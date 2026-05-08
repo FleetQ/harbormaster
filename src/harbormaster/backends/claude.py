@@ -62,7 +62,7 @@ class ClaudeBackend:
         """Tolerate leading bash-login-shell banner noise: locate first valid JSON."""
         if not stdout:
             raise BackendError("claude -p returned empty stdout", code="parse_failure")
-        payload: dict | None = None
+        payload: dict[str, object] | None = None
         try:
             payload = json.loads(stdout.strip())
         except json.JSONDecodeError:
@@ -78,10 +78,10 @@ class ClaudeBackend:
                 f"claude -p returned non-JSON: {stdout[:300]}",
                 code="parse_failure",
             )
-        result = payload.get("result") or payload.get("response") or ""
-        if not result:
+        result_obj = payload.get("result") or payload.get("response")
+        if not isinstance(result_obj, str) or not result_obj:
             raise BackendError(
-                f"claude -p returned empty result. Payload keys: {list(payload.keys())}",
+                f"claude -p returned empty/non-string result. Payload keys: {list(payload.keys())}",
                 code="parse_failure",
             )
-        return result
+        return result_obj

@@ -1,20 +1,32 @@
 """Shared helpers for tool implementations (private to harbormaster.tools)."""
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
 from harbormaster.backends import BackendError, ClaudeBackend
 from harbormaster.config import HarbormasterConfig
-from harbormaster.projects import resolve_project
+from harbormaster.projects import resolve_project, validate_project_name
 from harbormaster.ssh import (
-    SshTimeout,
+    SshTimeoutError,
     diagnose_ssh_failure,
     is_remote,
     run_ssh,
 )
 
-DUMP_DIR = Path("/tmp")
+
+def _dump_dir() -> Path:
+    """Return the directory for truncated-output dumps.
+
+    Uses $XDG_STATE_HOME (or ~/.local/state) by default, NOT /tmp — claude
+    output may include private code, secrets, or SSH host data. Creates the
+    directory mode 0o700 (owner-only) on first use.
+    """
+    state = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    d = Path(state) / "harbormaster" / "dumps"
+    d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return d
 
 
 def _get_backend(config: HarbormasterConfig, name: str = "claude") -> ClaudeBackend | None:
@@ -38,6 +50,11 @@ def run_backend(
     Returns either the (possibly truncated) result text, or a string starting
     with 'Error: ...' so the MCP envelope stays consistent across tools.
     """
+    try:
+        validate_project_name(name)
+    except ValueError as e:
+        return f"Error: {e}"
+
     backend = _get_backend(config)
     if backend is None:
         return "Error: backend 'claude' is not enabled in config"
@@ -60,7 +77,7 @@ def run_backend(
                 total_timeout=total_timeout,
                 connect_timeout=connect_timeout,
             )
-        except SshTimeout as e:
+        except SshTimeoutError as e:
             return f"Error: {e}"
         err = diagnose_ssh_failure(host, proc)
         if err:
@@ -91,9 +108,10 @@ def _truncate(text: str, word_cap: int, source_label: str) -> str:
     if len(words) <= word_cap:
         return text
     truncated = " ".join(words[:word_cap])
-    dump_path = DUMP_DIR / f"harbormaster-{source_label}-{int(time.time())}.md"
     try:
+        dump_path = _dump_dir() / f"harbormaster-{source_label}-{int(time.time())}.md"
         dump_path.write_text(text, encoding="utf-8")
+        os.chmod(dump_path, 0o600)
         return f"{truncated}\n\n[...truncated, full output: {dump_path}]"
     except OSError:
         return f"{truncated}\n\n[...truncated, dump failed]"

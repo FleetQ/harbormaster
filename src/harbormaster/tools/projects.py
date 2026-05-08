@@ -6,9 +6,9 @@ import subprocess
 from mcp.server.fastmcp import FastMCP
 
 from harbormaster.config import HarbormasterConfig
-from harbormaster.projects import discover_projects, resolve_project
+from harbormaster.projects import discover_projects, resolve_project, validate_project_name
 from harbormaster.ssh import (
-    SshTimeout,
+    SshTimeoutError,
     diagnose_ssh_failure,
     is_remote,
     quote_for_remote,
@@ -18,7 +18,7 @@ from harbormaster.ssh import (
 
 def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
     @mcp.tool()
-    def list_projects(host: str | None = None) -> list[dict] | list[str]:
+    def list_projects(host: str | None = None) -> list[dict[str, object]] | list[str]:
         """List projects from configured globs (local) or remote SSH host.
 
         Local: rich list of dicts (name, path, last_commit, has_serena,
@@ -36,7 +36,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                     total_timeout=connect_timeout + 10,
                     connect_timeout=connect_timeout,
                 )
-            except SshTimeout as e:
+            except SshTimeoutError as e:
                 return [f"Error: {e}"]
             err = diagnose_ssh_failure(host, proc)
             if err:
@@ -90,7 +90,7 @@ def _local_status(name: str, config: HarbormasterConfig) -> str:
         capture_output=True, text=True, timeout=5,
     )
     if status.returncode == 0:
-        n = len([l for l in status.stdout.splitlines() if l.strip()])
+        n = len([line for line in status.stdout.splitlines() if line.strip()])
         lines.append(f"**Uncommitted:** {n} file(s)")
 
     lines.append("")
@@ -128,6 +128,11 @@ def _local_status(name: str, config: HarbormasterConfig) -> str:
 
 
 def _remote_status(host: str, name: str, config: HarbormasterConfig) -> str:
+    try:
+        validate_project_name(name)
+    except ValueError as e:
+        return f"Error: {e}"
+
     host_cfg = config.hosts.get(host)
     remote_htdocs = host_cfg.remote_htdocs if host_cfg else "~/htdocs"
     connect_timeout = host_cfg.connect_timeout if host_cfg else 10
@@ -155,7 +160,7 @@ def _remote_status(host: str, name: str, config: HarbormasterConfig) -> str:
             total_timeout=connect_timeout + 15,
             connect_timeout=connect_timeout,
         )
-    except SshTimeout as e:
+    except SshTimeoutError as e:
         return f"Error: {e}"
     err = diagnose_ssh_failure(host, proc)
     if err:

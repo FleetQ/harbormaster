@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from harbormaster.config import HarbormasterConfig, load_config
 
@@ -67,7 +68,7 @@ def test_invalid_toml_rejects(tmp_path: Path, monkeypatch):
     )
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         load_config()
 
 

@@ -12,56 +12,74 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+LogLevel = Literal["debug", "info", "warning", "error", "critical"]
+_FORBID_EXTRA = ConfigDict(extra="forbid")
 
 
 class ProjectsConfig(BaseModel):
+    model_config = _FORBID_EXTRA
+
     glob: list[str] = Field(default_factory=lambda: ["~/htdocs/*"])
     exclude: list[str] = Field(default_factory=list)
     require_marker: bool = False
 
 
 class BackendConfig(BaseModel):
+    model_config = _FORBID_EXTRA
+
     enabled: bool = True
     binary: str = "claude"
     extra_args: list[str] = Field(default_factory=lambda: ["-p"])
-    timeout_local: int = 60
-    timeout_remote: int = 120
-    output_word_cap: int = 800
+    timeout_local: int = Field(default=60, gt=0)
+    timeout_remote: int = Field(default=120, gt=0)
+    output_word_cap: int = Field(default=800, gt=0)
 
 
 class HostConfig(BaseModel):
+    model_config = _FORBID_EXTRA
+
     ssh_host: str
     remote_htdocs: str = "~/htdocs"
     backend: str = "claude"
-    connect_timeout: int = 10
-    total_timeout: int = 120
+    connect_timeout: int = Field(default=10, gt=0)
+    total_timeout: int = Field(default=120, gt=0)
 
 
 class ServerConfig(BaseModel):
-    ui_port: int = 7531
-    mcp_http_port: int = 7532
-    log_level: str = "info"
-    trajectory_retention_days: int = 90
+    model_config = _FORBID_EXTRA
+
+    ui_port: int = Field(default=7531, gt=0, lt=65536)
+    mcp_http_port: int = Field(default=7532, gt=0, lt=65536)
+    log_level: LogLevel = "info"
+    trajectory_retention_days: int = Field(default=90, gt=0)
 
 
 class StorageConfig(BaseModel):
+    model_config = _FORBID_EXTRA
+
     db_path: str = "~/.local/share/harbormaster/harbormaster.db"
     enable_dedup: bool = False
 
 
 class FleetQConfig(BaseModel):
+    model_config = _FORBID_EXTRA
+
     enabled: bool = False
     base_url: str = "https://app.fleetq.net"
     api_token_env: str = "FLEETQ_API_TOKEN"
     write_trajectories: bool = True
     publish_a2a_cards: bool = False
     register_as_bridge: bool = False
-    heartbeat_interval: int = 30
+    heartbeat_interval: int = Field(default=30, gt=0)
 
 
 class HarbormasterConfig(BaseModel):
+    model_config = _FORBID_EXTRA
+
     server: ServerConfig = Field(default_factory=ServerConfig)
     projects: ProjectsConfig = Field(default_factory=ProjectsConfig)
     backends: dict[str, BackendConfig] = Field(

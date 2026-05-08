@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess
 from pathlib import Path
+from typing import TypeGuard
 
 SSH_CONFIG_PATH = Path.home() / ".ssh" / "config"
 
@@ -18,12 +19,15 @@ class SshError(Exception):
     """SSH connection / auth failure (distinct from remote-command failure)."""
 
 
-class SshTimeout(SshError):
+class SshTimeoutError(SshError):
     """SSH operation exceeded configured timeout."""
 
 
-def is_remote(host: str | None) -> bool:
-    """A None or 'local' host means run locally; anything else is treated as SSH alias."""
+def is_remote(host: str | None) -> TypeGuard[str]:
+    """A None or 'local' host means run locally; anything else is treated as SSH alias.
+
+    Returns a TypeGuard so mypy can narrow `host` to `str` after a True check.
+    """
     return bool(host) and host != "local"
 
 
@@ -65,7 +69,7 @@ def run_ssh(
             cmd, capture_output=True, text=True, timeout=total_timeout
         )
     except subprocess.TimeoutExpired as e:
-        raise SshTimeout(f"SSH to '{host}' exceeded {total_timeout}s") from e
+        raise SshTimeoutError(f"SSH to '{host}' exceeded {total_timeout}s") from e
 
 
 def diagnose_ssh_failure(
@@ -90,7 +94,18 @@ def diagnose_ssh_failure(
     )
     if any(ind in stderr for ind in indicators):
         last_line = stderr.splitlines()[-1] if stderr else "unknown error"
-        return f"SSH to '{host}' failed: {last_line}"
+        msg = f"SSH to '{host}' failed: {last_line}"
+        if "Host key verification failed" in stderr:
+            msg += (
+                " (hint: BatchMode=yes blocks the interactive prompt; "
+                "ssh manually once to accept the host key, then retry)"
+            )
+        elif "Permission denied" in stderr:
+            msg += (
+                " (hint: BatchMode=yes blocks password prompts; "
+                "set up an SSH key for this host)"
+            )
+        return msg
     return None
 
 
