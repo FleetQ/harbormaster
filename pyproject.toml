@@ -47,10 +47,17 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.8",
     "hypothesis>=6.100",
+    # UI extras pulled in for tests/unit/test_ui.py — keeps a single
+    # `uv sync --extra dev` command working for contributors who don't want
+    # the [ui] extra explicitly.
+    "fastapi>=0.110",
+    "jinja2>=3.1",
+    "httpx>=0.27",
 ]
 
 [project.scripts]
 harbormaster-mcp = "harbormaster.__main__:main"
+harbormaster-ui = "harbormaster.ui.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/FleetQ/harbormaster"

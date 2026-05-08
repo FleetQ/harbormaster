@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Harbormaster{% endblock %}
+{% block content %}
+<section x-data="{ projects: [], loading: true, error: null }"
+         x-init="(async () => {
+           try {
+             const r = await fetch('/api/projects');
+             if (!r.ok) throw new Error('HTTP ' + r.status);
+             projects = await r.json();
+           } catch (e) {
+             error = e.message;
+           } finally {
+             loading = false;
+           }
+         })()">
+
+  <header class="mb-6 flex items-baseline justify-between">
+    <h2 class="text-lg font-bold">Projects</h2>
+    <span class="text-sm text-gray-400"
+          x-show="!loading"
+          x-text="`${projects.length} discovered`"></span>
+  </header>
+
+  <div x-show="loading" class="text-gray-400">Loading projects…</div>
+
+  <div x-show="error" class="border border-red-800 bg-red-950/40 text-red-300 px-4 py-3 rounded">
+    Error loading projects: <span x-text="error"></span>
+  </div>
+
+  <div x-show="!loading && !error && projects.length === 0"
+       class="border border-gray-800 bg-gray-900/40 text-gray-400 px-4 py-6 rounded">
+    <p class="mb-2">No projects discovered yet.</p>
+    <p class="text-sm">
+      Configure <code class="text-cyan-400">[projects] glob</code> in
+      <code class="text-cyan-400">~/.config/harbormaster/config.toml</code>.
+      Default looks for <code class="text-cyan-400">~/htdocs/*</code>.
+    </p>
+  </div>
+
+  <div x-show="!loading && !error && projects.length > 0"
+       class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <template x-for="p in projects" :key="p.path">
+      <article class="border border-gray-800 rounded-lg p-4 hover:border-cyan-700 transition bg-gray-900/40">
+        <header class="flex items-baseline justify-between mb-2 gap-2">
+          <h3 class="font-bold text-cyan-400 truncate" x-text="p.name"></h3>
+          <span class="text-xs text-gray-500 shrink-0"
+                x-text="p.last_commit ? p.last_commit.hash : '(no git)'"></span>
+        </header>
+        <p class="text-sm text-gray-300 mb-3 line-clamp-2"
+           x-text="p.brief || '(no description)'"></p>
+        <footer class="flex flex-wrap gap-2 text-xs items-center">
+          <span x-show="p.has_serena"
+                class="bg-purple-900/50 text-purple-300 px-2 py-0.5 rounded">serena</span>
+          <span x-show="p.has_claude_md"
+                class="bg-cyan-900/50 text-cyan-300 px-2 py-0.5 rounded">claude.md</span>
+          <span class="text-gray-500 truncate font-mono" x-text="p.path"></span>
+        </footer>
+      </article>
+    </template>
+  </div>
+</section>
+{% endblock %}

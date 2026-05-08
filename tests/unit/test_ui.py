@@ -1,0 +1,114 @@
+"""Unit tests for the Live UI routes.
+
+Skipped when [ui] extras aren't installed — keeps contributors who run only
+the stdio MCP server unblocked. CI installs the extras explicitly.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("fastapi")
+pytest.importorskip("jinja2")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from harbormaster import __version__  # noqa: E402
+from harbormaster.config import HarbormasterConfig, ProjectsConfig  # noqa: E402
+from harbormaster.ui import create_app  # noqa: E402
+
+
+def _make_project_dir(p: Path) -> None:
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "CLAUDE.md").write_text("# test", encoding="utf-8")
+
+
+@pytest.fixture
+def populated_config(tmp_path: Path) -> HarbormasterConfig:
+    base = tmp_path / "code"
+    _make_project_dir(base / "alpha")
+    _make_project_dir(base / "beta")
+    return HarbormasterConfig(projects=ProjectsConfig(glob=[f"{base}/*"]))
+
+
+@pytest.fixture
+def empty_config(tmp_path: Path) -> HarbormasterConfig:
+    return HarbormasterConfig(projects=ProjectsConfig(glob=[f"{tmp_path}/empty/*"]))
+
+
+# ----- /api/health -----------------------------------------------------------
+
+
+def test_health_endpoint_returns_ok(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/api/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["version"] == __version__
+
+
+# ----- /api/projects ---------------------------------------------------------
+
+
+def test_projects_endpoint_returns_list(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/api/projects")
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body, list)
+    assert len(body) == 2
+    names = {p["name"] for p in body}
+    assert names == {"alpha", "beta"}
+
+
+def test_projects_endpoint_returns_expected_keys(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/api/projects")
+    body = r.json()
+    expected_keys = {"name", "path", "last_commit", "has_serena", "has_claude_md", "brief"}
+    assert expected_keys <= set(body[0].keys())
+
+
+def test_projects_endpoint_empty_when_no_matches(empty_config):
+    client = TestClient(create_app(empty_config))
+    r = client.get("/api/projects")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+# ----- / (dashboard) ---------------------------------------------------------
+
+
+def test_root_returns_dashboard_html(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    body = r.text
+    # Layout + identity markers
+    assert "Harbormaster" in body
+    assert __version__ in body
+    # Dashboard-specific
+    assert "Projects" in body
+    # Stack tags (CDN-loaded — important for the markup contract)
+    assert "tailwindcss" in body
+    assert "alpinejs" in body
+    assert "htmx" in body
+
+
+def test_root_links_to_api_endpoints(populated_config):
+    client = TestClient(create_app(populated_config))
+    body = client.get("/").text
+    assert "/api/projects" in body
+    assert "/api/health" in body
+
+
+# ----- create_app contract --------------------------------------------------
+
+
+def test_create_app_exposes_correct_metadata(populated_config):
+    app = create_app(populated_config)
+    assert app.title == "Harbormaster"
+    assert app.version == __version__

@@ -394,7 +394,10 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "fastapi" },
+    { name = "httpx" },
     { name = "hypothesis" },
+    { name = "jinja2" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -415,9 +418,12 @@ ui = [
 [package.metadata]
 requires-dist = [
     { name = "bleach", marker = "extra == 'ui'", specifier = ">=6.1" },
+    { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.110" },
     { name = "fastapi", marker = "extra == 'ui'", specifier = ">=0.110" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'fleetq'", specifier = ">=0.27" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
+    { name = "jinja2", marker = "extra == 'dev'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'ui'", specifier = ">=3.1" },
     { name = "mcp", specifier = ">=1.2.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8" },

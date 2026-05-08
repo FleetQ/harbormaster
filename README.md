@@ -52,6 +52,24 @@ Or in Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_confi
 }
 ```
 
+### Live UI (optional)
+
+Install with the `[ui]` extra and run the dashboard alongside (or instead of) the MCP server:
+
+```bash
+pipx install 'harbormaster-mcp[ui]'
+harbormaster-ui --port 7531
+# open http://127.0.0.1:7531/
+```
+
+v1.0.0a4 ships:
+
+- **Dashboard** at `/` — project grid with framework / git / Serena / CLAUDE.md badges (HTMX + Alpine + Tailwind via CDN, ~no build step).
+- **`GET /api/projects`** — JSON list of every project Harbormaster discovers (use this to script your own dashboards).
+- **`GET /api/health`** — `{"status":"ok","version":"..."}` for liveness probes.
+
+The UI is a separate process from the MCP server. Run both — they read the same TOML config so projects discovered by one are visible to the other. SSE feed of live MCP queries lands in v1.0.0a5.
+
 ### HTTP / SSE transport
 
 For remote MCP clients or running outside the desktop client, Harbormaster can speak SSE / streamable-http instead of stdio. **A bearer token is required** — there is no auth-disabled HTTP mode.

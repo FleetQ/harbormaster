@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" class="bg-gray-950 text-gray-100">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Harbormaster{% endblock %}</title>
+<meta name="description" content="Harbormaster — MCP server dashboard.">
+<script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+<script defer src="https://unpkg.com/alpinejs@3"></script>
+<style>
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+</style>
+</head>
+<body class="min-h-screen">
+<header class="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+  <div class="flex items-baseline gap-3">
+    <span class="text-2xl">⚓</span>
+    <h1 class="text-xl font-bold">Harbormaster</h1>
+    <span class="text-gray-500 text-sm">v{{ version }}</span>
+  </div>
+  <nav class="flex gap-4 text-sm">
+    <a href="/" class="text-gray-300 hover:text-cyan-400">Dashboard</a>
+    <a href="/api/projects" class="text-gray-300 hover:text-cyan-400">/api/projects</a>
+    <a href="/api/health" class="text-gray-300 hover:text-cyan-400">/api/health</a>
+    <a href="https://github.com/FleetQ/harbormaster" class="text-gray-300 hover:text-cyan-400">GitHub</a>
+  </nav>
+</header>
+<main class="px-6 py-6 max-w-7xl mx-auto">
+  {% block content %}{% endblock %}
+</main>
+<footer class="border-t border-gray-800 px-6 py-3 text-xs text-gray-500">
+  Part of the <a href="https://fleetq.net" class="text-cyan-500 hover:text-cyan-400">FleetQ</a> ecosystem · MIT
+</footer>
+</body>
+</html>
