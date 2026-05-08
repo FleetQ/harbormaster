@@ -131,10 +131,98 @@ jobs:
             kill "$HMS_PID" 2>/dev/null || true
           fi
 
+  smoke-ui:
+    name: Live UI smoke test (loopback, no auth)
+    runs-on: ubuntu-24.04
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Start harbormaster-ui in background
+        run: |
+          uv run harbormaster-ui --host 127.0.0.1 --port 17531 &
+          echo "UI_PID=$!" >> "$GITHUB_ENV"
+          # Poll /api/health up to 15s
+          for _ in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 1 http://127.0.0.1:17531/api/health || echo 0)
+            if [ "$status" = "200" ]; then
+              echo "UI up after $_ tries"
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "UI did not become healthy within 15s"
+          exit 1
+
+      - name: /api/health returns ok + version
+        run: |
+          body=$(curl -s --max-time 5 http://127.0.0.1:17531/api/health)
+          echo "body: $body"
+          echo "$body" | grep -q '"status":"ok"' || { echo "missing status:ok"; exit 1; }
+          echo "$body" | grep -q '"version":' || { echo "missing version field"; exit 1; }
+
+      - name: /api/projects returns a JSON list
+        run: |
+          status=$(curl -s -o /tmp/projects.json -w '%{http_code}' --max-time 5 http://127.0.0.1:17531/api/projects)
+          test "$status" = "200" || { echo "Expected 200, got $status"; exit 1; }
+          # Body must be a JSON array (starts with [, ends with ])
+          first=$(head -c 1 /tmp/projects.json)
+          last=$(tail -c 1 /tmp/projects.json)
+          test "$first" = "[" || { echo "body does not start with ["; head -c 200 /tmp/projects.json; exit 1; }
+          test "$last" = "]" || { echo "body does not end with ]"; tail -c 200 /tmp/projects.json; exit 1; }
+
+      - name: / returns dashboard HTML
+        run: |
+          body=$(curl -s --max-time 5 http://127.0.0.1:17531/)
+          echo "$body" | grep -q '<title>' || { echo "missing <title>"; exit 1; }
+          echo "$body" | grep -q 'Harbormaster' || { echo "missing 'Harbormaster' in body"; exit 1; }
+          echo "$body" | grep -q 'tailwindcss' || { echo "missing tailwindcss CDN"; exit 1; }
+
+      - name: Stop background server
+        if: always()
+        run: |
+          if [ -n "${UI_PID:-}" ]; then
+            kill "$UI_PID" 2>/dev/null || true
+          fi
+
+  smoke-ui-auth:
+    name: UI auth required for non-loopback bind
+    runs-on: ubuntu-24.04
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Public bind without token must exit 2
+        run: |
+          # Run with --host 0.0.0.0 (public) and no HARBORMASTER_UI_TOKEN.
+          # The CLI must abort BEFORE binding any port. Capture exit code.
+          set +e
+          uv run harbormaster-ui --host 0.0.0.0 --port 17532 2>&1
+          rc=$?
+          set -e
+          test "$rc" = "2" || { echo "Expected exit 2, got $rc"; exit 1; }
+          echo "OK: aborted with exit 2 as expected"
+
   build:
     name: Build sdist + wheel
     runs-on: ubuntu-24.04
-    needs: [test, smoke-http]
+    needs: [test, smoke-http, smoke-ui, smoke-ui-auth]
     steps:
       - uses: actions/checkout@v4
 
