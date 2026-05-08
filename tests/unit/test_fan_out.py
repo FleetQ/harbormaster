@@ -28,10 +28,16 @@ def test_fan_out_ask_signature():
     mcp = build_server(HarbormasterConfig())
     fn = next(t for t in mcp._tool_manager.list_tools() if t.name == "fan_out_ask").fn
     sig = inspect.signature(fn)
-    expected = {"question", "project_filter", "host_filter", "max_concurrency", "max_turns"}
+    expected = {
+        "question", "project_filter", "host_filter",
+        "max_concurrency", "max_turns",
+        "synthesize", "synthesis_max_turns",
+    }
     assert expected == set(sig.parameters.keys())
     assert sig.parameters["max_concurrency"].default == 5
     assert sig.parameters["max_turns"].default == 3
+    assert sig.parameters["synthesize"].default is False
+    assert sig.parameters["synthesis_max_turns"].default == 5
 
 
 # ----- _build_targets -------------------------------------------------------
@@ -137,3 +143,23 @@ def test_format_report_counts_errors_against_success():
     }
     report = _format_report("q", targets, results)
     assert "Success:** 1/2" in report
+
+
+def test_format_report_with_synthesis_includes_synthesis_section():
+    from harbormaster.tools.fan_out import _format_report as fmt
+    targets = [_Target("local", "a")]
+    results = {targets[0]: "answer one"}
+    report = fmt("q", targets, results, synthesis="Combined view: themes are X, Y.")
+    assert "## Synthesis" in report
+    assert "Combined view" in report
+    # Synthesis appears BEFORE per-target sections
+    assert report.find("## Synthesis") < report.find("## a")
+
+
+def test_format_report_without_synthesis_omits_section():
+    """Default (synthesis=None) report has no Synthesis header at all."""
+    from harbormaster.tools.fan_out import _format_report as fmt
+    targets = [_Target("local", "a")]
+    results = {targets[0]: "answer"}
+    report = fmt("q", targets, results)
+    assert "## Synthesis" not in report

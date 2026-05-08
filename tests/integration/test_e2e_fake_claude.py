@@ -82,6 +82,51 @@ def test_fan_out_ask_real_subprocess(fake_config: HarbormasterConfig, tmp_path: 
     assert "Success:** 2/2" in out
 
 
+def test_fan_out_ask_with_synthesize(fake_config: HarbormasterConfig, tmp_path: Path):
+    """synthesize=True triggers an extra claude -p call producing a synthesis
+    section. The fake shim echoes the synthesis prompt back, so the synthesis
+    section contains evidence of the cross-target prompt being assembled."""
+    second = tmp_path / "code" / "other"
+    second.mkdir(parents=True)
+    (second / "CLAUDE.md").write_text("# 2nd project", encoding="utf-8")
+
+    mcp = build_server(fake_config)
+    fn = next(t for t in mcp._tool_manager.list_tools() if t.name == "fan_out_ask").fn
+    out = fn(
+        question="how does X work?",
+        project_filter=None,
+        host_filter=None,
+        max_concurrency=2,
+        max_turns=1,
+        synthesize=True,
+        synthesis_max_turns=1,
+    )
+    assert "## Synthesis" in out
+    # Synthesis section comes before per-target sections
+    assert out.find("## Synthesis") < out.find("## myproj")
+    # Per-target sections still present
+    assert "## myproj" in out
+    assert "## other" in out
+
+
+def test_fan_out_ask_synthesize_skipped_on_all_errors(fake_config: HarbormasterConfig, monkeypatch):
+    """When every target errors, synthesis has nothing to summarize and
+    surfaces a 'Synthesis skipped:' line instead of crashing or hanging."""
+    monkeypatch.setenv("HARBORMASTER_FAKE_CLAUDE_FAIL", "exit2")
+    mcp = build_server(fake_config)
+    fn = next(t for t in mcp._tool_manager.list_tools() if t.name == "fan_out_ask").fn
+    out = fn(
+        question="?",
+        project_filter=None,
+        host_filter=None,
+        max_concurrency=1,
+        max_turns=1,
+        synthesize=True,
+        synthesis_max_turns=1,
+    )
+    assert "Synthesis skipped" in out
+
+
 # ----- failure-mode coverage -------------------------------------------------
 
 

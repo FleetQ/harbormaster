@@ -5,20 +5,22 @@ a single markdown report concatenating per-target answers under section
 headers. Concurrency capped via ThreadPoolExecutor; backend subprocess is
 the bottleneck so threads work fine without asyncio.
 
-LLM-side synthesis ("summarize all 50 answers into one") is intentionally
-deferred to v1.0.0a3 — it would add another 30s+ claude -p call to every
-fan-out and is better designed once we have real usage data.
+Optional `synthesize=True` adds a second pass that asks the local backend
+to produce a unified summary across all per-target answers — costs one
+extra claude -p invocation, off by default.
 """
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from harbormaster.backends import BackendError
 from harbormaster.config import HarbormasterConfig
 from harbormaster.projects import discover_projects
-from harbormaster.tools._helpers import run_backend
+from harbormaster.tools._helpers import _get_backend, run_backend
 
 
 @dataclass(frozen=True)
@@ -38,13 +40,15 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         host_filter: list[str] | None = None,
         max_concurrency: int = 5,
         max_turns: int = 3,
+        synthesize: bool = False,
+        synthesis_max_turns: int = 5,
     ) -> str:
         """Ask the same question of multiple projects in parallel.
 
         Spawns one backend subprocess per (host, project) target, capped at
         max_concurrency in flight. Returns a markdown report with one section
-        per target. No LLM synthesis in v1.0 — read the per-section answers
-        directly.
+        per target. With synthesize=True, runs a final local backend pass
+        that summarizes all per-target answers into a unified prologue.
 
         Args:
             question: the question to ask every target.
@@ -52,16 +56,19 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                 discovered projects (host='local' only).
             host_filter: optional list of host aliases. None = local only.
                 Use e.g. ['local', 'friday'] to fan out across hosts. Remote
-                hosts require an explicit project_filter (we can't enumerate
-                remote projects cheaply enough to call here).
+                hosts require an explicit project_filter.
             max_concurrency: cap parallel backend processes (default 5).
-            max_turns: per-target backend max_turns (default 3 — keeps fan-out
-                affordable; bump for more complex questions).
+            max_turns: per-target backend max_turns (default 3).
+            synthesize: if True, append a final claude -p call that produces
+                a unified summary across all successful targets. Costs one
+                extra subprocess + tokens.
+            synthesis_max_turns: max_turns for the synthesis pass (default 5,
+                higher than per-target since synthesis is more reasoning-heavy).
 
         Returns:
-            Markdown report. Per-target sections include either the answer or
-            "Error: ..." if that target failed. Section header uses the form
-            `<host>/<project>` for remote, `<project>` for local.
+            Markdown report. Per-target sections + (optionally) a synthesis
+            section. Failed targets stay isolated as 'Error: ...' in their
+            own section — they don't kill the whole report.
         """
         targets = _build_targets(project_filter, host_filter, config)
         if not targets:
@@ -99,7 +106,13 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                 target, out = f.result()
                 results[target] = out
 
-        return _format_report(question, targets, results)
+        synthesis = None
+        if synthesize:
+            synthesis = _synthesize(
+                config, question, targets, results, synthesis_max_turns
+            )
+
+        return _format_report(question, targets, results, synthesis=synthesis)
 
 
 def _build_targets(
@@ -107,11 +120,7 @@ def _build_targets(
     host_filter: list[str] | None,
     config: HarbormasterConfig,
 ) -> list[_Target]:
-    """Resolve filter args into a concrete list of (host, project) targets.
-
-    Local: enumerate via discover_projects, then intersect with project_filter
-    if given. Remote: cannot enumerate; project_filter is required.
-    """
+    """Resolve filter args into a concrete list of (host, project) targets."""
     targets: list[_Target] = []
     hosts = host_filter if host_filter is not None else ["local"]
 
@@ -122,10 +131,6 @@ def _build_targets(
                 if project_filter is None or name in project_filter:
                     targets.append(_Target(host="local", project=name))
         else:
-            # Remote: skip silently if no project_filter — caller may have
-            # mixed local+remote in host_filter and only meant project_filter
-            # for local. For pure-remote calls without a filter we cannot
-            # produce targets, hence the explicit error in fan_out_ask.
             if not project_filter:
                 continue
             for name in project_filter:
@@ -133,10 +138,62 @@ def _build_targets(
     return targets
 
 
+def _synthesize(
+    config: HarbormasterConfig,
+    question: str,
+    targets: list[_Target],
+    results: dict[_Target, str],
+    max_turns: int,
+) -> str:
+    """Spawn one local backend call that summarizes per-target answers.
+
+    Uses Path.cwd() as the working directory — synthesis is a meta-question
+    that doesn't need any project's CLAUDE.md context, just the answers
+    themselves. Returns the synthesis text or a 'Synthesis skipped/failed:'
+    string so the report stays self-explaining.
+    """
+    backend = _get_backend(config)
+    if backend is None:
+        return "Synthesis skipped: backend 'claude' is not enabled."
+
+    sections: list[str] = []
+    for target in targets:
+        out = results.get(target, "")
+        if not out or out.startswith("Error:"):
+            continue
+        sections.append(f"### Answer from {target.label()}\n\n{out.strip()}")
+
+    if not sections:
+        return "Synthesis skipped: no successful target answers to synthesize."
+
+    synthesis_prompt = (
+        "You are synthesizing answers from multiple AI subagents to the same question. "
+        "Your job is to find common themes, contradictions, and the most useful insight — "
+        "not to enumerate.\n\n"
+        f"## Original question\n\n{question}\n\n"
+        "## Per-subagent answers\n\n"
+        + "\n\n".join(sections)
+        + "\n\n---\n\n"
+        "Reply with a markdown summary under 300 words."
+    )
+
+    try:
+        result = backend.ask_local(
+            cwd=Path.cwd(),
+            prompt=synthesis_prompt,
+            max_turns=max_turns,
+        )
+    except BackendError as e:
+        return f"Synthesis failed: {e}"
+    return result.output
+
+
 def _format_report(
     question: str,
     targets: list[_Target],
     results: dict[_Target, str],
+    *,
+    synthesis: str | None = None,
 ) -> str:
     successes = sum(1 for r in results.values() if not r.startswith("Error:"))
     lines = [
@@ -145,6 +202,13 @@ def _format_report(
         f"**Targets:** {len(targets)} · **Success:** {successes}/{len(targets)}",
         "",
     ]
+    if synthesis is not None:
+        lines.append("## Synthesis")
+        lines.append("")
+        lines.append(synthesis)
+        lines.append("")
+        lines.append("---")
+        lines.append("")
     for target in targets:
         out = results.get(target, "(no result — concurrency bug?)")
         lines.append(f"## {target.label()}")
