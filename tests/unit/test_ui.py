@@ -112,3 +112,27 @@ def test_create_app_exposes_correct_metadata(populated_config):
     app = create_app(populated_config)
     assert app.title == "Harbormaster"
     assert app.version == __version__
+
+
+# ----- bearer middleware can be applied to UI app ---------------------------
+
+
+def test_ui_app_with_bearer_middleware_rejects_unauth(populated_config):
+    """Verify the same bearer middleware used on MCP HTTP transports works
+    when applied to the UI app — both /api/* and / get protected."""
+    from harbormaster.transport import build_bearer_middleware
+
+    app = create_app(populated_config)
+    app.add_middleware(build_bearer_middleware("ui-token-xyz"))
+    client = TestClient(app)
+
+    # No header → 401 on every route
+    assert client.get("/api/health").status_code == 401
+    assert client.get("/api/projects").status_code == 401
+    assert client.get("/").status_code == 401
+
+    # Correct token → 200
+    h = {"Authorization": "Bearer ui-token-xyz"}
+    assert client.get("/api/health", headers=h).status_code == 200
+    assert client.get("/api/projects", headers=h).status_code == 200
+    assert client.get("/", headers=h).status_code == 200
