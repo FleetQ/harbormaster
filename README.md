@@ -52,6 +52,20 @@ Or in Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_confi
 }
 ```
 
+### HTTP / SSE transport
+
+For remote MCP clients or running outside the desktop client, Harbormaster can speak SSE / streamable-http instead of stdio:
+
+```bash
+harbormaster-mcp --transport sse --host 127.0.0.1 --port 7532
+# or the new MCP spec transport:
+harbormaster-mcp --transport streamable-http --port 7532
+```
+
+v1.0 binds to `127.0.0.1` by default and has **no built-in auth layer** — only run on `0.0.0.0` behind a reverse proxy that handles auth. (Auth lands in v1.1+ via the FleetQ Bridge integration.)
+
+Run `harbormaster-mcp --help` for the full flag set.
+
 ## Configure
 
 Zero-config by default — Harbormaster discovers projects under `~/htdocs/*` if it exists. For any other layout, drop a TOML file at `~/.config/harbormaster/config.toml`:
