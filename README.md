@@ -134,7 +134,7 @@ Every project-targeting tool accepts an optional `host` parameter. With `host` s
 
 ## Status
 
-**v1.0.0a8** — Bridge reverse-channel subscriber (Pusher path, log-only) shipped 2026-05-08. Auto-starts on successful FleetQ register; logs incoming `agent.request` events at INFO. Actual MCP-tool dispatch + responses land in v1.0.0a9. The 6-week roadmap to general availability:
+**v1.0.0a9** — `POST /mcp/{server}` HTTP-direct routing endpoint shipped 2026-05-08. **End-to-end FleetQ → harbormaster MCP routing now functional** (with the matching agent-fleet PR https://github.com/escapeboy/agent-fleet-o/pull/72 applied). The 6-week roadmap to general availability:
 
 | Phase | Weeks | Focus |
 |-------|-------|-------|

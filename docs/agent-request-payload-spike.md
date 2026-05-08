@@ -99,6 +99,37 @@ MCP tool routing from FleetQ → harbormaster does **not** flow over the Pusher 
 
 If C is not in the cards, **Path A** is the honest stop point — ship harbormaster v1.0 as a strong stand-alone MCP server with optional FleetQ visibility. Don't promise routing that doesn't work.
 
+## Live verification (2026-05-08, after Path C ship)
+
+After landing harbormaster's `POST /mcp/{server}` endpoint and the
+agent-fleet `feat/mcp-call-http-direct` branch (PR
+https://github.com/escapeboy/agent-fleet-o/pull/72), the full chain
+was tested against the local OrbStack FleetQ:
+
+```
+FleetQ user → POST /api/v1/bridge/mcp/call (Sanctum bearer)
+    → BridgeController::mcpCall
+    → resolveForMcpServer returns the HTTP-tunnel-mode connection
+    → mcpCallViaHttp POSTs to host.docker.internal:7531/mcp/harbormaster
+    → harbormaster-ui's /mcp/{server} endpoint dispatches to FastMCP
+    → tool result wrapped in MCP envelope, returned synchronously
+    → 200 reaches the original FleetQ caller
+```
+
+Verified payloads (via `/Users/katsarov/htdocs/harbormaster/.venv/bin/python`):
+
+- `tools/list` → 200, returned all 6 tools (`list_projects`,
+  `list_hosts`, `project_status`, `ask_project`, `delegate_task`,
+  `fan_out_ask`).
+- `tools/call name=list_hosts` → 200, real SSH hosts:
+  `github.com, pricex, lukanet, ghcr.io, auth.lukanet.com,
+  sandbox.barsy.in, friday, sage-production`.
+- `tools/call name=i_do_not_exist` → 502 wrapping daemon's 404
+  with body `{"detail":"tool not found: 'i_do_not_exist'"}`.
+
+End-to-end MCP routing FleetQ ↔ harbormaster is now functional
+without a relay binary. Path C delivered.
+
 ## Spike artefacts
 
 - Token created via direct DB insert (Passport boot in container blocks `User::createToken()`):
