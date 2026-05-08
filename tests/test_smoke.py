@@ -26,9 +26,36 @@ def test_server_constructed():
 def test_tools_registered():
     # FastMCP keeps a tool manager — list registered tool names
     names = [t.name for t in server.mcp._tool_manager.list_tools()]
-    expected = {"list_projects", "project_status", "ask_project", "delegate_task"}
+    expected = {
+        "list_projects", "project_status", "ask_project",
+        "delegate_task", "list_hosts",
+    }
     missing = expected - set(names)
     assert not missing, f"missing tools: {missing}"
+
+
+def test_is_remote_helper():
+    assert server._is_remote(None) is False
+    assert server._is_remote("") is False
+    assert server._is_remote("local") is False
+    assert server._is_remote("friday") is True
+
+
+def test_list_hosts_returns_list():
+    out = server.list_hosts()
+    assert isinstance(out, list)
+    # All entries are non-empty strings without wildcards
+    for h in out:
+        assert isinstance(h, str) and h
+        assert "*" not in h and "?" not in h
+
+
+def test_host_param_signatures():
+    import inspect
+    for fname in ("list_projects", "project_status", "ask_project", "delegate_task"):
+        sig = inspect.signature(getattr(server, fname))
+        assert "host" in sig.parameters, f"{fname} missing host param"
+        assert sig.parameters["host"].default is None, f"{fname} host default != None"
 
 
 def test_resolve_project_rejects_unknown():
