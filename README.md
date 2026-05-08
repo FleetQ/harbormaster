@@ -134,7 +134,7 @@ Every project-targeting tool accepts an optional `host` parameter. With `host` s
 
 ## Status
 
-**v1.0.0a5** — UI bearer auth + smoke-ui CI + PyPI publish workflow shipped 2026-05-08. The 6-week roadmap to general availability:
+**v1.0.0a6** — FleetQ Bridge integration (register / heartbeat / disconnect) + smoke-ui-with-token CI shipped 2026-05-08. **First v1.1 milestone landed.** The 6-week roadmap to general availability:
 
 | Phase | Weeks | Focus |
 |-------|-------|-------|
@@ -153,6 +153,36 @@ Harbormaster v1.0 grew out of `project-router-mcp` v0.1 (2026-05-08). v0.1 git h
 Single Python process hosting an MCP server (stdio + HTTP/SSE), an embedded Live UI, and an optional FleetQ adapter. Pluggable backend per host (default: `claude -p`). All shell-bound strings pass through `shlex.quote`.
 
 Detailed component diagrams, transport choices, and integration contract: [`docs/architecture-harbormaster.md`](docs/architecture-harbormaster.md).
+
+## FleetQ Bridge integration (optional)
+
+Install with the `[fleetq]` extra and Harbormaster can register itself as a Bridge daemon in your FleetQ deployment, advertising its 6 MCP tools to the platform:
+
+```bash
+pipx install 'harbormaster-mcp[fleetq]'
+```
+
+In your config TOML:
+
+```toml
+[fleetq]
+enabled = true
+register_as_bridge = true
+base_url = "https://app.fleetq.net"   # or your self-hosted FleetQ URL
+api_token_env = "FLEETQ_API_TOKEN"    # env var holding the Sanctum token
+heartbeat_interval = 30               # seconds between heartbeats
+```
+
+Then export your Sanctum token (must have a `team:<uuid>` ability) and run the MCP server:
+
+```bash
+export FLEETQ_API_TOKEN=...
+harbormaster-mcp
+```
+
+Harbormaster shows up in your FleetQ Connections UI as `harbormaster on <hostname>`. v1.0.0a6 ships **register + heartbeat + disconnect**; the reverse-WebSocket relay channel for incoming MCP tool calls lands in v1.0.0a7+.
+
+Discovered contract reference: [`docs/fleetq-bridge-contract.md`](docs/fleetq-bridge-contract.md).
 
 ## Releasing
 
