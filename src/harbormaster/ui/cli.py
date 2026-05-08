@@ -126,7 +126,13 @@ def main(argv: list[str] | None = None) -> int:
 
     _configure_logging(config.server.log_level, args.log_format)
 
-    app = create_app(config)
+    # Build the MCP server alongside so the UI's /mcp/{server} HTTP-direct
+    # routing endpoint can dispatch into the local tool registry. v1.0.0a9+
+    # — closes the FleetQ HTTP-tunnel-mode loop without needing a relay binary.
+    from harbormaster.server import build_server
+
+    mcp = build_server(config)
+    app = create_app(config, mcp=mcp)
 
     if token:
         app.add_middleware(build_bearer_middleware(token))

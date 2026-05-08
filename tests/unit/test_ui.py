@@ -202,3 +202,172 @@ def test_ui_app_with_bearer_middleware_rejects_unauth(populated_config):
     assert client.get("/api/health", headers=h).status_code == 200
     assert client.get("/api/projects", headers=h).status_code == 200
     assert client.get("/", headers=h).status_code == 200
+
+
+# ----- POST /mcp/{server} HTTP-direct routing endpoint ----------------------
+
+
+@pytest.fixture
+def app_with_mcp(populated_config):
+    """Build the UI app with a real FastMCP instance bound, so /mcp/{server}
+    can dispatch into the tool registry."""
+    from harbormaster.server import build_server
+
+    mcp = build_server(populated_config)
+    return create_app(populated_config, mcp=mcp)
+
+
+def test_mcp_endpoint_returns_404_when_mcp_not_bound(populated_config):
+    """create_app(config) without mcp= should leave the endpoint unreachable
+    (clear 404 with a hint, not a confusing 500)."""
+    client = TestClient(create_app(populated_config))
+    r = client.post(
+        "/mcp/harbormaster",
+        json={"method": "tools/list", "params": {}},
+    )
+    assert r.status_code == 404
+    assert "MCP HTTP-direct routing not available" in r.json()["detail"]
+
+
+def test_mcp_endpoint_404_on_unknown_server(app_with_mcp):
+    client = TestClient(app_with_mcp)
+    r = client.post(
+        "/mcp/some-other-server",
+        json={"method": "tools/list", "params": {}},
+    )
+    assert r.status_code == 404
+
+
+def test_mcp_endpoint_tools_list_returns_all_registered_tools(app_with_mcp):
+    client = TestClient(app_with_mcp)
+    r = client.post(
+        "/mcp/harbormaster",
+        json={"method": "tools/list", "params": {}},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    tools = body["result"]["tools"]
+    names = {t["name"] for t in tools}
+    expected = {
+        "list_projects", "list_hosts", "project_status",
+        "ask_project", "delegate_task", "fan_out_ask",
+    }
+    assert expected <= names
+    # Every tool entry has at minimum a name + description
+    for t in tools:
+        assert "name" in t
+        assert "description" in t
+
+
+def test_mcp_endpoint_tools_call_dispatches_to_tool(app_with_mcp):
+    """tools/call with method 'list_hosts' (a fast read-only tool) should
+    return an MCP envelope wrapping the tool's return value."""
+    client = TestClient(app_with_mcp)
+    r = client.post(
+        "/mcp/harbormaster",
+        json={
+            "request_id": "req-9",
+            "method": "tools/call",
+            "params": {"name": "list_hosts", "arguments": {}},
+            "timeout": 30,
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "result" in body
+    content = body["result"]["content"]
+    assert isinstance(content, list)
+    assert content[0]["type"] == "text"
+
+
+def test_mcp_endpoint_tools_call_404_on_unknown_tool(app_with_mcp):
+    client = TestClient(app_with_mcp)
+    r = client.post(
+        "/mcp/harbormaster",
+        json={
+            "method": "tools/call",
+            "params": {"name": "nonexistent_tool", "arguments": {}},
+        },
+    )
+    assert r.status_code == 404
+    assert "not found" in r.json()["detail"]
+
+
+def test_mcp_endpoint_tools_call_400_on_missing_name(app_with_mcp):
+    client = TestClient(app_with_mcp)
+    r = client.post(
+        "/mcp/harbormaster",
+        json={"method": "tools/call", "params": {"arguments": {}}},
+    )
+    assert r.status_code == 400
+
+
+def test_mcp_endpoint_tools_call_400_on_non_dict_arguments(app_with_mcp):
+    client = TestClient(app_with_mcp)
+    r = client.post(
+        "/mcp/harbormaster",
+        json={
+            "method": "tools/call",
+            "params": {"name": "list_hosts", "arguments": "not-a-dict"},
+        },
+    )
+    assert r.status_code == 400
+
+
+def test_mcp_endpoint_rejects_unsupported_method(app_with_mcp):
+    """Pydantic regex on `method` rejects anything outside tools/call|tools/list."""
+    client = TestClient(app_with_mcp)
+    r = client.post(
+        "/mcp/harbormaster",
+        json={"method": "logging/setLevel", "params": {}},
+    )
+    assert r.status_code == 422  # pydantic validation
+
+
+def test_mcp_endpoint_tool_exception_returned_as_iserror_envelope(populated_config):
+    """A tool that raises must not 500 — wrap as MCP isError result so the
+    caller (FleetQ) gets a structured response."""
+    from mcp.server.fastmcp import FastMCP
+
+    mcp = FastMCP("harbormaster-test")
+
+    @mcp.tool()
+    def boom() -> str:
+        raise RuntimeError("simulated tool failure")
+
+    app = create_app(populated_config, mcp=mcp)
+    client = TestClient(app)
+    r = client.post(
+        "/mcp/harbormaster",
+        json={"method": "tools/call", "params": {"name": "boom", "arguments": {}}},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["result"]["isError"] is True
+    assert "simulated tool failure" in body["result"]["content"][0]["text"]
+
+
+def test_mcp_endpoint_protected_by_bearer_middleware(populated_config):
+    """Same middleware reused — /mcp/{server} respects HARBORMASTER_UI_TOKEN."""
+    from harbormaster.server import build_server
+    from harbormaster.transport import build_bearer_middleware
+
+    mcp = build_server(populated_config)
+    app = create_app(populated_config, mcp=mcp)
+    app.add_middleware(build_bearer_middleware("expected"))
+    client = TestClient(app)
+
+    # No bearer → 401
+    r = client.post(
+        "/mcp/harbormaster",
+        json={"method": "tools/list", "params": {}},
+    )
+    assert r.status_code == 401
+
+    # Correct bearer → 200
+    r = client.post(
+        "/mcp/harbormaster",
+        headers={"Authorization": "Bearer expected"},
+        json={"method": "tools/list", "params": {}},
+    )
+    assert r.status_code == 200
