@@ -1,92 +1,123 @@
-# project-router-mcp
+# Harbormaster
 
-Local MCP server that routes questions and tasks to per-project Claude Code subagents under `~/htdocs/` — locally on Jarvis or remotely on any SSH host.
+> MCP server that routes Q&A across all your projects — locally or over SSH. **Part of the [FleetQ](https://fleetq.net) ecosystem.**
 
-## Why
+[![PyPI](https://img.shields.io/pypi/v/harbormaster-mcp.svg?label=harbormaster-mcp)](https://pypi.org/project/harbormaster-mcp/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#status)
 
-You work across many projects, each with its own `CLAUDE.md` and Serena memories. Switching cwd loses context. This router lets the **main** Claude Code session ask any project a question without changing directory — the project's subagent loads its own memory, answers, and returns a summary.
+## What it does
 
-Inspired by Google's A2A protocol pattern, but local-first and built on the tools you already have (Claude Code subagents + Serena memories). Optional SSH fan-out lets you target the same tools at remote VPS hosts.
+You work across many projects, each with its own `CLAUDE.md` and Serena memories. Switching cwd loses context. Harbormaster lets one Claude Code session ask any project a question without changing directory — the project's subagent loads its own memory, answers, and returns a summary.
+
+Optional SSH fan-out lets the same tools target remote VPS hosts. Optional FleetQ adapter makes Harbormaster a first-class citizen of the FleetQ Bridge ecosystem (Platform Tool, A2A Agent Cards, federated knowledge graph).
 
 ## Tools
 
 | Tool | Purpose | Cost |
 |---|---|---|
-| `list_projects(host=None)` | Enumerate `~/htdocs/*` projects with metadata. With `host`, returns remote dir listing (flat strings). | ~50ms local / ~1s remote |
-| `project_status(name, host=None)` | Git log, Serena memory headers, recent log tails | ~200ms local / ~2s remote |
-| `ask_project(name, question, max_turns=5, host=None)` | Spawn `claude -p` in project cwd, return ≤800 word summary | ~30s local / up to 90s remote |
-| `delegate_task(name, task, deliverable, allow_writes=False, host=None)` | Read-only delegation; v1 fails closed for writes | ~60s local / up to 90s remote |
-| `list_hosts()` | Read `~/.ssh/config`, return Host aliases (wildcards skipped) | ~5ms |
+| `list_projects(host=None)` | Enumerate configured projects (local) or remote dir listing (SSH). | ~50 ms / ~1 s |
+| `list_hosts()` | Configured `[hosts]` + `~/.ssh/config` Host aliases. | ~5 ms |
+| `project_status(name, host=None)` | Git log, Serena memories, log tails. | ~200 ms / ~2 s |
+| `ask_project(name, question, max_turns=5, host=None)` | Spawn `claude -p` in project cwd, return ≤ 800-word summary. | ~30 s / ~90 s |
+| `delegate_task(name, task, deliverable, allow_writes=False, host=None)` | Read-only delegation; v1 fails closed for writes. | ~60 s / ~90 s |
+
+More tools (`fan_out_ask`, `recall_qa`, …) land in v1.0–1.2. See [`docs/architecture-harbormaster.md`](docs/architecture-harbormaster.md).
 
 ## Install
 
-1. Ensure `uv` is installed: `brew install uv`
-2. Add to `~/.claude/settings.json`:
-
-   ```json
-   {
-     "mcpServers": {
-       "project-router": {
-         "command": "uv",
-         "args": ["run", "/Users/katsarov/htdocs/project-router-mcp/src/server.py"],
-         "env": {}
-       }
-     }
-   }
-   ```
-
-3. Restart Claude Code. Tools appear as `mcp__project-router__list_projects`, etc.
-
-## Usage
-
-In any Claude Code session, regardless of cwd:
-
+```bash
+pipx install harbormaster-mcp
+# or run without install:
+uvx harbormaster-mcp
 ```
-> Какво е състоянието на pinporn проекта?
-[main agent calls project-router__project_status("pinporn")]
-[returns markdown summary in <1s]
 
-> Има ли логнати грешки в pinporn cron-а днес?
-[main agent calls project-router__ask_project("pinporn", "...")]
-[claude -p subprocess loads pinporn Serena memories, answers, returns ≤800 words]
+Register in Claude Code:
+
+```bash
+claude mcp add --scope user harbormaster harbormaster-mcp
 ```
+
+Or in Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "harbormaster": {
+      "command": "/opt/homebrew/bin/harbormaster-mcp",
+      "env": {}
+    }
+  }
+}
+```
+
+## Configure
+
+Zero-config by default — Harbormaster discovers projects under `~/htdocs/*` if it exists. For any other layout, drop a TOML file at `~/.config/harbormaster/config.toml`:
+
+```toml
+[projects]
+glob = ["~/code/*", "~/work/*"]
+exclude = ["**/node_modules/**", "**/vendor/**"]
+
+[hosts.friday]
+ssh_host = "katsarov-server.local"
+remote_htdocs = "~/htdocs"
+
+[hosts.hetzner-1]
+ssh_host = "hetzner-1.example.com"
+remote_htdocs = "/var/www"
+```
+
+A per-project override at `./.harbormaster.toml` in your cwd takes precedence over the user-level config.
+
+Full schema and all options: [`docs/architecture-harbormaster.md` §3](docs/architecture-harbormaster.md).
 
 ## Remote hosts
 
-Every project-targeting tool now accepts an optional `host` parameter. When omitted (or set to `"local"`), behavior is unchanged — `claude -p` runs locally in `~/htdocs/<name>`. When set to an SSH alias, the equivalent command runs on that host:
+Every project-targeting tool accepts an optional `host` parameter. With `host` set, Harbormaster runs the equivalent command on that SSH host:
 
 ```
 > ask_project(name="pricex", question="quick health check?", host="friday")
 [ssh friday bash -lc 'cd ~/htdocs/pricex && claude -p ...']
-[returns summary from Friday's claude subagent]
 ```
 
-How it works:
+**Pre-flight on each remote host**:
 
-- Transport: `ssh -o ConnectTimeout=10 -o BatchMode=yes <host> bash -lc <quoted-cmd>`. `bash -lc` ensures the remote login shell loads PATH so `claude` resolves on the VPS.
-- Remote project root: defaults to `~/htdocs/<name>`. Override globally via env var `ROUTER_REMOTE_HTDOCS` (e.g. `/var/www`) when launching the MCP server.
-- Quoting: every interpolated value (project name, question, max_turns) is run through `shlex.quote` before assembly. No raw f-string concatenation into shell commands.
-- Timeouts: 10s SSH connect, 90s total for `ask_project` / `delegate_task` (vs 60s local) to absorb the SSH handshake. Connection errors (timeout, refused, unknown host, permission denied, host key) surface as plain `Error: SSH to '<host>' failed: ...` strings — never stack traces.
-- Discovery: `list_hosts()` reads `~/.ssh/config` and returns Host aliases (wildcards filtered out) so the main agent can pick a target.
-
-### Pre-flight on each remote VPS
-
-For remote calls to actually succeed, on every host you intend to target:
-
-1. Install Claude Code: `npm i -g @anthropic-ai/claude-code` (or your usual install path).
-2. Authenticate: run `claude` once interactively to complete login. **This counts as a separate Anthropic seat** — you are paying per active host.
-3. Make sure `~/htdocs/<project>` (or your `ROUTER_REMOTE_HTDOCS` override) actually exists, with the project's `CLAUDE.md` / Serena memories in place. Otherwise the subagent has no context.
-4. Confirm passwordless SSH from Jarvis to the host (`BatchMode=yes` is set, so password prompts will fail fast rather than hang).
+1. Install Claude Code: `npm i -g @anthropic-ai/claude-code`.
+2. Authenticate once: `claude` (this is a separate Anthropic seat per host).
+3. Ensure project paths exist with their `CLAUDE.md` / `.serena/` in place.
+4. Confirm passwordless SSH from your machine (`BatchMode=yes` is enforced).
 
 ## v1 limits
 
-- Read-only delegation (`allow_writes=True` → error), local and remote.
-- stdio transport only (Jarvis local).
-- Sequential calls (no parallel).
-- 60s local / 90s remote subprocess timeout.
-- 800-word output cap (full output dumped to `/tmp/router-*.md` if exceeded).
-- Remote `list_projects` returns a flat list of directory names — the rich metadata (git log, Serena flags) is local-only because gathering it remotely would mean N round trips.
+- Read-only delegation (`allow_writes=True` returns an error).
+- 60 s local / 90 s remote subprocess timeout.
+- 800-word output cap (full output dumped to `/tmp/harbormaster-*.md` on truncation).
+- Remote `list_projects` returns a flat list of directory names (rich metadata is local-only — gathering it remotely would mean N round-trips).
+
+## Status
+
+**v1.0.0a1** — package scaffolding shipped 2026-05-08. The 6-week roadmap to general availability:
+
+| Phase | Weeks | Focus |
+|-------|-------|-------|
+| v1.0 | 1–2 | Local + SSH + Live UI scaffold + PyPI alpha |
+| v1.1 | 3–4 | FleetQ Bridge / Platform Tool / A2A integration |
+| v1.2 | 5–6 | Q&A history, federated KG, auto project graph |
+
+See [`docs/design-harbormaster.md`](docs/design-harbormaster.md) for the full design.
+
+## Lineage
+
+Harbormaster v1.0 grew out of `project-router-mcp` v0.1 (2026-05-08). v0.1 git history is preserved on this repository — the v0.1 single-file server lived at `src/server.py` and remains in commits prior to the v1.0 scaffolding refactor.
 
 ## Architecture
 
-See `docs/architecture-project-router-mcp.md`.
+Single Python process hosting an MCP server (stdio + HTTP/SSE), an embedded Live UI, and an optional FleetQ adapter. Pluggable backend per host (default: `claude -p`). All shell-bound strings pass through `shlex.quote`.
+
+Detailed component diagrams, transport choices, and integration contract: [`docs/architecture-harbormaster.md`](docs/architecture-harbormaster.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
