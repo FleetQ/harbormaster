@@ -15,6 +15,8 @@ layer in front of it (auth lands in v1.1+).
 from __future__ import annotations
 
 import argparse
+import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -75,13 +77,56 @@ def _build_parser() -> argparse.ArgumentParser:
             "when --transport != stdio. Default: HARBORMASTER_MCP_TOKEN."
         ),
     )
+    parser.add_argument(
+        "--log-format",
+        choices=["text", "json"],
+        default="text",
+        help=(
+            "Log output format. 'text' for human-readable (default); "
+            "'json' for one-line JSON per record (good under journalctl/Docker)."
+        ),
+    )
     return parser
 
 
-_HARBORMASTER_TOOLS = [
-    "list_projects", "list_hosts", "project_status",
-    "ask_project", "delegate_task", "fan_out_ask",
-]
+class _JsonLogFormatter(logging.Formatter):
+    """Single-line JSON per log record. No structlog dep — stdlib only."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, object] = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
+            "level": record.levelname.lower(),
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        return json.dumps(payload, default=str)
+
+
+def _configure_logging(level: str, fmt: str) -> None:
+    """Set up the root logger.
+
+    `level` comes from config.server.log_level (Literal-validated by pydantic).
+    `fmt` comes from --log-format CLI flag.
+    """
+    handler = logging.StreamHandler(sys.stderr)
+    if fmt == "json":
+        handler.setFormatter(_JsonLogFormatter())
+    else:
+        handler.setFormatter(
+            logging.Formatter(
+                fmt="%(asctime)s %(levelname)-7s %(name)s — %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
+    root = logging.getLogger()
+    # Replace any pre-existing handlers (so re-runs in long-lived processes
+    # don't duplicate output).
+    for h in list(root.handlers):
+        root.removeHandler(h)
+    root.addHandler(handler)
+    root.setLevel(level.upper())
 
 
 def _maybe_start_fleetq_bridge(config: HarbormasterConfig):  # type: ignore[no-untyped-def]
@@ -105,7 +150,7 @@ def _maybe_start_fleetq_bridge(config: HarbormasterConfig):  # type: ignore[no-u
         return None
 
     try:
-        from harbormaster.fleetq import BridgeClient, HeartbeatLoop
+        from harbormaster.fleetq import BridgeClient, HeartbeatLoop, build_manifest
     except ImportError as e:
         print(
             f"Warning: [fleetq] enabled but the [fleetq] extra is not installed "
@@ -122,16 +167,7 @@ def _maybe_start_fleetq_bridge(config: HarbormasterConfig):  # type: ignore[no-u
         label=f"harbormaster on {socket.gethostname()}",
         bridge_version=__version__,
     )
-    endpoints = {
-        "mcp_servers": [{
-            "name": "harbormaster",
-            "description": (
-                "Project-router MCP — list_projects, project_status, ask_project, "
-                "delegate_task, fan_out_ask, list_hosts."
-            ),
-            "tools": _HARBORMASTER_TOOLS,
-        }],
-    }
+    endpoints = build_manifest()
     loop = HeartbeatLoop(client, endpoints, interval=config.fleetq.heartbeat_interval)
     loop.start()
     return loop
@@ -143,6 +179,9 @@ def main(argv: list[str] | None = None) -> int:
 
     config_path = Path(args.config) if args.config else None
     config = load_config(config_path)
+
+    _configure_logging(config.server.log_level, args.log_format)
+
     mcp = build_server(config)
 
     bridge_loop = _maybe_start_fleetq_bridge(config)

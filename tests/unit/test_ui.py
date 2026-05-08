@@ -114,6 +114,72 @@ def test_create_app_exposes_correct_metadata(populated_config):
     assert app.version == __version__
 
 
+# ----- /health (FleetQ Bridge ping target) ----------------------------------
+
+
+def test_fleetq_health_endpoint(populated_config):
+    """FleetQ pings /health (not /api/health) on HTTP-tunnel-mode connections.
+    Same shape, distinct route."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok", "version": __version__}
+
+
+# ----- /discover (FleetQ Bridge HTTP-tunnel mode) ---------------------------
+
+
+def test_discover_returns_fleetq_manifest_shape(populated_config):
+    """FleetQ's /api/v1/bridge/connect calls /discover to validate. Response
+    must have the documented {agents, llm_endpoints, mcp_servers} shape."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/discover")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body.keys()) >= {"agents", "llm_endpoints", "mcp_servers"}
+    assert isinstance(body["agents"], list)
+    assert isinstance(body["llm_endpoints"], list)
+    assert isinstance(body["mcp_servers"], list)
+
+
+def test_discover_announces_harbormaster_mcp_server(populated_config):
+    client = TestClient(create_app(populated_config))
+    body = client.get("/discover").json()
+    servers = body["mcp_servers"]
+    assert len(servers) == 1
+    hm = servers[0]
+    assert hm["name"] == "harbormaster"
+    assert "tools" in hm
+    # Check that all 6 v1.0.0a7 tools are advertised
+    expected_tools = {
+        "list_projects", "list_hosts", "project_status",
+        "ask_project", "delegate_task", "fan_out_ask",
+    }
+    assert expected_tools <= set(hm["tools"])
+
+
+# ----- bearer middleware applies to /discover too --------------------------
+
+
+def test_discover_protected_by_bearer_middleware(populated_config):
+    """When the user runs UI with HARBORMASTER_UI_TOKEN set, FleetQ must send
+    that same token as endpoint_secret — middleware enforces it."""
+    from harbormaster.transport import build_bearer_middleware
+
+    app = create_app(populated_config)
+    app.add_middleware(build_bearer_middleware("ui-token-xyz"))
+    client = TestClient(app)
+
+    # Without bearer
+    assert client.get("/discover").status_code == 401
+    assert client.get("/health").status_code == 401
+
+    # With bearer
+    h = {"Authorization": "Bearer ui-token-xyz"}
+    assert client.get("/discover", headers=h).status_code == 200
+    assert client.get("/health", headers=h).status_code == 200
+
+
 # ----- bearer middleware can be applied to UI app ---------------------------
 
 

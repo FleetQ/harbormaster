@@ -7,6 +7,14 @@ out of scope for a6 and lands in v1.0.0a7+.
 See `docs/fleetq-bridge-contract.md` for the discovered FleetQ API contract.
 """
 from harbormaster.fleetq.bridge import BridgeClient, BridgeError, RegisterResponse
+from harbormaster.fleetq.endpoints import HARBORMASTER_TOOLS, build_manifest
 from harbormaster.fleetq.heartbeat import HeartbeatLoop
 
-__all__ = ["BridgeClient", "BridgeError", "HeartbeatLoop", "RegisterResponse"]
+__all__ = [
+    "HARBORMASTER_TOOLS",
+    "BridgeClient",
+    "BridgeError",
+    "HeartbeatLoop",
+    "RegisterResponse",
+    "build_manifest",
+]
