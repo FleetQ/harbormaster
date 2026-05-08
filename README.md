@@ -134,7 +134,7 @@ Every project-targeting tool accepts an optional `host` parameter. With `host` s
 
 ## Status
 
-**v1.0.0a6** — FleetQ Bridge integration (register / heartbeat / disconnect) + smoke-ui-with-token CI shipped 2026-05-08. **First v1.1 milestone landed.** The 6-week roadmap to general availability:
+**v1.0.0a7** — `/discover` + `/health` endpoints (HTTP-tunnel mode), shared logging config, extracted endpoints manifest shipped 2026-05-08. The 6-week roadmap to general availability:
 
 | Phase | Weeks | Focus |
 |-------|-------|-------|
