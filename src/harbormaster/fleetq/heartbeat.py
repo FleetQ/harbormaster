@@ -13,7 +13,7 @@ import logging
 import threading
 from typing import Any
 
-from harbormaster.fleetq.bridge import BridgeClient, BridgeError
+from harbormaster.fleetq.bridge import BridgeClient, BridgeError, RegisterResponse
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +41,26 @@ class HeartbeatLoop:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._registered = False
+        self._last_response: RegisterResponse | None = None
 
     @property
     def registered(self) -> bool:
         return self._registered
 
+    @property
+    def last_response(self) -> RegisterResponse | None:
+        """Return the most recent successful RegisterResponse (if any).
+
+        Used by the entry point to start a BridgeRelay subscriber once we
+        have the reverb_app_key + reverb_relay_url + team_id.
+        """
+        return self._last_response
+
     def _register_now(self) -> None:
         try:
             response = self.client.register(self.endpoints)
             self._registered = True
+            self._last_response = response
             logger.info(
                 "FleetQ bridge registered: session=%s team=%s",
                 response.session_id, response.team_id,

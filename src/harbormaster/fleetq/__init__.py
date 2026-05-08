@@ -9,11 +9,13 @@ See `docs/fleetq-bridge-contract.md` for the discovered FleetQ API contract.
 from harbormaster.fleetq.bridge import BridgeClient, BridgeError, RegisterResponse
 from harbormaster.fleetq.endpoints import HARBORMASTER_TOOLS, build_manifest
 from harbormaster.fleetq.heartbeat import HeartbeatLoop
+from harbormaster.fleetq.relay import BridgeRelay
 
 __all__ = [
     "HARBORMASTER_TOOLS",
     "BridgeClient",
     "BridgeError",
+    "BridgeRelay",
     "HeartbeatLoop",
     "RegisterResponse",
     "build_manifest",

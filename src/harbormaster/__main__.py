@@ -15,11 +15,17 @@ layer in front of it (auth lands in v1.1+).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from harbormaster.fleetq.heartbeat import HeartbeatLoop
+    from harbormaster.fleetq.relay import BridgeRelay
 
 from harbormaster import __version__
 from harbormaster.config import HarbormasterConfig, load_config
@@ -129,12 +135,30 @@ def _configure_logging(level: str, fmt: str) -> None:
     root.setLevel(level.upper())
 
 
-def _maybe_start_fleetq_bridge(config: HarbormasterConfig):  # type: ignore[no-untyped-def]
-    """Start the FleetQ Bridge heartbeat thread if config.fleetq enables it.
+class _FleetQOrchestration:
+    """Pair of (HeartbeatLoop, BridgeRelay | None) — caller stops both in finally."""
 
-    Returns the HeartbeatLoop instance (or None if disabled / [fleetq] extra
-    not installed / token missing). Caller is responsible for stop()ing it
-    on shutdown.
+    def __init__(
+        self,
+        loop: HeartbeatLoop,
+        relay: BridgeRelay | None,
+    ) -> None:
+        self.loop = loop
+        self.relay = relay
+
+    def stop(self) -> None:
+        """Stop relay first (releases WS) then heartbeat (deregisters)."""
+        if self.relay is not None:
+            with contextlib.suppress(Exception):
+                self.relay.stop()
+        self.loop.stop()
+
+
+def _maybe_start_fleetq_bridge(config: HarbormasterConfig):  # type: ignore[no-untyped-def]
+    """Start the FleetQ Bridge heartbeat + (optional) relay subscriber.
+
+    Returns a _FleetQOrchestration with .stop() that cleans up both, or None
+    when integration is disabled / not installed / missing token.
     """
     if not (config.fleetq.enabled and config.fleetq.register_as_bridge):
         return None
@@ -150,7 +174,12 @@ def _maybe_start_fleetq_bridge(config: HarbormasterConfig):  # type: ignore[no-u
         return None
 
     try:
-        from harbormaster.fleetq import BridgeClient, HeartbeatLoop, build_manifest
+        from harbormaster.fleetq import (
+            BridgeClient,
+            BridgeRelay,
+            HeartbeatLoop,
+            build_manifest,
+        )
     except ImportError as e:
         print(
             f"Warning: [fleetq] enabled but the [fleetq] extra is not installed "
@@ -170,7 +199,35 @@ def _maybe_start_fleetq_bridge(config: HarbormasterConfig):  # type: ignore[no-u
     endpoints = build_manifest()
     loop = HeartbeatLoop(client, endpoints, interval=config.fleetq.heartbeat_interval)
     loop.start()
-    return loop
+
+    relay = None
+    response = loop.last_response
+    if loop.registered and response and response.reverb_app_key and response.reverb_relay_url:
+        try:
+            relay = BridgeRelay(
+                base_url=config.fleetq.base_url,
+                api_token=api_token,
+                team_id=response.team_id,
+                app_key=response.reverb_app_key,
+                relay_url=response.reverb_relay_url,
+            )
+            relay.start()
+        except Exception as e:  # noqa: BLE001 - relay is best-effort in v1.0.0a8
+            print(
+                f"Warning: FleetQ bridge relay failed to start ({e}). "
+                f"The bridge connection is registered but inbound MCP tool "
+                f"calls from FleetQ will not be received.",
+                file=sys.stderr,
+            )
+            relay = None
+    elif loop.registered:
+        print(
+            "Note: FleetQ bridge registered, but the response did not include "
+            "Reverb credentials — relay subscriber not started.",
+            file=sys.stderr,
+        )
+
+    return _FleetQOrchestration(loop=loop, relay=relay)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -184,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
 
     mcp = build_server(config)
 
-    bridge_loop = _maybe_start_fleetq_bridge(config)
+    fleetq = _maybe_start_fleetq_bridge(config)
 
     try:
         if args.transport == "stdio":
@@ -204,8 +261,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     finally:
-        if bridge_loop is not None:
-            bridge_loop.stop()
+        if fleetq is not None:
+            fleetq.stop()
 
 
 if __name__ == "__main__":
