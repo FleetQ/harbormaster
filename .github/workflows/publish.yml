@@ -1,0 +1,104 @@
+# Security note: this workflow does NOT consume any untrusted github.event.*
+# fields. Only tag-name and step-output expressions flow into run: blocks, all
+# bound via env: for explicit handling. Uses PyPI Trusted Publishing (OIDC) —
+# no long-lived API tokens stored in the repo.
+
+name: Publish to PyPI
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to publish"
+        type: choice
+        options: [pypi, testpypi]
+        default: pypi
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Read package version
+        id: version
+        run: |
+          v=$(uv run python -c "from harbormaster import __version__; print(__version__)")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Building harbormaster-mcp $v"
+
+      - name: Build distribution
+        run: uv build
+
+      - name: Verify built version matches tag
+        if: github.event_name == 'push'
+        env:
+          REF: ${{ github.ref_name }}
+          PKG_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tag_version="${REF#v}"
+          if [ "$tag_version" != "$PKG_VERSION" ]; then
+            echo "Tag $REF (-> $tag_version) does not match package $PKG_VERSION"
+            exit 1
+          fi
+          echo "OK: tag $REF matches package version $PKG_VERSION"
+
+      - name: Upload distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 14
+
+  publish-pypi:
+    name: Publish to PyPI
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/harbormaster-mcp
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/harbormaster-mcp
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/

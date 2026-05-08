@@ -154,6 +154,10 @@ Single Python process hosting an MCP server (stdio + HTTP/SSE), an embedded Live
 
 Detailed component diagrams, transport choices, and integration contract: [`docs/architecture-harbormaster.md`](docs/architecture-harbormaster.md).
 
+## Releasing
+
+PyPI publishing is automated via Trusted Publishing (OIDC) — no API tokens in the repo. Tag-pushes to `v*` trigger `.github/workflows/publish.yml`. Setup steps and the release checklist live in [`docs/publishing.md`](docs/publishing.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
