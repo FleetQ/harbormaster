@@ -8,6 +8,7 @@ import pytest
 from harbormaster.config import ProjectsConfig
 from harbormaster.projects import (
     discover_projects,
+    find_project_path,
     resolve_project,
     validate_project_name,
 )
@@ -131,3 +132,98 @@ def test_resolve_project_under_configured_base(tmp_path: Path):
     cfg = ProjectsConfig(glob=[f"{base}/*"])
     p = resolve_project("myproj", cfg)
     assert p == (base / "myproj").resolve()
+
+
+# ----- find_project_path (cheap lookup, no git spawns) -----------------------
+
+
+def test_find_project_path_returns_path(tmp_path: Path):
+    base = tmp_path / "code"
+    _make_project_dir(base / "myproj")
+    cfg = ProjectsConfig(glob=[f"{base}/*"])
+    p = find_project_path("myproj", cfg)
+    assert p == (base / "myproj").resolve()
+
+
+def test_find_project_path_validates_name():
+    cfg = ProjectsConfig(glob=["~/htdocs/*"])
+    with pytest.raises(ValueError, match="invalid project name"):
+        find_project_path("..", cfg)
+
+
+def test_find_project_path_raises_on_unknown(tmp_path: Path):
+    cfg = ProjectsConfig(glob=[f"{tmp_path}/*"])
+    with pytest.raises(ValueError, match="not found"):
+        find_project_path("nonexistent-project-xyz", cfg)
+
+
+def test_find_project_path_respects_containment(tmp_path: Path):
+    """Symlink under base pointing to a 'project' outside should not be
+    findable — same containment guard as discover_projects."""
+    base = tmp_path / "code"
+    base.mkdir()
+    outside = tmp_path / "outside"
+    _make_project_dir(outside / "secret")
+    (base / "secret").symlink_to(outside / "secret")
+    cfg = ProjectsConfig(glob=[f"{base}/*"])
+    with pytest.raises(ValueError, match="not found"):
+        find_project_path("secret", cfg)
+
+
+# ----- gitignore-style excludes ---------------------------------------------
+
+
+def test_excludes_double_star_node_modules(tmp_path: Path):
+    """`**/node_modules/**` should exclude any project whose path contains
+    a `node_modules` component, regardless of depth."""
+    base = tmp_path / "code"
+    _make_project_dir(base / "real")
+    deep = base / "monorepo" / "node_modules" / "leaked"
+    _make_project_dir(deep)
+    cfg = ProjectsConfig(
+        glob=[f"{base}/**/*"],
+        exclude=["**/node_modules/**"],
+    )
+    projects = discover_projects(cfg)
+    names = {p.name for p in projects}
+    assert "real" in names
+    assert "leaked" not in names
+
+
+def test_excludes_glob_pattern(tmp_path: Path):
+    """`test_fixture_*` should exclude matching path components via fnmatch."""
+    base = tmp_path / "code"
+    _make_project_dir(base / "real")
+    _make_project_dir(base / "test_fixture_x")
+    cfg = ProjectsConfig(glob=[f"{base}/*"], exclude=["test_fixture_*"])
+    projects = discover_projects(cfg)
+    names = {p.name for p in projects}
+    assert "real" in names
+    assert "test_fixture_x" not in names
+
+
+# ----- recursive ** glob ------------------------------------------------------
+
+
+def test_recursive_glob_finds_deeply_nested(tmp_path: Path):
+    base = tmp_path / "code"
+    _make_project_dir(base / "a" / "deep" / "nested" / "proj")
+    cfg = ProjectsConfig(glob=[f"{base}/**/*"])
+    projects = discover_projects(cfg)
+    names = {p.name for p in projects}
+    assert "proj" in names
+
+
+def test_recursive_glob_exclude_filters_inside(tmp_path: Path):
+    base = tmp_path / "code"
+    _make_project_dir(base / "good")
+    _make_project_dir(base / "vendor" / "thirdparty" / "lib")
+    cfg = ProjectsConfig(
+        glob=[f"{base}/**/*"],
+        exclude=["**/vendor/**"],
+    )
+    projects = discover_projects(cfg)
+    names = {p.name for p in projects}
+    assert "good" in names
+    assert "lib" not in names
+    assert "vendor" not in names

@@ -1,6 +1,23 @@
-"""Local project discovery and resolution from configured globs."""
+"""Local project discovery, name validation, and resolution.
+
+The split between this module's public functions reflects two access patterns:
+
+- Cold/full enumeration → `discover_projects(config)` returns rich
+  `ProjectInfo` (with git log, Serena flags, brief). Used by the
+  `list_projects` MCP tool — pays N git subprocesses per call.
+
+- Hot/single lookup → `find_project_path(name, config)` returns just a
+  `Path` after a name match. Used by the `ask_project` / `delegate_task`
+  hot paths. No git, no per-project work beyond filesystem stat.
+
+Both share the same containment guarantees: a child whose resolved path
+leaves every configured glob's base directory is rejected (closes the
+symlink-out-of-base traversal vector).
+"""
 from __future__ import annotations
 
+import fnmatch
+import glob as _glob
 import re
 import subprocess
 from dataclasses import asdict, dataclass
@@ -49,26 +66,24 @@ def _is_project(p: Path) -> bool:
 
 
 def _glob_base(pattern: str) -> Path | None:
-    """Extract the literal base directory of a glob pattern (the prefix before
-    the first wildcard). Returns None for patterns that don't have a meaningful
-    base (e.g. `*` alone)."""
-    expanded = str(Path(pattern).expanduser())
-    star_idx = -1
-    for ch in ("*", "?"):
-        i = expanded.find(ch)
-        if i >= 0 and (star_idx < 0 or i < star_idx):
-            star_idx = i
-    if star_idx < 0:
-        return Path(expanded).resolve() if Path(expanded).exists() else None
-    base_str = expanded[:star_idx].rstrip("/")
-    if not base_str:
+    """Longest non-magic path prefix of the pattern, used as the containment
+    base. Returns None if no fixed prefix exists (e.g. a bare `*`)."""
+    expanded = Path(pattern).expanduser()
+    if not _glob.has_magic(str(expanded)):
+        return expanded.resolve() if expanded.is_dir() else None
+    base_parts: list[str] = []
+    for part in expanded.parts:
+        if _glob.has_magic(part):
+            break
+        base_parts.append(part)
+    if not base_parts:
         return None
-    base = Path(base_str)
+    base = Path(*base_parts)
     return base.resolve() if base.is_dir() else None
 
 
 def _is_under_any_base(path: Path, bases: list[Path]) -> bool:
-    """Containment check: True if `path` is under any of `bases` (after resolving)."""
+    """Containment check: True if `path` is under any of `bases` after resolving."""
     try:
         resolved = path.resolve()
     except OSError:
@@ -79,6 +94,36 @@ def _is_under_any_base(path: Path, bases: list[Path]) -> bool:
             return True
         except ValueError:
             continue
+    return False
+
+
+def _is_excluded(path: Path, patterns: list[str]) -> bool:
+    """Check if `path` matches any exclude pattern.
+
+    Supports gitignore-style patterns:
+      - `**/node_modules/**` → match if any path component is `node_modules`
+      - `node_modules`       → same (treated as bare component name)
+      - `*.swp`              → fnmatch against any path component
+      - `/full/path/*.tmp`   → fnmatch against the full absolute path
+    """
+    parts = path.parts
+    parts_set = set(parts)
+    s = str(path)
+    for raw in patterns:
+        core = raw.removeprefix("**/").removesuffix("/**").strip("/")
+        if not core:
+            continue
+        if not _glob.has_magic(core):
+            # Plain name → match against any component (fast path).
+            if core in parts_set:
+                return True
+            continue
+        # Has globbing meta — fnmatch each component, then full path.
+        for part in parts:
+            if fnmatch.fnmatchcase(part, core):
+                return True
+        if fnmatch.fnmatchcase(s, raw):
+            return True
     return False
 
 
@@ -110,47 +155,70 @@ def _project_brief(path: Path) -> str:
     return ""
 
 
-def _is_excluded(path: Path, patterns: list[str]) -> bool:
-    s = str(path)
-    for pat in patterns:
-        # Strip leading ** for naive substring match — adequate for v1.0
-        normalized = pat.replace("**/", "").replace("/**", "")
-        if normalized and normalized in s:
-            return True
-    return False
+def _iter_glob_matches(config: ProjectsConfig) -> list[tuple[Path, list[Path]]]:
+    """Yield (resolved_base, matches) per configured glob pattern.
+
+    Uses stdlib `glob.iglob(recursive=True)` so `**` patterns work as expected.
+    Bases are returned alongside matches so callers can do a containment check.
+    """
+    out: list[tuple[Path, list[Path]]] = []
+    for pattern in config.glob:
+        expanded = str(Path(pattern).expanduser())
+        base = _glob_base(pattern)
+        matches = [Path(m) for m in _glob.iglob(expanded, recursive=True)]
+        if base is not None:
+            out.append((base, matches))
+        else:
+            out.append((Path("/"), matches))  # no base → any path is "under" /
+    return out
+
+
+def find_project_path(name: str, config: ProjectsConfig) -> Path:
+    """Fast project-by-name lookup. No git, no rich metadata, no sort.
+
+    Walks configured globs and returns the first match whose directory name
+    equals `name` and which passes the containment + exclude filters. Validates
+    `name` against the strict regex first.
+    """
+    validate_project_name(name)
+    bases_with_matches = _iter_glob_matches(config)
+    bases = [b for b, _ in bases_with_matches if str(b) != "/"]
+
+    for _base, matches in bases_with_matches:
+        for child in matches:
+            if child.name != name:
+                continue
+            try:
+                resolved = child.resolve()
+            except OSError:
+                continue
+            if not _is_project(resolved):
+                continue
+            if _is_excluded(resolved, config.exclude):
+                continue
+            if bases and not _is_under_any_base(resolved, bases):
+                continue
+            if config.require_marker and not (resolved / "CLAUDE.md").is_file() \
+                    and not (resolved / ".serena").is_dir():
+                continue
+            return resolved
+
+    raise ValueError(f"project {name!r} not found in configured globs")
 
 
 def discover_projects(config: ProjectsConfig) -> list[ProjectInfo]:
-    """Walk configured globs and return ProjectInfo for every directory that
-    looks like a project. Sorted by last commit date desc.
+    """Walk configured globs and return rich ProjectInfo for every match.
 
-    Containment guard: a child whose resolved path leaves the resolved base
-    directory of every configured glob (e.g. via a symlink to /etc/foo) is
-    skipped. This prevents discovery from following symlinks out of the
-    user's intended project space.
+    Sorted by last commit date desc. Pays one `git log` subprocess per match —
+    use this for the list_projects MCP tool, NOT for hot lookup paths.
     """
-    bases = [b for p in config.glob if (b := _glob_base(p)) is not None]
+    bases_with_matches = _iter_glob_matches(config)
+    bases = [b for b, _ in bases_with_matches if str(b) != "/"]
     seen: set[Path] = set()
     projects: list[ProjectInfo] = []
 
-    for pattern in config.glob:
-        expanded_str = str(Path(pattern).expanduser())
-        if "*" in expanded_str or "?" in expanded_str:
-            star_idx = min(
-                (i for i in (expanded_str.find("*"), expanded_str.find("?")) if i >= 0),
-                default=-1,
-            )
-            base_str = expanded_str[:star_idx].rstrip("/")
-            glob_fragment = expanded_str[len(base_str):].lstrip("/") or "*"
-            base = Path(base_str)
-            if not base.is_dir():
-                continue
-            children = list(base.glob(glob_fragment))
-        else:
-            p = Path(expanded_str)
-            children = [p] if p.exists() else []
-
-        for child in children:
+    for _base, matches in bases_with_matches:
+        for child in matches:
             try:
                 resolved = child.resolve()
             except OSError:
@@ -162,7 +230,6 @@ def discover_projects(config: ProjectsConfig) -> list[ProjectInfo]:
             if _is_excluded(resolved, config.exclude):
                 continue
             if bases and not _is_under_any_base(resolved, bases):
-                # Symlink (or relative climb) out of the configured base. Skip.
                 continue
             if config.require_marker and not (resolved / "CLAUDE.md").is_file() \
                     and not (resolved / ".serena").is_dir():
@@ -185,16 +252,10 @@ def discover_projects(config: ProjectsConfig) -> list[ProjectInfo]:
 
 
 def resolve_project(name: str, config: ProjectsConfig) -> Path:
-    """Return the local path for a project by name. Raises ValueError on
-    invalid name OR when the project is not found among discovered projects.
+    """Public API: return the path of a project by name.
 
-    Always validates `name` against the strict regex first so callers can rely
-    on it rejecting traversal attempts before any filesystem walk happens.
+    Now an alias for find_project_path — kept under the original name to
+    preserve external API stability. Callers that need rich metadata should
+    use discover_projects() and filter on .name.
     """
-    validate_project_name(name)
-    candidates = discover_projects(config)
-    for c in candidates:
-        if c.name == name:
-            return Path(c.path)
-    available = ", ".join(p.name for p in candidates[:20])
-    raise ValueError(f"project '{name}' not found. Available: {available}")
+    return find_project_path(name, config)
