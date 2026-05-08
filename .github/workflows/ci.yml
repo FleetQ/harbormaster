@@ -54,10 +54,87 @@ jobs:
       - name: Tests (pytest)
         run: uv run --python ${{ matrix.python-version }} pytest tests/ -v
 
+  smoke-http:
+    name: HTTP transport smoke test (SSE + bearer auth)
+    runs-on: ubuntu-24.04
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Generate auth token
+        id: token
+        # Workflow-internal random — not user input. Stored in step output for
+        # downstream env: bindings (no ${{ }} interpolation inside run: scripts).
+        run: |
+          {
+            echo "token=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Start harbormaster-mcp in background
+        env:
+          HARBORMASTER_MCP_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          uv run harbormaster-mcp --transport sse --port 17532 &
+          echo "HMS_PID=$!" >> "$GITHUB_ENV"
+          # Poll until the bearer middleware is live (max 15s)
+          for _ in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 1 http://127.0.0.1:17532/sse || echo 0)
+            if [ "$status" = "401" ]; then
+              echo "Server up — auth middleware is rejecting unauth requests"
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "Server did not start within 15s"
+          exit 1
+
+      - name: Reject request without Authorization header
+        run: |
+          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:17532/sse)
+          test "$status" = "401" || { echo "Expected 401, got $status"; exit 1; }
+
+      - name: Reject request with wrong bearer token
+        run: |
+          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+            -H 'Authorization: Bearer obviously-wrong' \
+            http://127.0.0.1:17532/sse)
+          test "$status" = "401" || { echo "Expected 401, got $status"; exit 1; }
+
+      - name: Accept request with correct bearer token
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          # SSE keeps the connection open, so cap the curl with --max-time.
+          # The middleware's job is "anything except 401" — the actual
+          # MCP handshake response is FastMCP's concern, not ours here.
+          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 \
+            -H "Authorization: Bearer $TOKEN" \
+            http://127.0.0.1:17532/sse || echo 0)
+          if [ "$status" = "401" ]; then
+            echo "FAIL: bearer middleware rejected the correct token (status=$status)"
+            exit 1
+          fi
+          echo "OK: middleware passed through to FastMCP (status=$status)"
+
+      - name: Stop background server
+        if: always()
+        run: |
+          if [ -n "${HMS_PID:-}" ]; then
+            kill "$HMS_PID" 2>/dev/null || true
+          fi
+
   build:
     name: Build sdist + wheel
     runs-on: ubuntu-24.04
-    needs: test
+    needs: [test, smoke-http]
     steps:
       - uses: actions/checkout@v4
 
