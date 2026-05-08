@@ -44,8 +44,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--host",
         default="127.0.0.1",
         help=(
-            "Bind address for SSE / streamable-http. Default: 127.0.0.1 "
-            "(localhost only; v1.0 has no auth layer)."
+            "Bind address for SSE / streamable-http. Default: 127.0.0.1. "
+            "Auth is required for HTTP transports — see --auth-token-env."
         ),
     )
     parser.add_argument(
@@ -66,6 +66,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "$XDG_CONFIG_HOME/harbormaster/config.toml then built-in defaults."
         ),
     )
+    parser.add_argument(
+        "--auth-token-env",
+        default="HARBORMASTER_MCP_TOKEN",
+        help=(
+            "Env var holding the bearer token for HTTP transports. Required "
+            "when --transport != stdio. Default: HARBORMASTER_MCP_TOKEN."
+        ),
+    )
     return parser
 
 
@@ -81,11 +89,14 @@ def main(argv: list[str] | None = None) -> int:
         mcp.run()
         return 0
 
-    # SSE / streamable-http: configure FastMCP transport settings then run.
+    # HTTP-based transport: require a bearer token before binding any port.
+    from harbormaster.transport import require_auth_token_or_exit, run_http_transport
+
+    token = require_auth_token_or_exit(args.auth_token_env, args.transport)
     port = args.port if args.port is not None else config.server.mcp_http_port
-    mcp.settings.host = args.host
-    mcp.settings.port = port
-    mcp.run(transport=args.transport)
+    run_http_transport(
+        mcp, transport=args.transport, host=args.host, port=port, token=token
+    )
     return 0
 
 

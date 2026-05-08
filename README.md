@@ -54,15 +54,18 @@ Or in Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_confi
 
 ### HTTP / SSE transport
 
-For remote MCP clients or running outside the desktop client, Harbormaster can speak SSE / streamable-http instead of stdio:
+For remote MCP clients or running outside the desktop client, Harbormaster can speak SSE / streamable-http instead of stdio. **A bearer token is required** — there is no auth-disabled HTTP mode.
 
 ```bash
+export HARBORMASTER_MCP_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
 harbormaster-mcp --transport sse --host 127.0.0.1 --port 7532
 # or the new MCP spec transport:
 harbormaster-mcp --transport streamable-http --port 7532
 ```
 
-v1.0 binds to `127.0.0.1` by default and has **no built-in auth layer** — only run on `0.0.0.0` behind a reverse proxy that handles auth. (Auth lands in v1.1+ via the FleetQ Bridge integration.)
+Clients send the token as `Authorization: Bearer <token>`. Missing or wrong tokens return 401.
+
+Override the env-var name with `--auth-token-env MY_VAR` if you keep secrets under a different name. Use `--host 0.0.0.0` only if you understand the implications — the bearer token is the only thing between the open port and your projects.
 
 Run `harbormaster-mcp --help` for the full flag set.
 
