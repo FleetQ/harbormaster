@@ -134,7 +134,7 @@ Every project-targeting tool accepts an optional `host` parameter. With `host` s
 
 ## Status
 
-**v1.0.0a3** — Backend Protocol tightening, HTTP/SSE transport, e2e test infrastructure, fan-out synthesis shipped 2026-05-08. The 6-week roadmap to general availability:
+**v1.0.0a4** — Live UI scaffold + bearer auth + CI live-SSE shipped 2026-05-08. The 6-week roadmap to general availability:
 
 | Phase | Weeks | Focus |
 |-------|-------|-------|
