@@ -64,6 +64,12 @@ def _build_parser() -> argparse.ArgumentParser:
             "required on public bind. Default: HARBORMASTER_UI_TOKEN."
         ),
     )
+    parser.add_argument(
+        "--log-format",
+        choices=["text", "json"],
+        default="text",
+        help="Log output format. 'text' (default) or 'json'.",
+    )
     return parser
 
 
@@ -111,8 +117,15 @@ def main(argv: list[str] | None = None) -> int:
 
     token = _resolve_ui_token(args)
 
+    # Reuse the MCP entry point's logging setup so harbormaster-ui and
+    # harbormaster-mcp share identical log shape (text vs json).
+    from harbormaster.__main__ import _configure_logging
+
     config_path = Path(args.config) if args.config else None
     config = load_config(config_path)
+
+    _configure_logging(config.server.log_level, args.log_format)
+
     app = create_app(config)
 
     if token:
