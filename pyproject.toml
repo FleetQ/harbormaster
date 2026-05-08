@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harbormaster-mcp"
-version = "1.0.0a2"
+dynamic = ["version"]
 description = "MCP server that routes Q&A across all your projects — locally or over SSH. Part of the FleetQ ecosystem."
 readme = "README.md"
 license = "MIT"
@@ -57,6 +57,11 @@ Homepage = "https://github.com/FleetQ/harbormaster"
 Repository = "https://github.com/FleetQ/harbormaster"
 Issues = "https://github.com/FleetQ/harbormaster/issues"
 Documentation = "https://github.com/FleetQ/harbormaster/tree/main/docs"
+
+[tool.hatch.version]
+# Single source of truth for the package version. Hatchling reads __version__
+# from this file at build time; runtime imports also read from the same place.
+path = "src/harbormaster/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/harbormaster"]

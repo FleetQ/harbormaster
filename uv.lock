@@ -386,7 +386,6 @@ wheels = [
 
 [[package]]
 name = "harbormaster-mcp"
-version = "1.0.0a1"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
@@ -430,7 +429,7 @@ requires-dist = [
     { name = "sse-starlette", marker = "extra == 'ui'", specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'ui'", specifier = ">=0.27" },
 ]
-provides-extras = ["ui", "fleetq", "dev"]
+provides-extras = ["dev", "fleetq", "ui"]
 
 [[package]]
 name = "httpcore"
