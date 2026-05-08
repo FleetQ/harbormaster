@@ -17,10 +17,10 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from harbormaster.backends import BackendError
+from harbormaster.backends import BackendError, get_backend
 from harbormaster.config import HarbormasterConfig
 from harbormaster.projects import discover_projects
-from harbormaster.tools._helpers import _get_backend, run_backend
+from harbormaster.tools._helpers import run_backend
 
 
 @dataclass(frozen=True)
@@ -152,7 +152,7 @@ def _synthesize(
     themselves. Returns the synthesis text or a 'Synthesis skipped/failed:'
     string so the report stays self-explaining.
     """
-    backend = _get_backend(config)
+    backend = get_backend(config)
     if backend is None:
         return "Synthesis skipped: backend 'claude' is not enabled."
 

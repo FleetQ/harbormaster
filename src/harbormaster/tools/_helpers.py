@@ -10,7 +10,7 @@ import os
 import time
 from pathlib import Path
 
-from harbormaster.backends import BackendError, ClaudeBackend
+from harbormaster.backends import BackendError, get_backend
 from harbormaster.config import HarbormasterConfig
 from harbormaster.projects import resolve_project, validate_project_name
 from harbormaster.ssh import is_remote
@@ -27,13 +27,6 @@ def _dump_dir() -> Path:
     d = Path(state) / "harbormaster" / "dumps"
     d.mkdir(parents=True, exist_ok=True, mode=0o700)
     return d
-
-
-def _get_backend(config: HarbormasterConfig, name: str = "claude") -> ClaudeBackend | None:
-    cfg = config.backends.get(name)
-    if cfg is None or not cfg.enabled:
-        return None
-    return ClaudeBackend(cfg)
 
 
 def run_backend(
@@ -58,7 +51,7 @@ def run_backend(
     except ValueError as e:
         return f"Error: {e}"
 
-    backend = _get_backend(config)
+    backend = get_backend(config)
     if backend is None:
         return "Error: backend 'claude' is not enabled in config"
     cap = backend.cfg.output_word_cap
