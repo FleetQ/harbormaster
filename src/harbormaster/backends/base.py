@@ -1,8 +1,14 @@
 """Backend Protocol and shared types.
 
-A Backend knows how to ask a question against a project — locally as a
-subprocess and remotely as a shell command sent over SSH. The Protocol keeps
-the contract minimal so non-Claude backends (codex, aider, gemini) can drop in.
+A Backend asks a question against a project — locally as a subprocess and
+remotely over SSH — and returns a uniform `BackendResult`. The Protocol is
+deliberately minimal so non-Claude backends (codex, aider, gemini, local
+llama-server) can implement it without exposing transport / parsing details
+to callers.
+
+Failure mode contract: methods raise `BackendError(code=...)` instead of
+returning a result with an ok flag. Callers in `tools/_helpers.py` map
+exceptions back to user-visible 'Error: ...' strings at the MCP boundary.
 """
 from __future__ import annotations
 
@@ -13,32 +19,56 @@ from typing import Protocol
 
 @dataclass(frozen=True)
 class BackendResult:
+    """Successful backend invocation.
+
+    Truncation policy lives at the tool boundary (`_helpers._truncate`),
+    not in the backend — this dataclass is the raw subagent answer.
+    """
+
     output: str
-    truncated: bool
     duration_ms: int
 
 
 class BackendError(Exception):
-    """Backend failure with a stable code for callers to dispatch on."""
+    """Backend failure with a stable code for callers to dispatch on.
+
+    Codes:
+      - 'timeout'        — local subprocess or SSH exceeded its timeout
+      - 'exit_nonzero'   — subagent process returned a non-zero exit
+      - 'parse_failure'  — stdout did not contain a valid result payload
+      - 'ssh_error'      — SSH layer failed (refused / auth / unknown host)
+      - 'auth_failure'   — backend-specific auth (Anthropic seat) failed
+    """
 
     def __init__(self, message: str, code: str) -> None:
         super().__init__(message)
         self.message = message
-        self.code = code  # 'timeout' | 'exit_nonzero' | 'parse_failure' | 'auth_failure'
+        self.code = code
 
     def __str__(self) -> str:
         return self.message
 
 
 class Backend(Protocol):
-    """Pluggable backend contract."""
+    """Pluggable contract for asking a project question."""
 
     name: str
 
-    def ask_local(self, *, cwd: Path, prompt: str, max_turns: int) -> str: ...
+    def ask_local(
+        self,
+        *,
+        cwd: Path,
+        prompt: str,
+        max_turns: int,
+    ) -> BackendResult: ...
 
-    def build_remote_command(
-        self, *, remote_cwd: str, prompt: str, max_turns: int
-    ) -> str: ...
-
-    def parse_remote_stdout(self, stdout: str) -> str: ...
+    def ask_remote(
+        self,
+        *,
+        host: str,
+        remote_cwd: str,
+        prompt: str,
+        max_turns: int,
+        connect_timeout: int,
+        total_timeout: int,
+    ) -> BackendResult: ...

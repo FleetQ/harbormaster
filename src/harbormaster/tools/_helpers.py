@@ -1,4 +1,9 @@
-"""Shared helpers for tool implementations (private to harbormaster.tools)."""
+"""Shared helpers for tool implementations (private to harbormaster.tools).
+
+Translates between the typed Backend interface (which raises BackendError on
+failure) and the MCP user-facing string contract (which returns 'Error: ...'
+prefixed strings so the envelope stays consistent across tools).
+"""
 from __future__ import annotations
 
 import os
@@ -8,12 +13,7 @@ from pathlib import Path
 from harbormaster.backends import BackendError, ClaudeBackend
 from harbormaster.config import HarbormasterConfig
 from harbormaster.projects import resolve_project, validate_project_name
-from harbormaster.ssh import (
-    SshTimeoutError,
-    diagnose_ssh_failure,
-    is_remote,
-    run_ssh,
-)
+from harbormaster.ssh import is_remote
 
 
 def _dump_dir() -> Path:
@@ -45,10 +45,13 @@ def run_backend(
     config: HarbormasterConfig,
     label_prefix: str,
 ) -> str:
-    """Dispatch a prompt to local or remote backend.
+    """Dispatch a prompt to local or remote backend, return the (possibly
+    truncated) result text or an 'Error: ...' string.
 
-    Returns either the (possibly truncated) result text, or a string starting
-    with 'Error: ...' so the MCP envelope stays consistent across tools.
+    No SSH glue here — that's encapsulated inside the backend. This function
+    is purely orchestration: validate the project name, pick the backend,
+    pick local-vs-remote, dispatch, and translate exceptions to strings at
+    the MCP boundary.
     """
     try:
         validate_project_name(name)
@@ -60,47 +63,34 @@ def run_backend(
         return "Error: backend 'claude' is not enabled in config"
     cap = backend.cfg.output_word_cap
 
-    if is_remote(host):
-        host_cfg = config.hosts.get(host)
-        remote_htdocs = host_cfg.remote_htdocs if host_cfg else "~/htdocs"
-        connect_timeout = host_cfg.connect_timeout if host_cfg else 10
-        total_timeout = host_cfg.total_timeout if host_cfg else 120
-
-        remote_cmd = backend.build_remote_command(
-            remote_cwd=f"{remote_htdocs}/{name}",
-            prompt=prompt,
-            max_turns=max_turns,
-        )
-        try:
-            proc = run_ssh(
-                host, remote_cmd,
-                total_timeout=total_timeout,
+    try:
+        if is_remote(host):
+            host_cfg = config.hosts.get(host)
+            remote_htdocs = host_cfg.remote_htdocs if host_cfg else "~/htdocs"
+            connect_timeout = host_cfg.connect_timeout if host_cfg else 10
+            total_timeout = host_cfg.total_timeout if host_cfg else 120
+            result = backend.ask_remote(
+                host=host,
+                remote_cwd=f"{remote_htdocs}/{name}",
+                prompt=prompt,
+                max_turns=max_turns,
                 connect_timeout=connect_timeout,
+                total_timeout=total_timeout,
             )
-        except SshTimeoutError as e:
-            return f"Error: {e}"
-        err = diagnose_ssh_failure(host, proc)
-        if err:
-            return f"Error: {err}"
-        if proc.returncode != 0:
-            stderr_tail = (proc.stderr or "")[-500:]
-            return f"Error: remote backend exit {proc.returncode}: {stderr_tail}"
-        try:
-            result = backend.parse_remote_stdout(proc.stdout)
-        except BackendError as e:
-            return f"Error: {e}"
-        return _truncate(result, cap, f"{label_prefix}-{host}-{name}")
-
-    # Local
-    try:
-        cwd = resolve_project(name, config.projects)
-    except ValueError as e:
-        return f"Error: {e}"
-    try:
-        result = backend.ask_local(cwd=cwd, prompt=prompt, max_turns=max_turns)
+            label = f"{label_prefix}-{host}-{name}"
+        else:
+            try:
+                cwd = resolve_project(name, config.projects)
+            except ValueError as e:
+                return f"Error: {e}"
+            result = backend.ask_local(
+                cwd=cwd, prompt=prompt, max_turns=max_turns
+            )
+            label = f"{label_prefix}-{name}"
     except BackendError as e:
         return f"Error: {e}"
-    return _truncate(result, cap, f"{label_prefix}-{name}")
+
+    return _truncate(result.output, cap, label)
 
 
 def _truncate(text: str, word_cap: int, source_label: str) -> str:
