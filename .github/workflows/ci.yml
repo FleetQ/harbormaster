@@ -1,0 +1,75 @@
+# Security note: this workflow does NOT consume any untrusted github.event.*
+# fields (titles, bodies, branch labels, commit messages). The only ${{ }}
+# expansions are workflow-defined matrix values and trusted action versions —
+# no user-controlled string flows into a `run:` step. See:
+# https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --extra dev --python ${{ matrix.python-version }}
+
+      - name: Lint (ruff)
+        run: uv run --python ${{ matrix.python-version }} ruff check src/ tests/
+
+      - name: Type check (mypy --strict)
+        run: uv run --python ${{ matrix.python-version }} mypy --strict src/harbormaster/
+
+      - name: Tests (pytest)
+        run: uv run --python ${{ matrix.python-version }} pytest tests/ -v
+
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-24.04
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Build distribution
+        run: uv build
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 14

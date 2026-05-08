@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harbormaster-mcp"
-version = "1.0.0a1"
+version = "1.0.0a2"
 description = "MCP server that routes Q&A across all your projects — locally or over SSH. Part of the FleetQ ecosystem."
 readme = "README.md"
 license = "MIT"

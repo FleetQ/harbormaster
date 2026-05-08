@@ -21,8 +21,9 @@ Optional SSH fan-out lets the same tools target remote VPS hosts. Optional Fleet
 | `project_status(name, host=None)` | Git log, Serena memories, log tails. | ~200 ms / ~2 s |
 | `ask_project(name, question, max_turns=5, host=None)` | Spawn `claude -p` in project cwd, return ≤ 800-word summary. | ~30 s / ~90 s |
 | `delegate_task(name, task, deliverable, allow_writes=False, host=None)` | Read-only delegation; v1 fails closed for writes. | ~60 s / ~90 s |
+| `fan_out_ask(question, project_filter=None, host_filter=None, max_concurrency=5, max_turns=3)` | Parallel multi-project Q&A. Returns one section per target. | ~`max_turns × claude_p_time` × ⌈targets/max_concurrency⌉ |
 
-More tools (`fan_out_ask`, `recall_qa`, …) land in v1.0–1.2. See [`docs/architecture-harbormaster.md`](docs/architecture-harbormaster.md).
+More tools (`recall_qa`, …) land in v1.1–1.2. See [`docs/architecture-harbormaster.md`](docs/architecture-harbormaster.md).
 
 ## Install
 
@@ -98,7 +99,7 @@ Every project-targeting tool accepts an optional `host` parameter. With `host` s
 
 ## Status
 
-**v1.0.0a1** — package scaffolding shipped 2026-05-08. The 6-week roadmap to general availability:
+**v1.0.0a2** — fan-out + perf + CI shipped 2026-05-08. The 6-week roadmap to general availability:
 
 | Phase | Weeks | Focus |
 |-------|-------|-------|
