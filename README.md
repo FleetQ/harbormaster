@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/harbormaster-mcp.svg?label=harbormaster-mcp)](https://pypi.org/project/harbormaster-mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#status)
+[![Status](https://img.shields.io/badge/status-stable-green.svg)](#status)
 
 ## What it does
 
@@ -154,13 +154,13 @@ JSON mode (no `Accept: text/event-stream`, no `stream` flag) is unchanged — fu
 
 ## Status
 
-**v1.0.0a17** — v1.2 phase 1 (Q&A history) shipped 2026-05-09. New
-`recall_qa` MCP tool exposes semantic recall over every past
-`ask_project` / `delegate_task` trajectory, persisted to a per-host
-sqlite-vec store. Default embedding backend is fastembed
-(BAAI/bge-small-en-v1.5, runs locally, ~50MB ONNX); falls back to
-FTS5 / bm25 when the optional `[history]` extra is missing. Opt-in via
-`[history] enabled = true`. See [`docs/architecture-harbormaster.md` §17](docs/architecture-harbormaster.md).
+**v1.0.0** — GA shipped 2026-05-09. All four v1.2 phases complete:
+Q&A history with semantic recall (a17), auto project graph from
+manifest parsing (a18), federated KG via FleetQ KnowledgeGraph (a19),
+and cross-session memory recall via auto-grounded prompts (a20). 8
+MCP tools, 392 tests, mypy --strict + ruff clean across 40 source
+files. See [`docs/sprint-retro-harbormaster-v1.0.0.md`](docs/sprint-retro-harbormaster-v1.0.0.md)
+for the full a1→GA arc.
 
 | Phase | Status | Focus |
 |-------|--------|-------|
