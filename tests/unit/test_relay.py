@@ -961,3 +961,176 @@ def test_relay_dispatcher_max_workers_clamped_to_min_1(fake_pusher_factory):
         dispatcher_max_workers=0,
     )
     assert relay._dispatcher_max_workers == 1
+
+
+# --- v5.0.0a3: per-tool safety gate in worker loop ----------------------
+
+
+def test_relay_unsafe_tool_routes_to_inline_dispatch_under_pool(fake_pusher_factory):
+    """When the pool is enabled but the tool is unsafe, dispatch must
+    run inline (on the worker thread, not the pool)."""
+    import threading
+    import time
+
+    handler_threads = []
+
+    def handler(payload):
+        handler_threads.append(threading.get_ident())
+        time.sleep(0.02)
+        yield "ok"
+
+    relay = BridgeRelay(
+        base_url="http://example",
+        api_token="t",
+        team_id="team-1",
+        app_key="key",
+        relay_url="wss://example:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=handler,
+        worker_thread=True,
+        dispatcher_max_workers=4,
+        # third_party_plugin is NOT in SAFE_FOR_PARALLEL.
+    )
+    relay.start()
+
+    class _StubChannel3:
+        def __init__(self): self.events = []
+        def trigger(self, event, data): self.events.append((event, data))
+    relay._channel = _StubChannel3()
+
+    # Send 3 requests for an unknown tool — must serialize on worker thread.
+    for i in range(3):
+        relay._on_agent_request({
+            "request_id": f"req-{i}",
+            "method": "tools/call",
+            "params": {"name": "third_party_plugin", "arguments": {}},
+        })
+
+    deadline = time.time() + 2.0
+    while len(handler_threads) < 3 and time.time() < deadline:
+        time.sleep(0.01)
+
+    relay.stop()
+
+    assert len(handler_threads) == 3
+    # All three dispatched on the SAME thread (the worker), not the pool.
+    assert len(set(handler_threads)) == 1
+
+
+def test_relay_explicit_unsafe_tools_override_routes_to_inline(fake_pusher_factory):
+    """Operator deny list: even ask_project (default-safe) routes to
+    single-worker when listed in dispatcher_unsafe_tools."""
+    import threading
+    import time
+
+    handler_threads = []
+
+    def handler(payload):
+        handler_threads.append(threading.get_ident())
+        time.sleep(0.02)
+        yield "ok"
+
+    relay = BridgeRelay(
+        base_url="http://example",
+        api_token="t",
+        team_id="team-1",
+        app_key="key",
+        relay_url="wss://example:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=handler,
+        worker_thread=True,
+        dispatcher_max_workers=4,
+        dispatcher_unsafe_tools=["ask_project"],
+    )
+    relay.start()
+
+    class _StubChannel4:
+        def __init__(self): self.events = []
+        def trigger(self, event, data): self.events.append((event, data))
+    relay._channel = _StubChannel4()
+
+    for i in range(3):
+        relay._on_agent_request({
+            "request_id": f"req-{i}",
+            "method": "tools/call",
+            "params": {"name": "ask_project", "arguments": {"name": "x", "question": "y"}},
+        })
+
+    deadline = time.time() + 2.0
+    while len(handler_threads) < 3 and time.time() < deadline:
+        time.sleep(0.01)
+
+    relay.stop()
+
+    # All three serialised on the worker (deny-listed tool).
+    assert len(set(handler_threads)) == 1
+
+
+def test_relay_safe_tool_still_uses_pool_under_mixed_workload(fake_pusher_factory):
+    """When safe + unsafe tools both arrive, safe ones use the pool and
+    unsafe ones use the worker — verified by counting distinct threads."""
+    import threading
+    import time
+
+    threads_per_tool: dict[str, set[int]] = {"safe": set(), "unsafe": set()}
+    lock = threading.Lock()
+
+    def handler(payload):
+        name = (payload.get("params") or {}).get("name", "?")
+        kind = "safe" if name == "list_projects" else "unsafe"
+        with lock:
+            threads_per_tool[kind].add(threading.get_ident())
+        time.sleep(0.05)
+        yield "ok"
+
+    relay = BridgeRelay(
+        base_url="http://example",
+        api_token="t",
+        team_id="team-1",
+        app_key="key",
+        relay_url="wss://example:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=handler,
+        worker_thread=True,
+        dispatcher_max_workers=4,
+    )
+    relay.start()
+
+    class _StubChannel5:
+        def __init__(self): self.events = []
+        def trigger(self, event, data): self.events.append((event, data))
+    relay._channel = _StubChannel5()
+
+    # 4 safe (list_projects) → should fan out across pool.
+    for i in range(4):
+        relay._on_agent_request({
+            "request_id": f"safe-{i}",
+            "method": "tools/call",
+            "params": {"name": "list_projects", "arguments": {}},
+        })
+    # 4 unsafe (third_party) → all serialised on worker.
+    for i in range(4):
+        relay._on_agent_request({
+            "request_id": f"unsafe-{i}",
+            "method": "tools/call",
+            "params": {"name": "third_party_unknown", "arguments": {}},
+        })
+
+    deadline = time.time() + 5.0
+    while (
+        len(threads_per_tool["safe"]) + len(threads_per_tool["unsafe"]) < 2
+        and time.time() < deadline
+    ):
+        time.sleep(0.01)
+
+    # Wait for everything to drain so we don't race the assertions.
+    time.sleep(0.5)
+    relay.stop()
+
+    # Safe tools used the pool — multiple worker IDs likely.
+    # Unsafe tools all on one thread (the worker).
+    assert len(threads_per_tool["unsafe"]) == 1
+    # Pool path saw at least one thread (could be 1..4 depending on
+    # scheduler); the key invariant is "different from the worker".
+    assert threads_per_tool["safe"]
+    assert threads_per_tool["safe"] != threads_per_tool["unsafe"]
