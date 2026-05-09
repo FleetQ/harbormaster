@@ -25,12 +25,51 @@ def test_build_ssh_argv_includes_safety_options():
     assert argv[0] == "ssh"
     assert "ConnectTimeout=10" in argv
     assert "BatchMode=yes" in argv
-    assert argv[-3:] == ["bash", "-lc", "ls"]
+    # v2.0.1 fix: bash -lc + the remote command live in a SINGLE argv
+    # entry so OpenSSH doesn't whitespace-join them and feed the wrong
+    # tokens to the remote login shell.
+    assert argv[-1] == "bash -lc ls"
 
 
 def test_build_ssh_argv_respects_connect_timeout_override():
     argv = build_ssh_argv("friday", "ls", connect_timeout=30)
     assert "ConnectTimeout=30" in argv
+
+
+def test_build_ssh_argv_quotes_multi_token_remote_command():
+    """Regression for v2.0.1: a remote command with whitespace
+    must travel as ONE argv entry, with the command shlex-quoted so
+    the remote shell sees `bash -lc 'ls -1 /path'` and not
+    `bash -lc ls -1 /path` (which would run `ls` with no args)."""
+    argv = build_ssh_argv("friday", "ls -1 /Users/katsarov/htdocs")
+    # Whole bash -lc <cmd> stays in one argv entry
+    assert argv[-1] == "bash -lc 'ls -1 /Users/katsarov/htdocs'"
+    # And there are NO bare 'bash' or '-lc' tokens that ssh would
+    # send to the remote as separate words.
+    assert "bash" not in argv[:-1]
+    assert "-lc" not in argv[:-1]
+
+
+def test_build_ssh_argv_quotes_command_with_shell_metacharacters():
+    """A compound `cd path && claude -p ...` must round-trip without
+    losing the quoting on internal pieces."""
+    inner = "cd '/srv/app with spaces' && claude -p --max-turns 1 -- 'hello $(echo evil)'"
+    argv = build_ssh_argv("friday", inner)
+    # The whole inner is wrapped — remote bash will receive exactly
+    # the inner string after the outer quote stripping.
+    last = argv[-1]
+    assert last.startswith("bash -lc ")
+    # shlex.quote round-trips: shlex.split(quoted)[0] == original.
+    import shlex as _shlex
+    payload = last[len("bash -lc "):]
+    parsed = _shlex.split(payload)
+    assert parsed == [inner]
+
+
+def test_build_ssh_argv_passes_empty_command_safely():
+    argv = build_ssh_argv("friday", "")
+    # shlex.quote("") = "''" — bash -lc '' is a no-op, not a syntax error.
+    assert argv[-1] == "bash -lc ''"
 
 
 def test_quote_for_remote_handles_shell_metas():

@@ -45,13 +45,25 @@ def build_ssh_argv(
     """Build the local argv for `ssh ... bash -lc <remote_cmd>`.
 
     The caller is responsible for shlex.quote-ing values *inside* remote_cmd.
+
+    Implementation note: OpenSSH joins every positional arg after the host
+    with whitespace before sending one command line to the remote shell.
+    Passing `["bash", "-lc", remote_cmd]` as three separate argv entries
+    therefore arrives at the remote shell as `bash -lc <token1> <token2>
+    <token3> ...` — bash interprets the FIRST token after `-c` as the
+    command and the rest as positional `$0`, `$1`, … (so `ls -1 /some/path`
+    becomes `ls` with no args, falling back to listing CWD = $HOME under
+    a login shell). Wrapping the whole `bash -lc <cmd>` in a single argv
+    entry — with `remote_cmd` shlex-quoted so its embedded spaces and
+    special chars survive the remote shell's word-splitting — fixes
+    that. v2.0.1 regression fix.
     """
     return [
         "ssh",
         "-o", f"ConnectTimeout={connect_timeout}",
         "-o", "BatchMode=yes",
         host,
-        "bash", "-lc", remote_cmd,
+        f"bash -lc {shlex.quote(remote_cmd)}",
     ]
 
 
