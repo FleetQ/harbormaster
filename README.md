@@ -154,21 +154,27 @@ JSON mode (no `Accept: text/event-stream`, no `stream` flag) is unchanged — fu
 
 ## Status
 
-**v1.0.0** — GA shipped 2026-05-09. All four v1.2 phases complete:
-Q&A history with semantic recall (a17), auto project graph from
-manifest parsing (a18), federated KG via FleetQ KnowledgeGraph (a19),
-and cross-session memory recall via auto-grounded prompts (a20). 8
-MCP tools, 392 tests, mypy --strict + ruff clean across 40 source
-files. See [`docs/sprint-retro-harbormaster-v1.0.0.md`](docs/sprint-retro-harbormaster-v1.0.0.md)
-for the full a1→GA arc.
+**v2.1.0** — GA shipped 2026-05-09 (same evening as v1.0.0 + v2.0.0
++ v2.0.1). The dashboard now works as a local operator console:
+Mermaid project graph + FleetQ Bridge / plugin status panels (v2.1.0a1),
+per-project detail page (a2), recall search inline (a3), "Ask this
+project" SSE form (a4), delegate + fan-out forms (a5), trajectory
+history view (a6). 554 tests, mypy --strict + ruff clean across 46
+source files.
 
 | Phase | Status | Focus |
 |-------|--------|-------|
 | v1.0 | **Complete** (a8–a14) | Local + SSH + Live UI + PyPI alpha publish pipeline + SSE chunk streaming on both sides + FleetQ Bridge HTTP-tunnel mode |
-| v1.1 | **Complete** (a13–a16) | Platform Tool seeder ✅ a13 · A2A Agent Card per project ✅ a15 · live FleetQ smoke ✅ a11 · `update_endpoints` watch ✅ a10 · Memory writeback ✅ a16 · operator guide ✅ a16 |
-| v1.2 | **Complete** (a17–a20) | Q&A history with sqlite-vec + fastembed ✅ a17 · auto project graph from manifest parsing ✅ a18 · federated KG via FleetQ KnowledgeGraph ✅ a19 · cross-session memory recall via auto-grounding ✅ a20 |
+| v1.1 | **Complete** (a13–a16) | Platform Tool seeder · A2A Agent Card per project · live FleetQ smoke · `update_endpoints` watch · Memory writeback · operator guide |
+| v1.2 | **Complete** (a17–a20) | Q&A history with sqlite-vec + fastembed · auto project graph from manifest parsing · federated KG via FleetQ KnowledgeGraph · cross-session memory recall via auto-grounding |
+| v2.0 | **Complete** (a1–a7) | Lockfile-aware deps + transitive graph · embedding upgrade-in-place · multi-backend (Codex) · plugin API · LLM triple extraction · cross-host recall aggregation · per-token streaming through Bridge |
+| v2.0.1 | **Complete** | SSH argv-quoting + pysher kwarg + plugin warn-missing + plugins list CLI |
+| v2.1 | **Complete** (a1–a6) | Mermaid graph + bridge/plugin status panels · project detail page · recall search inline · "Ask this project" SSE form · delegate + fan-out forms · trajectory history view |
 
-The original 6-week roadmap is largely complete on the v1.0 axis. v1.1 has shipped its biggest deliverables (Bridge integration, streaming end-to-end, Platform Tool seed, A2A cards). v1.2 (compounding) is the remaining phase before dropping the alpha tag and tagging `v1.0.0` GA.
+See [`docs/sprint-retro-harbormaster-v1.0.0.md`](docs/sprint-retro-harbormaster-v1.0.0.md)
+for the v1 arc, [`docs/sprint-retro-harbormaster-v2.0.0.md`](docs/sprint-retro-harbormaster-v2.0.0.md)
+for v2.0, and [`docs/sprint-retro-harbormaster-v2.1.0.md`](docs/sprint-retro-harbormaster-v2.1.0.md)
+for v2.1.
 
 See [`docs/design-harbormaster.md`](docs/design-harbormaster.md) for the full design.
 
