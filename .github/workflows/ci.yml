@@ -379,15 +379,21 @@ jobs:
 
           echo "$body" | head -20
 
-          echo "$body" | grep -qi '^content-type: text/event-stream' || {
+          # Strip CR from SSE wire — sse-starlette emits \r\n line endings
+          # per the SSE spec, but GNU grep's $ anchor matches before \n only,
+          # so the trailing \r breaks ^event: result$ on Ubuntu (it passed
+          # by coincidence on BSD grep / macOS). Normalize once, then assert.
+          body_norm=$(echo "$body" | tr -d '\r')
+
+          echo "$body_norm" | grep -qi '^content-type: text/event-stream' || {
             echo "FAIL: Content-Type was not text/event-stream"
             exit 1
           }
-          echo "$body" | grep -q '^event: result$' || {
+          echo "$body_norm" | grep -q '^event: result$' || {
             echo "FAIL: response did not contain 'event: result'"
             exit 1
           }
-          echo "$body" | grep -q '"name":"ask_project"' || {
+          echo "$body_norm" | grep -qE '"name":[[:space:]]*"ask_project"' || {
             echo "FAIL: response did not list ask_project tool"
             exit 1
           }
