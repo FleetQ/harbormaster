@@ -47,5 +47,10 @@ def create_app(
     )
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    # v7.0.0a6: register the language_badge filter so dashboard.html
+    # can render `{{ project.language | language_badge }}`.
+    from harbormaster.ui.manifest_cache import language_badge_class
+
+    templates.env.filters["language_badge"] = language_badge_class
     register_routes(app, templates, config, mcp=mcp, auth_token=auth_token)
     return app

@@ -24,6 +24,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator, Callable
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -533,9 +534,33 @@ def register_routes(
             "plugins": rows,
         }
 
+    # v7.0.0a6: TTL cache for /api/projects.
+    # Per-process cache; on a 20+ project install this avoids the
+    # filesystem walk + git log + manifest detection on every poll.
+    # Signature uses the previously-discovered project dirs so a
+    # rename/deletion still invalidates within the TTL window.
+    from harbormaster.ui.manifest_cache import (
+        ProjectsCache,
+        project_dirs_from_infos,
+    )
+
+    projects_cache = ProjectsCache()
+    # Track the last set of dirs we discovered so the next request can
+    # build an mtime signature without re-walking. Empty on first call
+    # (so the first hit is always a miss → walk → cache).
+    _last_dirs: list[Path] = []
+
     @app.get("/api/projects")
     async def list_projects() -> list[dict[str, object]]:
-        return [p.as_dict() for p in discover_projects(config.projects)]
+        nonlocal _last_dirs
+
+        def _build() -> list[dict[str, object]]:
+            nonlocal _last_dirs
+            infos = discover_projects(config.projects)
+            _last_dirs = project_dirs_from_infos(infos)
+            return [p.as_dict() for p in infos]
+
+        return projects_cache.get(_build, _last_dirs)
 
     # One ManifestCache per UI process — first hit warm-loads, subsequent
     # /api/graph polls hit the cache and stat the manifest file only.

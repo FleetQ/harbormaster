@@ -425,6 +425,14 @@
         <p class="text-sm text-gray-300 mb-3 line-clamp-2"
            x-text="p.brief || '(no description)'"></p>
         <footer class="flex flex-wrap gap-2 text-xs items-center">
+          <!-- v7.0.0a6: language badge. Hidden when p.language is
+               missing or 'unknown' so cards without detection stay
+               quiet rather than displaying a placeholder. -->
+          <span x-show="p.language && p.language !== 'unknown'"
+                class="px-2 py-0.5 rounded border"
+                :class="languageBadgeClass(p.language)"
+                x-text="p.language"
+                :title="`detected language: ${p.language}`"></span>
           <span x-show="p.has_serena"
                 class="bg-purple-900/50 text-purple-300 px-2 py-0.5 rounded">serena</span>
           <span x-show="p.has_claude_md"
@@ -670,10 +678,31 @@
 
   // v5.0.0a6: project grid + text filter + URL state.
   // v6.0.0a3: sort dropdown + group toggle.
+  // v7.0.0a6: language → Tailwind class mapping for the dashboard
+  // card badge. Mirrors LANGUAGE_BADGE_COLORS in
+  // src/harbormaster/ui/manifest_cache.py (kept in sync by the
+  // unit test test_language_badge_classes_match_python_table).
+  const LANGUAGE_BADGE_CLASSES = {
+    python: 'bg-blue-900/40 text-blue-300 border-blue-800',
+    typescript: 'bg-yellow-900/40 text-yellow-200 border-yellow-800',
+    javascript: 'bg-yellow-900/40 text-yellow-200 border-yellow-800',
+    php: 'bg-purple-900/40 text-purple-200 border-purple-800',
+    rust: 'bg-orange-900/40 text-orange-200 border-orange-800',
+    go: 'bg-cyan-900/40 text-cyan-200 border-cyan-800',
+    ruby: 'bg-rose-900/40 text-rose-200 border-rose-800',
+    unknown: 'bg-gray-800 text-gray-500 border-gray-700',
+  };
+  function languageBadgeClass(lang) {
+    const key = (lang || 'unknown').toLowerCase();
+    return LANGUAGE_BADGE_CLASSES[key] || LANGUAGE_BADGE_CLASSES.unknown;
+  }
+
   function projectGrid() {
     return {
       projects: [], loading: true, error: null,
       filter: '', sort: 'last_commit', group: 'flat',
+      // expose the helper to the template
+      languageBadgeClass,
 
       async init() {
         // Pull state from URL on mount so a shared link pre-fills.
