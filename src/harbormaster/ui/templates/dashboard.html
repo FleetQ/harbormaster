@@ -160,13 +160,33 @@
     to also consider lockfile-resolved deps.
   </div>
   <!-- v3.0.0a9: mobile-friendly graph viewport.
-       overflow-x-auto + max-h on small screens lets touch users scroll;
-       the pinch-zoom-on-svg pattern works once mermaid renders the SVG
-       in place of the <pre>. touch-pan-x lets the browser handle
-       horizontal panning natively. -->
-  <div class="overflow-x-auto overflow-y-auto max-h-[60vh] touch-pan-x touch-pan-y border border-gray-900 rounded bg-gray-950/40 p-2"
-       x-show="!graphLoading">
-    <pre class="mermaid text-xs leading-tight" x-ref="diagram" x-text="mermaidMarkup"></pre>
+       v4.0.0a3: pinch-zoom + drag-pan via graphZoom() Alpine scope.
+       The transform-target div carries the scale/translate; touch
+       events on the outer container drive zoom; mouse wheel zooms
+       on desktop; reset button returns to scale=1, translate=0,0. -->
+  <div x-data="graphZoom()"
+       x-show="!graphLoading"
+       class="relative">
+    <div class="absolute top-2 right-2 z-10 flex gap-1">
+      <button type="button" @click="reset()"
+              class="text-xs bg-gray-900/80 hover:bg-gray-800 border border-gray-700 px-2 py-0.5 rounded"
+              :title="`reset zoom (current: ${scale.toFixed(2)}×)`">
+        reset
+      </button>
+    </div>
+    <div class="overflow-hidden max-h-[60vh] border border-gray-900 rounded bg-gray-950/40 p-2 select-none"
+         @wheel.prevent="onWheel($event)"
+         @touchstart="onTouchStart($event)"
+         @touchmove.prevent="onTouchMove($event)"
+         @touchend="onTouchEnd($event)"
+         @mousedown="onMouseDown($event)"
+         @mousemove="onMouseMove($event)"
+         @mouseup="onMouseUp($event)"
+         @mouseleave="onMouseUp($event)">
+      <div :style="`transform: translate(${tx}px, ${ty}px) scale(${scale}); transform-origin: 0 0; transition: ${transitioning ? 'transform 0.2s ease' : 'none'}; cursor: ${dragging ? 'grabbing' : 'grab'};`">
+        <pre class="mermaid text-xs leading-tight" x-ref="diagram" x-text="mermaidMarkup"></pre>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -416,6 +436,108 @@
         } finally {
           this.loading = false;
         }
+      },
+    };
+  }
+
+  // v4.0.0a3: pan + zoom for the project graph.
+  // Pure JS, no library — operates on a transform: translate() scale()
+  // applied to the wrapper around the Mermaid <pre>/<svg>.
+  function graphZoom() {
+    return {
+      scale: 1, tx: 0, ty: 0,
+      dragging: false, _dragStartX: 0, _dragStartY: 0,
+      _txStart: 0, _tyStart: 0,
+      transitioning: false,
+      // Pinch state
+      _pinching: false, _pinchInitialDist: 0, _pinchInitialScale: 1,
+
+      reset() {
+        this.transitioning = true;
+        this.scale = 1; this.tx = 0; this.ty = 0;
+        // Disable transition after the animation so subsequent
+        // pan/zoom feel direct.
+        setTimeout(() => { this.transitioning = false; }, 220);
+      },
+
+      _clampScale(s) {
+        return Math.max(0.25, Math.min(4, s));
+      },
+
+      onWheel(e) {
+        // Wheel zoom (desktop). e.deltaY > 0 → zoom out.
+        const delta = -e.deltaY * 0.001;
+        const next = this._clampScale(this.scale * (1 + delta));
+        // Anchor zoom on cursor position so it feels natural.
+        const rect = e.currentTarget.getBoundingClientRect();
+        const cx = e.clientX - rect.left;
+        const cy = e.clientY - rect.top;
+        const dx = (cx - this.tx) * (next / this.scale - 1);
+        const dy = (cy - this.ty) * (next / this.scale - 1);
+        this.tx -= dx; this.ty -= dy;
+        this.scale = next;
+      },
+
+      onMouseDown(e) {
+        if (e.button !== 0) return;
+        this.dragging = true;
+        this._dragStartX = e.clientX; this._dragStartY = e.clientY;
+        this._txStart = this.tx; this._tyStart = this.ty;
+      },
+      onMouseMove(e) {
+        if (!this.dragging) return;
+        this.tx = this._txStart + (e.clientX - this._dragStartX);
+        this.ty = this._tyStart + (e.clientY - this._dragStartY);
+      },
+      onMouseUp() {
+        this.dragging = false;
+      },
+
+      onTouchStart(e) {
+        if (e.touches.length === 2) {
+          // Pinch start.
+          this._pinching = true;
+          this._pinchInitialDist = this._touchDist(e);
+          this._pinchInitialScale = this.scale;
+        } else if (e.touches.length === 1) {
+          // Single-finger pan start.
+          this.dragging = true;
+          this._dragStartX = e.touches[0].clientX;
+          this._dragStartY = e.touches[0].clientY;
+          this._txStart = this.tx; this._tyStart = this.ty;
+        }
+      },
+      onTouchMove(e) {
+        if (this._pinching && e.touches.length === 2) {
+          const dist = this._touchDist(e);
+          if (this._pinchInitialDist > 0) {
+            const next = this._clampScale(
+              this._pinchInitialScale * (dist / this._pinchInitialDist),
+            );
+            this.scale = next;
+          }
+        } else if (this.dragging && e.touches.length === 1) {
+          this.tx = this._txStart + (e.touches[0].clientX - this._dragStartX);
+          this.ty = this._tyStart + (e.touches[0].clientY - this._dragStartY);
+        }
+      },
+      onTouchEnd(e) {
+        if (e.touches.length === 0) {
+          this._pinching = false;
+          this.dragging = false;
+        } else if (e.touches.length === 1 && this._pinching) {
+          // Pinch ended but a finger is still down — switch to pan.
+          this._pinching = false;
+          this.dragging = true;
+          this._dragStartX = e.touches[0].clientX;
+          this._dragStartY = e.touches[0].clientY;
+          this._txStart = this.tx; this._tyStart = this.ty;
+        }
+      },
+      _touchDist(e) {
+        const a = e.touches[0], b = e.touches[1];
+        const dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
+        return Math.hypot(dx, dy);
       },
     };
   }
