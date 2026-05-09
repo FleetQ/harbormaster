@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
+import threading
 from collections.abc import Callable, Iterator
 from typing import Any
 from urllib.parse import urlparse
@@ -100,6 +102,8 @@ class BridgeRelay:
         auth_timeout: float = 10.0,
         chunk_handler: ChunkHandler | None = None,
         state_writer: Any = None,
+        worker_thread: bool = True,
+        worker_queue_max: int = 64,
     ) -> None:
         if not team_id:
             raise ValueError("team_id is required (from RegisterResponse)")
@@ -121,6 +125,18 @@ class BridgeRelay:
         # state module when [fleetq] is not installed (it already is,
         # but the typing-as-Any keeps the layering robust).
         self.state_writer = state_writer
+
+        # v3.0.0a5: when True, agent.request dispatch runs on a dedicated
+        # worker thread fed by a bounded queue, so pysher's event-receive
+        # thread never blocks on a slow chunk_handler. Set False to keep
+        # the v2.0.0a7 inline-dispatch behaviour (useful for synchronous
+        # tests against a stub channel).
+        self.worker_thread_enabled = worker_thread
+        self._worker_queue_max = worker_queue_max
+        self._worker_queue: queue.Queue[
+            tuple[str, dict[str, Any]] | None
+        ] | None = None
+        self._worker_thread_handle: threading.Thread | None = None
 
         self._pusher_factory: PusherFactory = pusher_factory or _default_pusher_factory
         self._pusher: Any = None
@@ -174,8 +190,12 @@ class BridgeRelay:
 
         Non-blocking: returns once pysher's connect call has been issued.
         The connection-established → auth → subscribe flow happens in
-        pysher's internal thread.
+        pysher's internal thread. When ``worker_thread_enabled`` is set
+        (default), a dedicated dispatcher thread is spun up here too so
+        agent.request dispatch never runs inline on pysher's thread.
         """
+        if self.worker_thread_enabled and self.chunk_handler is not None:
+            self._start_worker_thread()
         host, port, secure = self.parse_relay_url()
         logger.info(
             "BridgeRelay: connecting to Reverb at %s://%s:%d (channel=%s)",
@@ -192,6 +212,7 @@ class BridgeRelay:
     def stop(self) -> None:
         """Disconnect from Reverb. Idempotent."""
         if self._pusher is None:
+            self._stop_worker_thread()
             return
         try:
             self._pusher.disconnect()
@@ -203,6 +224,7 @@ class BridgeRelay:
             self._socket_id = None
             if self.state_writer is not None:
                 self.state_writer.update(subscribed=False)
+            self._stop_worker_thread()
 
     def _on_connection_established(self, data: str | dict[str, Any]) -> None:
         """Pusher fires this with the socket_id once the WS handshake completes."""
@@ -279,6 +301,32 @@ class BridgeRelay:
                 "cannot publish response — skipping dispatch."
             )
             return
+        # v3.0.0a5: when a worker thread is running, hand off via the
+        # bounded queue so pysher's thread isn't blocked by handler I/O.
+        # If the queue is full we still log + drop the request rather
+        # than block pysher; FleetQ-side popChunk will time out cleanly.
+        if self._worker_queue is not None:
+            try:
+                self._worker_queue.put_nowait((request_id, payload))
+            except queue.Full:
+                logger.warning(
+                    "BridgeRelay: worker queue full (max=%d) — dropping "
+                    "request_id=%s; dispatcher cannot keep up.",
+                    self._worker_queue_max,
+                    request_id,
+                )
+                # Best-effort error envelope back to FleetQ so the caller
+                # doesn't hang waiting for chunks that will never come.
+                import contextlib
+
+                with contextlib.suppress(Exception):
+                    self.publish_error(
+                        request_id=request_id,
+                        error="harbormaster relay worker queue full",
+                    )
+            return
+        # No worker thread (worker_thread=False or chunk_handler set late):
+        # fall back to inline dispatch on the pysher thread.
         self._dispatch_chunk_handler(request_id=request_id, payload=payload)
 
     def _dispatch_chunk_handler(
@@ -318,6 +366,81 @@ class BridgeRelay:
             except Exception:  # noqa: BLE001 - cleanup must not raise
                 logger.exception(
                     "BridgeRelay: publish_error also failed for request_id=%s",
+                    request_id,
+                )
+
+    # --- v3.0.0a5 worker thread -----------------------------------------
+
+    def _start_worker_thread(self) -> None:
+        """Spin up a single dispatcher thread fed by the inbound queue.
+
+        Single-worker on purpose: chunk_handler dispatch invokes MCP
+        tools synchronously, and tools may share state (sqlite stores,
+        embedding backends) that's not provably thread-safe. Serial
+        dispatch from a queue gives us ordered processing without the
+        thread-safety surface a multi-worker pool would require.
+        """
+        if self._worker_thread_handle and self._worker_thread_handle.is_alive():
+            return
+        self._worker_queue = queue.Queue(maxsize=self._worker_queue_max)
+        thread = threading.Thread(
+            target=self._worker_loop,
+            daemon=True,
+            name="bridge-relay-dispatcher",
+        )
+        thread.start()
+        self._worker_thread_handle = thread
+        logger.info(
+            "BridgeRelay: worker thread started (queue_max=%d)",
+            self._worker_queue_max,
+        )
+
+    def _stop_worker_thread(self) -> None:
+        """Send the sentinel, join briefly, drop the queue handle."""
+        if self._worker_queue is None:
+            return
+        # Sentinel = None — the loop exits cleanly.
+        try:
+            self._worker_queue.put(None, timeout=1.0)
+        except queue.Full:
+            logger.warning(
+                "BridgeRelay: worker queue full at shutdown — worker may not exit cleanly"
+            )
+        if self._worker_thread_handle is not None:
+            self._worker_thread_handle.join(timeout=2.0)
+            if self._worker_thread_handle.is_alive():
+                logger.warning(
+                    "BridgeRelay: worker thread did not exit within 2s; leaking daemon"
+                )
+        self._worker_queue = None
+        self._worker_thread_handle = None
+
+    def _worker_loop(self) -> None:
+        """Drain the inbound queue, calling _dispatch_chunk_handler per item.
+
+        Exceptions from the handler are caught one layer deeper inside
+        _dispatch_chunk_handler so they never escape this loop. A None
+        sentinel terminates the loop.
+        """
+        assert self._worker_queue is not None  # narrowed by caller
+        q = self._worker_queue
+        while True:
+            try:
+                item = q.get()
+            except Exception:  # noqa: BLE001 - never crash the worker
+                logger.exception("BridgeRelay: worker queue.get raised")
+                continue
+            if item is None:
+                logger.info("BridgeRelay: worker thread exiting (sentinel received)")
+                return
+            request_id, payload = item
+            try:
+                self._dispatch_chunk_handler(
+                    request_id=request_id, payload=payload
+                )
+            except Exception:  # noqa: BLE001 - handler protected one layer down
+                logger.exception(
+                    "BridgeRelay: worker dispatch raised for request_id=%s",
                     request_id,
                 )
 
