@@ -152,7 +152,7 @@ JSON mode (no `Accept: text/event-stream`, no `stream` flag) is unchanged — fu
 
 ## Status
 
-**v1.0.0a14** — Streaming widened to `delegate_task` + dispatch refactor shipped 2026-05-09. The SSE chunk-streaming path is now table-driven on `_STREAMING_TOOLS` — adding chunk events for the next tool means writing one prompt builder. `delegate_task` over SSE emits real per-token chunks; `allow_writes=true` still fails closed (now via the prompt builder before any subprocess starts). On the FleetQ side, the Harbormaster popular-tool seeder entry now has its own pinning test (4 cases, 14 assertions) so future seeder rewrites can't silently drop fields. The 6-week roadmap to general availability:
+**v1.0.0a15** — A2A Agent Card per project + v1.0 surface complete shipped 2026-05-09. Each `~/htdocs/<project>` exposes itself as an A2A v0.3 agent on `/agent-card/<project-name>` with three skills (ask, delegate, status), capabilities, and a vendor-namespaced `metadata.harbormaster` block. Plus three docs deliverables: a fan_out_ask streaming design doc with a tentative recommendation, an architecture-doc operator guide for nginx `proxy_buffering off`, and a roadmap rebaseline that replaces the stale "weeks 1-2 / 3-4 / 5-6" projection with current state. **v1.0's announced surface is now feature-complete** — what's left for `v1.0.0` GA is the v1.2 compounding phase (Q&A history + federated KG + auto project graph) and an operator guide.
 
 | Phase | Status | Focus |
 |-------|--------|-------|
