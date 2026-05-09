@@ -406,10 +406,32 @@ jobs:
             kill "$UI_PID" 2>/dev/null || true
           fi
 
+  smoke-ui-browser:
+    name: Headless browser tests (Playwright)
+    runs-on: ubuntu-24.04
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (dev + ui-test)
+        run: uv sync --extra dev --extra ui-test
+
+      - name: Install Playwright Chromium binary
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run browser-marked tests
+        run: uv run pytest -m browser tests/ui/ -v
+
   build:
     name: Build sdist + wheel
     runs-on: ubuntu-24.04
-    needs: [test, smoke-http, smoke-ui, smoke-ui-auth, smoke-ui-with-token, smoke-mcp-streaming]
+    needs: [test, smoke-http, smoke-ui, smoke-ui-auth, smoke-ui-with-token, smoke-mcp-streaming, smoke-ui-browser]
+
     steps:
       - uses: actions/checkout@v4
 
