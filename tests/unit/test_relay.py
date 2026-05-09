@@ -214,6 +214,35 @@ def test_fetch_channel_auth_rejects_missing_auth_field(httpserver: HTTPServer, r
 # ----- start / stop lifecycle ----------------------------------------------
 
 
+def test_default_pusher_factory_uses_custom_host_kwarg(monkeypatch):
+    """Regression for v2.0.1: pysher.Pusher's signature exposes the
+    WebSocket host as `custom_host=`, NOT `host=`. Passing `host=`
+    falls into pysher's `**thread_kwargs`, eventually reaching
+    `Thread.__init__()` which raises TypeError. The default factory
+    must therefore translate harbormaster's internal `host` parameter
+    to pysher's `custom_host`."""
+    from harbormaster.fleetq.relay import _default_pusher_factory
+
+    captured: list[dict[str, object]] = []
+
+    class FakePusher:
+        def __init__(self, **kwargs):
+            captured.append(kwargs)
+
+    fake_pysher = type("M", (), {"Pusher": FakePusher})
+    monkeypatch.setitem(__import__("sys").modules, "pysher", fake_pysher)
+
+    _default_pusher_factory(
+        key="k", host="app.fleetq.net", port=443, secure=True
+    )
+
+    assert captured == [
+        {"key": "k", "custom_host": "app.fleetq.net", "port": 443, "secure": True}
+    ]
+    # And critically — no bare 'host' key (would crash pysher).
+    assert "host" not in captured[0]
+
+
 def test_start_constructs_pusher_with_parsed_url_and_calls_connect(relay, fake_pusher_factory):
     relay.start()
     captured = fake_pusher_factory.captured

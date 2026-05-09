@@ -105,8 +105,11 @@ def load_plugins(
         return []
 
     loaded: list[str] = []
+    seen_dists: set[str] = set()
     for ep in discover_entry_points():
         dist_name = _entry_point_distribution_name(ep)
+        if dist_name is not None:
+            seen_dists.add(dist_name)
         if dist_name is None or dist_name not in allowlist:
             logger.info(
                 "plugin %r (entry point %r) not in [plugins].allow; skipping",
@@ -141,4 +144,19 @@ def load_plugins(
             continue
         loaded.append(dist_name)
         logger.info("loaded plugin %r (entry point %r)", dist_name, ep.name)
+
+    # v2.0.1: surface allowlist entries that don't correspond to any
+    # installed entry point. Helps operators notice when a plugin
+    # package is missing (typo in [plugins].allow, never `pip install`-ed,
+    # uninstalled by accident) instead of silently producing no tools.
+    missing = sorted(allowlist - seen_dists)
+    for dist_name in missing:
+        logger.warning(
+            "plugin %r is in [plugins].allow but no entry point with that "
+            "distribution was discovered — install the package "
+            "(`pip install %s`) or remove it from the allowlist.",
+            dist_name,
+            dist_name,
+        )
+
     return loaded
