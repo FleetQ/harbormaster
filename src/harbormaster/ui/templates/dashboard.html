@@ -978,6 +978,20 @@
       includeDevDeps: false, transitive: false,
       graph: {}, mermaidMarkup: '', graphLoading: true, graphError: null,
 
+      // v6.0.1: poll for window.__hmMermaid (loaded via async ESM in
+      // base.html). Resolves true when ready, false on timeout.
+      _waitForMermaid(maxMs) {
+        return new Promise((resolve) => {
+          const start = Date.now();
+          const check = () => {
+            if (window.__hmMermaid) return resolve(true);
+            if (Date.now() - start > maxMs) return resolve(false);
+            requestAnimationFrame(check);
+          };
+          check();
+        });
+      },
+
       async loadGraph() {
         this.graphLoading = true; this.graphError = null;
         try {
@@ -989,18 +1003,28 @@
           if (!r.ok) throw new Error('HTTP ' + r.status);
           this.graph = await r.json();
           this.mermaidMarkup = this.graph.mermaid || 'graph LR\n  empty[No projects]';
-          // Wait for the next frame so the new markup is in the DOM
-          // before mermaid runs over it.
-          requestAnimationFrame(async () => {
-            const node = this.$refs.diagram;
-            if (node && window.__hmMermaid) {
-              // Force re-process: clear `data-processed` if mermaid set it.
-              node.removeAttribute('data-processed');
-              try {
-                await window.__hmMermaid.run({ nodes: [node] });
-              } catch (e) { this.graphError = 'mermaid: ' + e.message; }
-            }
-          });
+          // v6.0.1 fix: two regressions, fixed together.
+          //   1) v4.0.0a3 wrapped the <pre> inside graphZoom()'s nested
+          //      x-data scope, breaking the parent scope's ref lookup
+          //      (Alpine refs are per-component). Replaced with a
+          //      querySelector that bypasses scope nesting.
+          //   2) The Mermaid ESM bundle is loaded async via <script
+          //      type="module"> in base.html. When loadGraph fires on
+          //      x-init, the global window.__hmMermaid may not exist
+          //      yet; the previous rAF callback would silently no-op
+          //      and leave the raw markup visible. Now we poll up to
+          //      3s for mermaid to be ready before running.
+          await this._waitForMermaid(3000);
+          const node = document.querySelector('pre.mermaid');
+          if (node && window.__hmMermaid) {
+            // Force re-process: clear `data-processed` if mermaid set it.
+            node.removeAttribute('data-processed');
+            try {
+              await window.__hmMermaid.run({ nodes: [node] });
+            } catch (e) { this.graphError = 'mermaid: ' + e.message; }
+          } else if (!window.__hmMermaid) {
+            this.graphError = 'mermaid bundle did not load within 3s';
+          }
         } catch (e) {
           this.graphError = e.message;
         } finally {
