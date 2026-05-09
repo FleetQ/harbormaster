@@ -5,6 +5,7 @@ import json
 import shlex
 import subprocess
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 from harbormaster.backends.base import BackendError, BackendResult
@@ -91,6 +92,111 @@ class ClaudeBackend:
         output = self._parse_stdout(proc.stdout)
         duration_ms = int((time.monotonic() - start) * 1000)
         return BackendResult(output=output, duration_ms=duration_ms)
+
+    def ask_local_stream(
+        self, *, cwd: Path, prompt: str, max_turns: int,
+    ) -> Iterator[str]:
+        """Stream-json variant of ask_local: yields assistant text chunks
+        as `claude -p` produces them, instead of buffering the entire
+        response.
+
+        Uses `--output-format stream-json` which emits one JSON object
+        per line on stdout. Each object has a `type` field; we forward
+        the text contents of `assistant` messages and ignore everything
+        else (tool calls, system messages, the final `result` summary).
+
+        Failure modes match ask_local:
+          - timeout → BackendError(code='timeout') after killing the subprocess
+          - non-zero exit → BackendError(code='exit_nonzero')
+          - malformed line → BackendError(code='parse_failure')
+
+        The iterator is exhausted when stdout closes; callers MUST drain
+        it (or use a context that does) so the subprocess is reaped.
+        """
+        cmd = [
+            self.cfg.binary, "-p",
+            "--permission-mode", "bypassPermissions",
+            "--max-turns", str(max_turns),
+            "--output-format", "stream-json",
+            "--verbose",  # stream-json requires --verbose in current claude-code
+            prompt,
+        ]
+        proc = subprocess.Popen(
+            cmd, cwd=str(cwd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,  # line-buffered
+        )
+        deadline = time.monotonic() + self.cfg.timeout_local
+        assert proc.stdout is not None  # noqa: S101 - PIPE was requested
+
+        try:
+            for line in proc.stdout:
+                if time.monotonic() > deadline:
+                    proc.kill()
+                    proc.wait(timeout=2)
+                    raise BackendError(
+                        f"timeout: claude -p exceeded {self.cfg.timeout_local}s",
+                        code="timeout",
+                    )
+                line = line.strip()
+                if not line:
+                    continue
+                yield from self._extract_assistant_text(line)
+        finally:
+            # Always drain stderr + reap the subprocess so we don't leak
+            # zombies even when the caller stops iterating early.
+            stderr_tail = ""
+            if proc.stderr is not None:
+                stderr_tail = (proc.stderr.read() or "")[-500:]
+                proc.stderr.close()
+            proc.stdout.close()
+            try:
+                rc = proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                rc = proc.wait()
+            if rc != 0:
+                raise BackendError(
+                    f"claude -p exit {rc}: {stderr_tail or '(no stderr)'}",
+                    code="exit_nonzero",
+                )
+
+    @staticmethod
+    def _extract_assistant_text(line: str) -> Iterator[str]:
+        """Parse one stream-json line and yield text deltas if it is an
+        assistant message. Anything else (system, tool_use, result) is
+        silently skipped — those are not user-facing tokens.
+
+        Tolerates malformed lines (logs warnings via BackendError only
+        when the upstream contract is clearly broken).
+        """
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError as e:
+            raise BackendError(
+                f"claude -p stream-json line is not JSON: {line[:200]}",
+                code="parse_failure",
+            ) from e
+        if not isinstance(msg, dict):
+            return
+        if msg.get("type") != "assistant":
+            return
+        message = msg.get("message")
+        if not isinstance(message, dict):
+            return
+        content = message.get("content")
+        if not isinstance(content, list):
+            return
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") != "text":
+                continue
+            text = block.get("text")
+            if isinstance(text, str) and text:
+                yield text
 
     # ----- private helpers --------------------------------------------------
 
