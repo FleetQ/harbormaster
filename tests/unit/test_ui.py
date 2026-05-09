@@ -362,6 +362,124 @@ def test_api_recall_host_all_passes_through(populated_config, tmp_path):
     assert "hosts_searched" in body
 
 
+# ----- v2.1.0a6 — Trajectory history --------------------------------------
+
+
+def test_api_trajectories_disabled_when_history_off(populated_config):
+    client = TestClient(create_app(populated_config))
+    body = client.get("/api/trajectories?project=alpha").json()
+    assert body["enabled"] is False
+    assert body["trajectories"] == []
+    assert "disabled" in body["message"]
+
+
+def test_api_trajectories_returns_empty_for_new_store(populated_config, tmp_path):
+    populated_config.history.enabled = True
+    populated_config.history.embedding_backend = "fts5"
+    populated_config.history.db_dir = str(tmp_path / "hist")
+    client = TestClient(create_app(populated_config))
+    body = client.get("/api/trajectories?project=alpha").json()
+    assert body["enabled"] is True
+    assert body["trajectories"] == []
+
+
+def test_api_trajectories_returns_recent_records(populated_config, tmp_path):
+    populated_config.history.enabled = True
+    populated_config.history.embedding_backend = "fts5"
+    populated_config.history.db_dir = str(tmp_path / "hist")
+
+    from harbormaster.history import (
+        FTS5Backend,
+        QARecord,
+    )
+    from harbormaster.history import (
+        QAStore as _QAStore,
+    )
+
+    store = _QAStore.open(
+        db_dir=populated_config.history.db_dir,
+        host=None,
+        embedding_backend=FTS5Backend(),
+    )
+    try:
+        for i in range(3):
+            store.record(
+                QARecord(
+                    question=f"question-{i}",
+                    answer=f"answer-{i}",
+                    project="alpha",
+                    host="local",
+                    tool="ask_project",
+                )
+            )
+        # Different project — must be filtered out
+        store.record(
+            QARecord(
+                question="other-question",
+                answer="other-answer",
+                project="beta",
+                host="local",
+                tool="ask_project",
+            )
+        )
+    finally:
+        store.close()
+
+    client = TestClient(create_app(populated_config))
+    body = client.get("/api/trajectories?project=alpha").json()
+    assert body["enabled"] is True
+    assert len(body["trajectories"]) == 3
+    # Newest first
+    assert body["trajectories"][0]["question"] == "question-2"
+    # All belong to alpha
+    assert all(t["project"] == "alpha" for t in body["trajectories"])
+
+
+def test_api_trajectories_respects_limit(populated_config, tmp_path):
+    populated_config.history.enabled = True
+    populated_config.history.embedding_backend = "fts5"
+    populated_config.history.db_dir = str(tmp_path / "hist")
+
+    from harbormaster.history import (
+        FTS5Backend,
+        QARecord,
+    )
+    from harbormaster.history import (
+        QAStore as _QAStore,
+    )
+
+    store = _QAStore.open(
+        db_dir=populated_config.history.db_dir,
+        host=None,
+        embedding_backend=FTS5Backend(),
+    )
+    try:
+        for i in range(5):
+            store.record(
+                QARecord(
+                    question=f"q-{i}",
+                    answer=f"a-{i}",
+                    project="alpha",
+                    host="local",
+                    tool="ask_project",
+                )
+            )
+    finally:
+        store.close()
+
+    client = TestClient(create_app(populated_config))
+    body = client.get("/api/trajectories?project=alpha&limit=2").json()
+    assert len(body["trajectories"]) == 2
+
+
+def test_project_detail_includes_trajectory_section(populated_config):
+    client = TestClient(create_app(populated_config))
+    body = client.get("/projects/alpha").text
+    assert "Recent Q&amp;A" in body
+    assert "/api/trajectories" in body
+    assert "trajectoryList" in body
+
+
 # ----- v2.1.0a5 — delegate_task form + fan-out page -----------------------
 
 

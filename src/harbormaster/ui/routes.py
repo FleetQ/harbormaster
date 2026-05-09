@@ -279,6 +279,66 @@ def register_routes(
             "matches": [m.to_dict() for m in matches],
         }
 
+    @app.get("/api/trajectories")
+    async def api_trajectories(
+        project: str | None = None,
+        host: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, object]:
+        """Recent Q&A trajectories from the per-host store (v2.1.0a6).
+
+        Powers the project-detail "Recent Q&A" section. Returns rows
+        ordered by `created_at` desc, optionally filtered by project.
+        Soft-fails to `{enabled: false, ...}` when [history] is off
+        or the [history] extra isn't installed — same shape as
+        /api/recall.
+        """
+        if limit <= 0 or limit > 200:
+            limit = 20
+        if not config.history.enabled:
+            return {
+                "enabled": False,
+                "trajectories": [],
+                "host": host or "local",
+                "message": "[history] is disabled in config",
+            }
+        try:
+            from harbormaster.history import (
+                QAStore,
+                get_embedding_backend,
+            )
+        except ImportError:
+            return {
+                "enabled": False,
+                "trajectories": [],
+                "host": host or "local",
+                "message": "the [history] extra is not installed",
+            }
+        backend = get_embedding_backend(config)
+        try:
+            store = QAStore.open(
+                db_dir=config.history.db_dir,
+                host=host,
+                embedding_backend=backend,
+                embedding_dim=config.history.embedding_dim,
+            )
+        except Exception as e:  # noqa: BLE001 - surface store errors to UI
+            return {
+                "enabled": True,
+                "trajectories": [],
+                "host": host or "local",
+                "message": f"history store unavailable: {e}",
+            }
+        try:
+            rows = store.list_recent(project=project, limit=limit)
+        finally:
+            store.close()
+        return {
+            "enabled": True,
+            "host": host or "local",
+            "trajectories": [m.to_dict() for m in rows],
+        }
+
     @app.get("/api/plugins")
     async def api_plugins() -> dict[str, object]:
         """Plugin discovery + status (v2.1.0a1).
