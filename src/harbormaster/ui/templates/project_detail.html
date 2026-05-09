@@ -93,20 +93,22 @@
               :key="t.project + ':' + t.tool + ':' + t.question">
       <li x-data="{ open: false }"
           class="rounded border transition-colors duration-200"
-          :class="t._optimistic
-            ? 'border-cyan-700/40 bg-cyan-950/30'
-            : 'border-gray-800 bg-gray-950/50'">
+          :class="optimisticBorderClass(t)">
         <button type="button" @click="open = !open"
                 class="w-full text-left px-3 py-2 hover:bg-gray-900/50 transition flex items-baseline justify-between gap-2">
           <span class="text-sm text-gray-200 truncate" x-text="t.question"></span>
           <span class="text-xs text-gray-500 shrink-0 flex gap-2 items-center">
-            <!-- v5.0.0a4: writing-back spinner shows on optimistics
-                 older than 5s — signals "writeback might be slow".
-                 The "● new" badge stays for fresh optimistics. -->
-            <span x-show="t._optimistic && isStale(t)"
+            <!-- v6.0.0a2: three escalation tiers driven by tier(t):
+                   "fresh" → cyan "● new" badge
+                   "stale" → amber spinner ("writing back…")
+                   "stuck" → red badge ("writeback stuck?") -->
+            <span x-show="tier(t) === 'stale'"
                   class="inline-block w-2 h-2 border border-amber-400 border-t-transparent rounded-full animate-spin"
                   title="writing back…"></span>
-            <span x-show="t._optimistic && !isStale(t)" class="text-cyan-400 font-bold">●&nbsp;new</span>
+            <span x-show="tier(t) === 'stuck'"
+                  class="text-rose-400 font-bold"
+                  title="server hasn't confirmed this entry — writeback may be stuck">⚠&nbsp;stuck?</span>
+            <span x-show="tier(t) === 'fresh'" class="text-cyan-400 font-bold">●&nbsp;new</span>
             <span x-text="t.tool"></span>
             <span x-text="formatDate(t.created_at || t.timestamp_s)"></span>
             <span x-text="open ? '▾' : '▸'"></span>
@@ -148,13 +150,50 @@
         if (this._tickHandle) clearInterval(this._tickHandle);
       },
 
-      isStale(entry) {
-        // True when an optimistic entry is older than 5s — signals
-        // "writeback might be slow"; renders the spinner instead of
-        // the "● new" badge.
-        if (!entry || !entry._optimistic) return false;
+      // v6.0.0a2: read configurable threshold from the meta tag emitted
+      // by base.html. Falls back to 5s if the tag is missing (older
+      // pages or unit tests).
+      _staleThreshold() {
+        const m = document.querySelector('meta[name="hm-optimistic-stale-seconds"]');
+        const raw = m ? parseInt(m.getAttribute('content'), 10) : NaN;
+        return Number.isFinite(raw) && raw > 0 ? raw : 5;
+      },
+
+      // Returns one of: "fresh" | "stale" | "stuck" | "" (non-optimistic).
+      // The escalation tier is driven by age vs. configured threshold:
+      //   age 0..N        → fresh
+      //   age N..(N×6)    → stale
+      //   age > N×6       → stuck
+      // Default N=5 yields 0..5s fresh, 5..30s stale, >30s stuck.
+      tier(entry) {
+        if (!entry || !entry._optimistic) return '';
         const age = this.now - (entry.timestamp_s || 0);
-        return age > 5;
+        const threshold = this._staleThreshold();
+        if (age <= threshold) return 'fresh';
+        if (age <= threshold * 6) return 'stale';
+        return 'stuck';
+      },
+
+      // Border + bg color class for a trajectory <li>. Non-optimistic
+      // entries stay neutral; optimistic ones tint by tier.
+      optimisticBorderClass(entry) {
+        switch (this.tier(entry)) {
+          case 'fresh':
+          case 'stale':
+            return 'border-cyan-700/40 bg-cyan-950/30';
+          case 'stuck':
+            return 'border-rose-700/50 bg-rose-950/30';
+          default:
+            return 'border-gray-800 bg-gray-950/50';
+        }
+      },
+
+      // Kept for backward-compat with v5.0.0a4 callers; now derived
+      // from tier(). Returns true when the entry is past the fresh
+      // threshold (so spinner-or-stuck visual applies).
+      isStale(entry) {
+        const t = this.tier(entry);
+        return t === 'stale' || t === 'stuck';
       },
 
       async load() {

@@ -68,11 +68,17 @@ def register_routes(
     # back to the same origin. Empty / None → meta tag is omitted and
     # plain fetch() works (loopback + no env token).
     auth_ctx: dict[str, str] = {"auth_token": auth_token} if auth_token else {}
+    # v6.0.0a2: optimistic-stale threshold flows from config →
+    # base.html → meta tag → JS isStale() helper. Hardcoded 5 in
+    # v5.0.0a4 is now operator-configurable.
+    base_ctx: dict[str, object] = {
+        "optimistic_stale_seconds": config.history.optimistic_stale_seconds,
+    }
 
     def _render(
         request: Request, template: str, extra: dict[str, Any]
     ) -> HTMLResponse:
-        ctx = {"version": __version__, **auth_ctx, **extra}
+        ctx = {"version": __version__, **auth_ctx, **base_ctx, **extra}
         return templates.TemplateResponse(request, template, ctx)
 
     @app.get("/", response_class=HTMLResponse)
