@@ -152,20 +152,43 @@ def register_routes(
 
     @app.get("/api/bridge/status")
     async def api_bridge_status() -> dict[str, object]:
-        """Config-derived FleetQ bridge status (v2.1.0a1).
+        """FleetQ bridge status — config + live runtime (v3.0.0a2).
 
-        Reports whether the bridge is *configured* — `[fleetq] enabled`,
-        `register_as_bridge`, `base_url`, and whether the API token env
-        var is non-empty. Does NOT report live session state — that
-        lives inside the harbormaster-mcp process and isn't shared with
-        the UI process. Surface it here so the dashboard can show "are
-        we wired for FleetQ at all?" at a glance.
+        Returns both the *configured* state (was bridge wiring set up?)
+        and the *runtime* state (is it actually connected right now?).
+        Runtime state is read from the cross-process state file the
+        harbormaster-mcp writer maintains; staleness is computed against
+        a 30s freshness window so a dead writer flips the badge to
+        ``stale`` instead of incorrectly showing ``connected``.
         """
         import os as _os
 
         api_token_present = bool(
             _os.environ.get(config.fleetq.api_token_env, "").strip()
         )
+
+        runtime: dict[str, object] = {"available": False}
+        try:
+            from harbormaster.fleetq.state import read_bridge_state
+
+            view = read_bridge_state()
+            runtime = {
+                "available": True,
+                "state_file_present": view.state_file_present,
+                "stale": view.stale,
+                "age_seconds": view.age_seconds,
+                "connected": view.state.connected,
+                "subscribed": view.state.subscribed,
+                "team_id": view.state.team_id,
+                "session_id": view.state.session_id,
+                "last_heartbeat": view.state.last_heartbeat,
+                "last_error": view.state.last_error,
+                "writer_pid": view.state.writer_pid,
+            }
+        except ImportError:
+            # [fleetq] extra not installed — the runtime block is opt-in.
+            pass
+
         return {
             "fleetq_enabled": config.fleetq.enabled,
             "register_as_bridge": config.fleetq.register_as_bridge,
@@ -176,6 +199,7 @@ def register_routes(
             "write_kg": config.fleetq.write_kg,
             "kg_extractor": config.fleetq.kg_extractor,
             "heartbeat_interval": config.fleetq.heartbeat_interval,
+            "runtime": runtime,
         }
 
     @app.get("/api/recall")
