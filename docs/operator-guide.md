@@ -103,6 +103,10 @@ log_delegate_task = true
 log_fan_out_ask = true
 default_top_k = 5                      # recall_qa default if caller omits
 default_min_similarity = 0.6           # vec-path filter; ignored on FTS5 fallback
+auto_ground = false                    # v1.2 phase 4: prepend top-K recall to ask_project/delegate_task prompts
+auto_ground_top_k = 3                  # how many matches to include in the prior-context section
+auto_ground_max_chars = 8000           # cap on prepended context (~2k tokens). Lowest-score matches drop first
+auto_ground_min_similarity = 0.55      # filter weak matches before they reach the prompt
 ```
 
 Install the `[history]` extra (`pipx install 'harbormaster-mcp[history]'`)
