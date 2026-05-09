@@ -1,10 +1,12 @@
 """MCP tool registration. `register_tools(mcp, config)` wires every tool against
 the loaded config so they share project discovery, backend choice, and SSH hosts."""
+
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
 from harbormaster.config import HarbormasterConfig
+from harbormaster.plugins import load_plugins
 from harbormaster.tools.ask import register as register_ask
 from harbormaster.tools.delegate import register as register_delegate
 from harbormaster.tools.fan_out import register as register_fan_out
@@ -15,6 +17,8 @@ from harbormaster.tools.recall import register as register_recall
 
 
 def register_tools(mcp: FastMCP, config: HarbormasterConfig) -> None:
+    # Built-in tools first; plugins land last so they can complement
+    # (but never override) the built-in surface.
     register_projects(mcp, config)
     register_ask(mcp, config)
     register_delegate(mcp, config)
@@ -22,6 +26,10 @@ def register_tools(mcp: FastMCP, config: HarbormasterConfig) -> None:
     register_hosts(mcp, config)
     register_recall(mcp, config)
     register_graph(mcp, config)
+
+    # v2.0.0a4: opt-in entry-point plugin discovery. No-op (with a
+    # single debug log) when [plugins].enabled is false.
+    load_plugins(mcp, config)
 
 
 __all__ = ["register_tools"]

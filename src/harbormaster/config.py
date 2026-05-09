@@ -7,6 +7,7 @@ Search order:
 If no config file is found, a HarbormasterConfig with defaults is returned —
 the package is designed to be zero-config friendly when ~/htdocs/* exists.
 """
+
 from __future__ import annotations
 
 import os
@@ -79,7 +80,6 @@ class FleetQConfig(BaseModel):
     heartbeat_interval: int = Field(default=30, gt=0)
 
 
-
 class HistoryConfig(BaseModel):
     model_config = _FORBID_EXTRA
 
@@ -101,14 +101,23 @@ class HistoryConfig(BaseModel):
     auto_ground_min_similarity: float = Field(default=0.55, ge=0.0, le=1.0)
 
 
+class PluginsConfig(BaseModel):
+    """v2.0.0a4 — entry-point plugin discovery config."""
+
+    model_config = _FORBID_EXTRA
+
+    enabled: bool = False
+    # Allowlist of distribution package names; empty allowlist means
+    # NO plugins are loaded even when enabled = true (deny-by-default).
+    allow: list[str] = Field(default_factory=list)
+
+
 class HarbormasterConfig(BaseModel):
     model_config = _FORBID_EXTRA
 
     server: ServerConfig = Field(default_factory=ServerConfig)
     projects: ProjectsConfig = Field(default_factory=ProjectsConfig)
-    backends: dict[str, BackendConfig] = Field(
-        default_factory=lambda: {"claude": BackendConfig()}
-    )
+    backends: dict[str, BackendConfig] = Field(default_factory=lambda: {"claude": BackendConfig()})
     # v2.0.0a3: which backend should be used when no per-project
     # override is specified. Falls through to "claude" so v1
     # configs work unchanged.
@@ -122,6 +131,7 @@ class HarbormasterConfig(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     fleetq: FleetQConfig = Field(default_factory=FleetQConfig)
     history: HistoryConfig = Field(default_factory=HistoryConfig)
+    plugins: PluginsConfig = Field(default_factory=PluginsConfig)
 
 
 def _expand(p: str) -> Path:

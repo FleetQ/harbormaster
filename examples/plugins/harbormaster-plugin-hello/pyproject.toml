@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "harbormaster-plugin-hello"
+version = "0.1.0"
+description = "Example Harbormaster plugin — registers a greet_project MCP tool."
+requires-python = ">=3.11"
+dependencies = ["harbormaster-mcp>=2.0.0a4", "mcp>=1.0"]
+
+[project.entry-points."harbormaster.tools"]
+hello = "harbormaster_plugin_hello:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/harbormaster_plugin_hello"]
