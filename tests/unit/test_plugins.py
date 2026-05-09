@@ -234,6 +234,70 @@ def test_load_plugins_skips_non_callable_target(monkeypatch: pytest.MonkeyPatch)
 # --- config field ------------------------------------------------------
 
 
+def test_load_plugins_warns_when_allowlisted_dist_not_installed(
+    monkeypatch: pytest.MonkeyPatch, caplog
+):
+    """v2.0.1: if [plugins].allow lists a distribution that has NO
+    matching entry point on disk, surface a WARNING so the operator
+    notices the missing pip install. The other plugin should still
+    load."""
+    import logging
+
+    config = HarbormasterConfig()
+    config.plugins = PluginsConfig(
+        enabled=True,
+        allow=["installed-pkg", "missing-pkg", "another-missing-one"],
+    )
+
+    ep = _FakeEntryPoint(
+        name="hello",
+        dist_name="installed-pkg",
+        target=lambda *args: None,
+    )
+    _patch_entry_points(monkeypatch, [ep])
+
+    with caplog.at_level(logging.WARNING, logger="harbormaster.plugins"):
+        loaded = load_plugins(MagicMock(), config)
+
+    assert loaded == ["installed-pkg"]
+    msgs = [r.message for r in caplog.records]
+    # Each missing dist gets its own WARNING line. Match by dist name +
+    # the "no entry point" phrase that the warning template uses.
+    assert any("missing-pkg" in m and "no entry point" in m for m in msgs)
+    assert any("another-missing-one" in m for m in msgs)
+    # The installed plugin is NOT flagged as missing.
+    assert not any(
+        "installed-pkg" in m and "no entry point" in m for m in msgs
+    )
+
+
+def test_load_plugins_no_warning_when_all_allowlisted_are_present(
+    monkeypatch: pytest.MonkeyPatch, caplog
+):
+    """If every allowlist entry corresponds to a real entry point,
+    we must NOT emit the missing-package WARNING."""
+    import logging
+
+    config = HarbormasterConfig()
+    config.plugins = PluginsConfig(
+        enabled=True, allow=["pkg-a", "pkg-b"]
+    )
+
+    eps = [
+        _FakeEntryPoint(name="a", dist_name="pkg-a", target=lambda *a: None),
+        _FakeEntryPoint(name="b", dist_name="pkg-b", target=lambda *a: None),
+    ]
+    _patch_entry_points(monkeypatch, eps)
+
+    with caplog.at_level(logging.WARNING, logger="harbormaster.plugins"):
+        loaded = load_plugins(MagicMock(), config)
+
+    assert sorted(loaded) == ["pkg-a", "pkg-b"]
+    # No warning about missing distributions.
+    assert not any("not be discovered" in r.message for r in caplog.records)
+    assert not any("but no entry point" in r.message for r in caplog.records)
+
+
 def test_plugins_config_default_is_disabled():
     config = HarbormasterConfig()
     assert config.plugins.enabled is False
