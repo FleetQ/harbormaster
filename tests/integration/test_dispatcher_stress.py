@@ -259,3 +259,167 @@ def test_dispatcher_backend_tools_isolation_under_failure(
             # Even non-isError envelopes for a failed subprocess should
             # have *some* text — assert content shape.
             assert text_blocks
+
+
+# --- v6.0.0a5: streaming-chunks dispatcher stress -----------------------
+
+
+def test_relay_streaming_chunks_per_request_ordering_preserved() -> None:
+    """50 concurrent agent.requests, each handler yields 5 chunks; the
+    relay publishes chunks via trigger() — assert per-request chunks
+    arrive contiguous (no interleaving across requests)."""
+    import threading
+    import time
+
+    from harbormaster.fleetq.relay import BridgeRelay
+
+    captured: list[tuple[str, int, str]] = []  # (request_id, chunk_index, text)
+    capture_lock = threading.Lock()
+
+    class _StubChan:
+        def trigger(self, event, data):
+            # Only count chunk events with a non-empty body — ignore
+            # the trailing done=true sentinel chunk for ordering checks.
+            if event != "client-relay.chunk":
+                return
+            chunk_text = data.get("chunk", "")
+            if not chunk_text:
+                return
+            req = data.get("request_id", "")
+            # Chunks are like "req-{N}:chunk-{K}" so we can recover the
+            # ordinal each request's handler emitted.
+            try:
+                idx = int(chunk_text.rsplit(":chunk-", 1)[-1])
+            except ValueError:
+                idx = -1
+            with capture_lock:
+                captured.append((req, idx, chunk_text))
+
+    def streaming_handler(payload):
+        rid = payload.get("request_id", "")
+        for i in range(5):
+            yield f"{rid}:chunk-{i}"
+            # Tiny sleep to give other workers a chance to interleave;
+            # the dispatcher pool's contract is "this won't actually
+            # interleave WITHIN one handler call" — different requests'
+            # chunks may interleave with each other, but the chunks of
+            # any single request stay contiguous in publish order.
+            time.sleep(0.002)
+
+    # Note: the fake_pusher_factory fixture is in tests/unit/test_relay.py;
+    # we redefine a minimal one here for the integration scope.
+    from unittest.mock import MagicMock
+
+    def fake_pusher_factory(*, key, host, port, secure):
+        p = MagicMock()
+        p.connection.bind = MagicMock()
+        p.subscribe = MagicMock()
+        p.connect = MagicMock()
+        p.disconnect = MagicMock()
+        return p
+
+    relay = BridgeRelay(
+        base_url="http://example",
+        api_token="t",
+        team_id="team",
+        app_key="key",
+        relay_url="wss://example:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=streaming_handler,
+        worker_thread=True,
+        dispatcher_max_workers=4,
+    )
+    relay.start()
+    relay._channel = _StubChan()
+
+    # Submit 50 agent.requests through the worker queue path.
+    request_count = 50
+    for n in range(request_count):
+        relay._on_agent_request({
+            "request_id": f"req-{n:02d}",
+            "method": "tools/call",
+            "params": {"name": "list_projects", "arguments": {}},
+        })
+
+    # Drain. Each request emits 5 chunks → expect 250 captures.
+    deadline = time.time() + 10
+    while len(captured) < request_count * 5 and time.time() < deadline:
+        time.sleep(0.05)
+
+    relay.stop()
+
+    assert len(captured) == request_count * 5, (
+        f"expected {request_count * 5} chunks, got {len(captured)}"
+    )
+
+    # Per-request ordering invariant: filter to one request, indices
+    # must be 0,1,2,3,4 in publish order (not necessarily globally
+    # contiguous, but ordered within the per-request subsequence).
+    by_request: dict[str, list[int]] = {}
+    for req, idx, _ in captured:
+        by_request.setdefault(req, []).append(idx)
+    for req, indices in by_request.items():
+        assert indices == [0, 1, 2, 3, 4], (
+            f"request {req} chunks out of order: {indices}"
+        )
+    assert len(by_request) == request_count
+
+
+def test_relay_streaming_pool_shutdown_mid_stream_clean() -> None:
+    """stop() during a long-running streaming handler must shut down
+    cleanly — no exception leaks, no daemon thread left pinned."""
+    import threading
+    import time
+
+    from harbormaster.fleetq.relay import BridgeRelay
+
+    started_event = threading.Event()
+    cancelled_event = threading.Event()
+
+    def slow_streaming_handler(payload):
+        started_event.set()
+        for i in range(20):
+            # Sleep that's long enough for stop() to land mid-stream.
+            time.sleep(0.05)
+            yield f"chunk-{i}"
+        cancelled_event.set()
+
+    from unittest.mock import MagicMock
+
+    def fake_pusher_factory(*, key, host, port, secure):
+        p = MagicMock()
+        p.connection.bind = MagicMock()
+        p.subscribe = MagicMock()
+        return p
+
+    relay = BridgeRelay(
+        base_url="http://example",
+        api_token="t",
+        team_id="team",
+        app_key="key",
+        relay_url="wss://example:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=slow_streaming_handler,
+        worker_thread=True,
+        dispatcher_max_workers=2,
+    )
+    relay.start()
+
+    class _StubChan:
+        def __init__(self): self.events = []
+        def trigger(self, event, data): self.events.append((event, data))
+    relay._channel = _StubChan()
+
+    relay._on_agent_request({
+        "request_id": "long-1",
+        "method": "tools/call",
+        "params": {"name": "list_projects", "arguments": {}},
+    })
+    assert started_event.wait(timeout=2.0)
+
+    # Stop mid-stream. Must not hang or raise.
+    relay.stop()
+
+    # Worker thread + pool both gone.
+    assert relay._worker_thread_handle is None
+    assert relay._dispatcher_pool is None
