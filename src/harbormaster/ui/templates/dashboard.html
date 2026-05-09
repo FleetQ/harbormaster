@@ -137,22 +137,25 @@
   <div x-show="!loading && !error && projects.length > 0"
        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
     <template x-for="p in projects" :key="p.path">
-      <article class="border border-gray-800 rounded-lg p-4 hover:border-cyan-700 transition bg-gray-900/40">
-        <header class="flex items-baseline justify-between mb-2 gap-2">
-          <h3 class="font-bold text-cyan-400 truncate" x-text="p.name"></h3>
-          <span class="text-xs text-gray-500 shrink-0"
-                x-text="p.last_commit ? p.last_commit.hash : '(no git)'"></span>
-        </header>
-        <p class="text-sm text-gray-300 mb-3 line-clamp-2"
-           x-text="p.brief || '(no description)'"></p>
-        <footer class="flex flex-wrap gap-2 text-xs items-center">
-          <span x-show="p.has_serena"
-                class="bg-purple-900/50 text-purple-300 px-2 py-0.5 rounded">serena</span>
-          <span x-show="p.has_claude_md"
-                class="bg-cyan-900/50 text-cyan-300 px-2 py-0.5 rounded">claude.md</span>
-          <span class="text-gray-500 truncate font-mono" x-text="p.path"></span>
-        </footer>
-      </article>
+      <a :href="`/projects/${encodeURIComponent(p.name)}`"
+         class="block border border-gray-800 rounded-lg p-4 hover:border-cyan-700 transition bg-gray-900/40 no-underline">
+        <article>
+          <header class="flex items-baseline justify-between mb-2 gap-2">
+            <h3 class="font-bold text-cyan-400 truncate" x-text="p.name"></h3>
+            <span class="text-xs text-gray-500 shrink-0"
+                  x-text="p.last_commit ? p.last_commit.hash : '(no git)'"></span>
+          </header>
+          <p class="text-sm text-gray-300 mb-3 line-clamp-2"
+             x-text="p.brief || '(no description)'"></p>
+          <footer class="flex flex-wrap gap-2 text-xs items-center">
+            <span x-show="p.has_serena"
+                  class="bg-purple-900/50 text-purple-300 px-2 py-0.5 rounded">serena</span>
+            <span x-show="p.has_claude_md"
+                  class="bg-cyan-900/50 text-cyan-300 px-2 py-0.5 rounded">claude.md</span>
+            <span class="text-gray-500 truncate font-mono" x-text="p.path"></span>
+          </footer>
+        </article>
+      </a>
     </template>
   </div>
 </section>

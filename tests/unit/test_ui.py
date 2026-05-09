@@ -224,6 +224,76 @@ def test_api_graph_accepts_transitive_query_param(populated_config):
     assert "mermaid" in body
 
 
+# ----- v2.1.0a2 — Project detail page --------------------------------------
+
+
+def test_project_detail_renders_for_known_project(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/projects/alpha")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    body = r.text
+    assert "alpha" in body
+    assert "Status" in body  # Section header
+    assert "← Dashboard" in body  # Breadcrumb back-link
+
+
+def test_project_detail_returns_404_for_unknown_project(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/projects/does-not-exist")
+    assert r.status_code == 404
+
+
+def test_project_detail_returns_400_for_invalid_name(populated_config):
+    """Slashes / `..` etc. must be rejected before resolving the path."""
+    client = TestClient(create_app(populated_config))
+    # Path traversal attempts get URL-decoded by Starlette into the
+    # path param; use a clearly-invalid name.
+    r = client.get("/projects/..%2Fsomething")
+    # Either 400 (validate_project_name rejected it) or 404 — both are
+    # acceptable; the critical thing is we don't render success.
+    assert r.status_code in (400, 404)
+
+
+def test_project_detail_includes_project_metadata(populated_config):
+    client = TestClient(create_app(populated_config))
+    body = client.get("/projects/alpha").text
+    # Path appears (project header card)
+    assert "alpha" in body
+    # claude.md badge appears since _make_project_dir writes one
+    assert "claude.md" in body
+
+
+def test_dashboard_card_links_to_detail_page(populated_config):
+    """v2.1.0a2: the project cards must navigate to /projects/{name}."""
+    client = TestClient(create_app(populated_config))
+    body = client.get("/").text
+    # The Alpine href binding should reference the route pattern.
+    assert "/projects/" in body
+    assert "encodeURIComponent" in body
+
+
+def test_project_detail_remote_host_reaches_remote_status(populated_config):
+    """When ?host= is passed (and != 'local'), the route delegates to
+    `_remote_status` which returns either remote markdown OR an
+    Error-prefixed string. We mock SSH to avoid hitting the network."""
+    from unittest.mock import patch
+
+    populated_config.hosts = {
+        "ghosthost": __import__(
+            "harbormaster.config", fromlist=["HostConfig"]
+        ).HostConfig(ssh_host="ghost-not-real"),
+    }
+
+    client = TestClient(create_app(populated_config))
+    with patch("harbormaster.tools.projects._remote_status") as m:
+        m.return_value = "## remote\nBranch: main\n"
+        r = client.get("/projects/alpha?host=ghosthost")
+    assert r.status_code == 200
+    assert "host: ghosthost" in r.text
+    assert "Branch: main" in r.text
+
+
 # ----- create_app contract --------------------------------------------------
 
 

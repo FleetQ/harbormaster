@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ project_name }} · Harbormaster{% endblock %}
+{% block content %}
+
+<nav class="mb-4 text-sm text-gray-400">
+  <a href="/" class="hover:text-cyan-400">← Dashboard</a>
+  <span class="mx-2 text-gray-700">/</span>
+  <span class="text-gray-300">{{ project_name }}</span>
+  {% if host != "local" %}
+    <span class="ml-2 text-xs px-2 py-0.5 bg-amber-900/40 text-amber-300 rounded">host: {{ host }}</span>
+  {% endif %}
+</nav>
+
+<header class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+  <div class="flex items-baseline justify-between gap-4 flex-wrap">
+    <h2 class="text-xl font-bold text-cyan-400">{{ project_name }}</h2>
+    {% if project %}
+      <span class="text-xs text-gray-500">
+        last commit:
+        {% if project.last_commit %}
+          <code class="text-gray-300">{{ project.last_commit.hash }}</code>
+        {% else %}
+          <span class="text-gray-600">(no git)</span>
+        {% endif %}
+      </span>
+    {% endif %}
+  </div>
+  {% if project %}
+    <p class="text-sm text-gray-300 mt-2">{{ project.brief or "(no description)" }}</p>
+    <footer class="mt-3 flex flex-wrap gap-2 text-xs items-center">
+      {% if project.has_serena %}
+        <span class="bg-purple-900/50 text-purple-300 px-2 py-0.5 rounded">serena</span>
+      {% endif %}
+      {% if project.has_claude_md %}
+        <span class="bg-cyan-900/50 text-cyan-300 px-2 py-0.5 rounded">claude.md</span>
+      {% endif %}
+      <span class="text-gray-500 truncate font-mono">{{ project.path }}</span>
+    </footer>
+  {% endif %}
+</header>
+
+<section class="mb-6">
+  <header class="mb-3 flex items-baseline justify-between">
+    <h3 class="text-base font-bold text-gray-300">Status</h3>
+    <span class="text-xs text-gray-500">
+      sourced from <code class="text-cyan-400">project_status</code>
+    </span>
+  </header>
+  <pre class="text-sm whitespace-pre-wrap break-words border border-gray-800 rounded-lg p-4 bg-gray-900/40 text-gray-300 leading-relaxed">{{ status_markdown }}</pre>
+</section>
+
+<!-- v2.1.0a4 placeholder: "Ask this project" inline form lands here. -->
+<section class="border border-dashed border-gray-800 rounded-lg p-4 bg-gray-900/20 text-gray-500 text-sm">
+  <p class="font-bold text-gray-400 mb-1">Coming in v2.1.0a4 / a5 / a6:</p>
+  <ul class="list-disc list-inside space-y-1">
+    <li>Inline <code class="text-cyan-400">ask_project</code> form with live SSE streaming</li>
+    <li><code class="text-cyan-400">delegate_task</code> form with deliverable field</li>
+    <li>Trajectory history (recent Q&amp;A from the per-host store)</li>
+  </ul>
+</section>
+
+{% endblock %}
