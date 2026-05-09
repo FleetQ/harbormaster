@@ -98,6 +98,13 @@ def read_state(path: Path | None = None) -> ReembedState:
         return ReembedState()
 
 
+# v5.0.0a1: backoff schedule for transient failures during open / reembed.
+# Three retries at 1s / 2s / 4s before giving up. Exponential keeps the
+# total wait bounded (7s) while smoothing over momentary sqlite-busy /
+# transient I/O blips.
+_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (1.0, 2.0, 4.0)
+
+
 def _reembed_one_host(
     *, config: Any, host: str | None, state: ReembedState
 ) -> tuple[int, str | None]:
@@ -105,22 +112,42 @@ def _reembed_one_host(
     Returns (processed_rows, error_message_or_None).
 
     Errors are caught here so a single bad host doesn't poison the
-    entire auto-reembed run.
+    entire auto-reembed run. v5.0.0a1: open / reembed paths retry up
+    to 3 times with exponential backoff on transient errors before
+    surfacing a permanent failure to the runner.
     """
     from harbormaster.history import QAStore, get_embedding_backend
 
     label = host if host is not None else "local"
-    try:
-        backend = get_embedding_backend(config)
-        store = QAStore.open(
-            db_dir=config.history.db_dir,
-            host=host,
-            embedding_backend=backend,
-            embedding_dim=config.history.embedding_dim,
-        )
-    except Exception as e:  # noqa: BLE001 - per-host isolation
-        logger.exception("auto_reembed: opening store failed for host=%s", label)
-        return 0, f"open failed: {e}"
+
+    backend = get_embedding_backend(config)
+    store = None
+    last_open_error: Exception | None = None
+    for attempt, delay in enumerate(
+        (0.0, *_RETRY_BACKOFF_SECONDS), start=1
+    ):
+        if delay > 0:
+            time.sleep(delay)
+        try:
+            store = QAStore.open(
+                db_dir=config.history.db_dir,
+                host=host,
+                embedding_backend=backend,
+                embedding_dim=config.history.embedding_dim,
+            )
+            last_open_error = None
+            break
+        except Exception as e:  # noqa: BLE001 - per-host isolation
+            last_open_error = e
+            logger.warning(
+                "auto_reembed: open attempt %d/%d failed for host=%s: %s",
+                attempt,
+                len(_RETRY_BACKOFF_SECONDS) + 1,
+                label,
+                e,
+            )
+    if store is None:
+        return 0, f"open failed (after {len(_RETRY_BACKOFF_SECONDS) + 1} attempts): {last_open_error}"
 
     try:
         if not store.has_embedding_drift():
@@ -128,11 +155,25 @@ def _reembed_one_host(
         # Update state to reflect we're now actually working on this host.
         state.current_host = label
         _write_state(state)
-        processed, _total = store.reembed(batch_size=100, resume=True)
-        return processed, None
-    except Exception as e:  # noqa: BLE001 - per-host isolation
-        logger.exception("auto_reembed: reembed failed for host=%s", label)
-        return 0, f"reembed failed: {e}"
+        last_reembed_error: Exception | None = None
+        for attempt, delay in enumerate(
+            (0.0, *_RETRY_BACKOFF_SECONDS), start=1
+        ):
+            if delay > 0:
+                time.sleep(delay)
+            try:
+                processed, _total = store.reembed(batch_size=100, resume=True)
+                return processed, None
+            except Exception as e:  # noqa: BLE001 - per-host isolation
+                last_reembed_error = e
+                logger.warning(
+                    "auto_reembed: reembed attempt %d/%d failed for host=%s: %s",
+                    attempt,
+                    len(_RETRY_BACKOFF_SECONDS) + 1,
+                    label,
+                    e,
+                )
+        return 0, f"reembed failed (after {len(_RETRY_BACKOFF_SECONDS) + 1} attempts): {last_reembed_error}"
     finally:
         store.close()
 

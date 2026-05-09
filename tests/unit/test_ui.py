@@ -1860,3 +1860,44 @@ def test_api_history_state_includes_config_flag(populated_config):
     client = TestClient(create_app(populated_config))
     body = client.get("/api/history/state").json()
     assert "auto_reembed_enabled" in body
+
+
+# --- v5.0.0a1: auto-reembed UI panel ------------------------------------
+
+
+def test_dashboard_renders_reembed_panel(populated_config):
+    """Dashboard must define reembedPanel() Alpine factory + render
+    the panel section."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "function reembedPanel()" in r.text
+    assert 'x-data="reembedPanel()"' in r.text
+
+
+def test_reembed_panel_phase_badge_classes(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # All four phase classes referenced.
+    assert "bg-cyan-900/50 text-cyan-300" in r.text  # running
+    assert "bg-emerald-900/50 text-emerald-300" in r.text  # done
+    assert "bg-rose-900/50 text-rose-300" in r.text  # failed
+    # phaseBadgeClass mapper is in scope.
+    assert "phaseBadgeClass()" in r.text
+
+
+def test_reembed_panel_shows_progress_bar(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # Progress bar wired to processed/total.
+    assert "state.processed / state.total" in r.text
+
+
+def test_reembed_panel_polls_only_when_running(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # Polling started in _maybeStartPolling, only when phase === 'running'.
+    assert "_maybeStartPolling" in r.text
+    assert "this.state.phase === 'running'" in r.text
+    # 3-second cadence.
+    assert ", 3000)" in r.text
