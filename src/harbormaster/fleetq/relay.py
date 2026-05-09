@@ -4,6 +4,20 @@ v1.0.0a8 scope: connect to Reverb, authenticate the private-daemon channel
 via /api/v1/bridge/broadcasting-auth, subscribe, log received `agent.request`
 events at INFO. NO execution dispatch — that's v1.0.0a9.
 
+v2.0.0a7 adds the *publish* side: `BridgeRelay.publish_chunk()` and
+`publish_error()` send Pusher client events back on the same channel
+following the wire shape in `docs/fleetq-relay-protocol.md`. An optional
+`chunk_handler: Callable[[dict], Iterator[str]]` can be wired into
+`__init__`; when set, incoming `agent.request` events are dispatched to
+the handler and its yielded text chunks stream back as
+`client-relay.chunk` events (done=false per token, done=true final).
+Exceptions in the handler become `client-relay.error` events.
+
+The handler is deliberately narrow: it gets the agent.request payload
+and returns an iterator of text chunks. Wiring agent.request → MCP
+tool selection lives one layer up so that the relay stays pluggable
+for non-MCP dispatch scenarios.
+
 See docs/fleetq-relay-protocol.md for the discovered protocol.
 
 Imports `pysher` lazily through a factory so test suites can inject a fake
@@ -13,7 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 from urllib.parse import urlparse
 
@@ -25,6 +39,11 @@ logger = logging.getLogger(__name__)
 # something with `.connection.bind(event, handler)`, `.subscribe(channel, auth)`,
 # `.connect()`, `.disconnect()`. Matches pysher.Pusher's surface.
 PusherFactory = Callable[..., Any]
+
+# Handler called when an `agent.request` arrives and chunk_handler was
+# provided. Receives the parsed payload dict, yields text chunks. The
+# relay handles publishing each chunk + the final done=true sentinel.
+ChunkHandler = Callable[[dict[str, Any]], Iterator[str]]
 
 
 def _default_pusher_factory(
@@ -69,6 +88,7 @@ class BridgeRelay:
         relay_url: str,
         pusher_factory: PusherFactory | None = None,
         auth_timeout: float = 10.0,
+        chunk_handler: ChunkHandler | None = None,
     ) -> None:
         if not team_id:
             raise ValueError("team_id is required (from RegisterResponse)")
@@ -84,9 +104,11 @@ class BridgeRelay:
         self.relay_url = relay_url
         self.channel_name = f"private-daemon.{team_id}"
         self.auth_timeout = auth_timeout
+        self.chunk_handler = chunk_handler
 
         self._pusher_factory: PusherFactory = pusher_factory or _default_pusher_factory
         self._pusher: Any = None
+        self._channel: Any = None
         self._socket_id: str | None = None
         self._subscribed: bool = False
 
@@ -188,6 +210,7 @@ class BridgeRelay:
             return
 
         channel = self._pusher.subscribe(self.channel_name, auth=auth)
+        self._channel = channel
         # 'agent.request' is the event class's broadcastAs() value.
         channel.bind("agent.request", self._on_agent_request)
         # pusher_internal:subscription_succeeded fires once subscription is confirmed.
@@ -205,18 +228,116 @@ class BridgeRelay:
         )
 
     def _on_agent_request(self, data: str | dict[str, Any]) -> None:
-        """v1.0.0a8: LOG only. v1.0.0a9 will dispatch to MCP tools and reply
-        with client-relay.chunk events on the same channel."""
+        """Handle an inbound agent.request event.
+
+        Logs the request unconditionally. When `chunk_handler` was wired
+        at construction (v2.0.0a7), also dispatches the payload to the
+        handler and streams its yielded text chunks back via
+        `client-relay.chunk` events on the same channel. Final chunk has
+        `done=true`. Exceptions become `client-relay.error`.
+        """
         try:
             payload = json.loads(data) if isinstance(data, str) else data
         except (TypeError, ValueError):
             payload = {"raw": str(data)[:200]}
         if not isinstance(payload, dict):
             payload = {"raw": str(payload)[:200]}
+        request_id = str(payload.get("request_id", "") or "")
         logger.info(
             "BridgeRelay: agent.request received "
-            "(request_id=%s, method=%s, server=%s) — execution dispatch lands in v1.0.0a9",
-            payload.get("request_id", "?"),
+            "(request_id=%s, method=%s, server=%s)",
+            request_id or "?",
             payload.get("method", "?"),
             payload.get("server", "?"),
         )
+
+        if self.chunk_handler is None:
+            return
+        if not request_id:
+            logger.warning(
+                "BridgeRelay: chunk_handler set but request_id missing in payload; "
+                "cannot publish response — skipping dispatch."
+            )
+            return
+        self._dispatch_chunk_handler(request_id=request_id, payload=payload)
+
+    def _dispatch_chunk_handler(
+        self, *, request_id: str, payload: dict[str, Any]
+    ) -> None:
+        """Run the configured chunk_handler and stream its output as
+        client-relay.chunk events. Catches every exception so a buggy
+        handler can't crash the Pusher thread; surfaces failure as
+        `client-relay.error` so the FleetQ side can wake the waiting
+        request with a sentinel.
+        """
+        assert self.chunk_handler is not None  # narrowed by caller
+        try:
+            iterator = self.chunk_handler(payload)
+            chunk_count = 0
+            for chunk in iterator:
+                if not isinstance(chunk, str) or not chunk:
+                    continue
+                self.publish_chunk(
+                    request_id=request_id, chunk=chunk, done=False
+                )
+                chunk_count += 1
+            # Final sentinel chunk — empty payload + done=true terminates
+            # the FleetQ-side popChunk loop cleanly.
+            self.publish_chunk(request_id=request_id, chunk="", done=True)
+            logger.info(
+                "BridgeRelay: dispatched %d chunks for request_id=%s",
+                chunk_count,
+                request_id,
+            )
+        except Exception as e:  # noqa: BLE001 - handler is untrusted
+            logger.exception(
+                "BridgeRelay: chunk_handler raised for request_id=%s", request_id
+            )
+            try:
+                self.publish_error(request_id=request_id, error=str(e))
+            except Exception:  # noqa: BLE001 - cleanup must not raise
+                logger.exception(
+                    "BridgeRelay: publish_error also failed for request_id=%s",
+                    request_id,
+                )
+
+    # --- v2.0.0a7 publish surface ---------------------------------------
+
+    def publish_chunk(
+        self, *, request_id: str, chunk: str, done: bool, usage: object | None = None
+    ) -> None:
+        """Send a `client-relay.chunk` Pusher client event on the
+        subscribed channel. Wire shape from `docs/fleetq-relay-protocol.md`:
+
+            { "request_id": <uuid>, "chunk": <str>, "done": <bool>, "usage": <obj|null> }
+
+        Multi-chunk streams use `done=false` per token and a final
+        empty-`chunk`/`done=true` sentinel to close the popChunk loop.
+        """
+        if self._channel is None:
+            raise RuntimeError(
+                "BridgeRelay: cannot publish_chunk before subscribe completes"
+            )
+        data = {
+            "request_id": request_id,
+            "chunk": chunk,
+            "done": done,
+            "usage": usage,
+        }
+        self._channel.trigger("client-relay.chunk", data)
+
+    def publish_error(self, *, request_id: str, error: str) -> None:
+        """Send a `client-relay.error` Pusher client event on the
+        subscribed channel. Wire shape from `docs/fleetq-relay-protocol.md`:
+
+            { "request_id": <uuid>, "error": <human-readable str> }
+
+        Wakes the FleetQ-side popChunk loop with a sentinel and
+        re-throws the error to the original mcpCall caller.
+        """
+        if self._channel is None:
+            raise RuntimeError(
+                "BridgeRelay: cannot publish_error before subscribe completes"
+            )
+        data = {"request_id": request_id, "error": error}
+        self._channel.trigger("client-relay.error", data)
