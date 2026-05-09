@@ -168,7 +168,7 @@
 <section x-data="{ projects: [], loading: true, error: null }"
          x-init="(async () => {
            try {
-             const r = await fetch('/api/projects');
+             const r = await hmFetch('/api/projects');
              if (!r.ok) throw new Error('HTTP ' + r.status);
              projects = await r.json();
            } catch (e) {
@@ -237,14 +237,14 @@
       },
       async loadBridge() {
         try {
-          const r = await fetch('/api/bridge/status');
+          const r = await hmFetch('/api/bridge/status');
           if (!r.ok) throw new Error('HTTP ' + r.status);
           this.bridge = await r.json();
         } catch (e) { this.bridgeError = e.message; }
       },
       async loadPlugins() {
         try {
-          const r = await fetch('/api/plugins');
+          const r = await hmFetch('/api/plugins');
           if (!r.ok) throw new Error('HTTP ' + r.status);
           this.plugins = await r.json();
         } catch (e) { this.pluginsError = e.message; }
@@ -322,7 +322,7 @@
           const params = new URLSearchParams({ question: this.question.trim() });
           if (this.project.trim()) params.set('project', this.project.trim());
           if (this.host) params.set('host', this.host);
-          const r = await fetch('/api/recall?' + params.toString());
+          const r = await hmFetch('/api/recall?' + params.toString());
           if (!r.ok) throw new Error('HTTP ' + r.status);
           const data = await r.json();
           this.backend = data.backend || '';
@@ -350,7 +350,7 @@
           if (this.includeDevDeps) params.set('include_dev_deps', 'true');
           if (this.transitive) params.set('transitive', 'true');
           const url = '/api/graph' + (params.toString() ? '?' + params : '');
-          const r = await fetch(url);
+          const r = await hmFetch(url);
           if (!r.ok) throw new Error('HTTP ' + r.status);
           this.graph = await r.json();
           this.mermaidMarkup = this.graph.mermaid || 'graph LR\n  empty[No projects]';

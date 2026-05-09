@@ -5,6 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Harbormaster{% endblock %}</title>
 <meta name="description" content="Harbormaster — MCP server dashboard.">
+{% if auth_token %}<meta name="hm-auth-token" content="{{ auth_token }}">{% endif %}
+<script>
+  // v3.0.0a6: bearer-token plumbing for SSE / API fetches.
+  // When the page is rendered with auth_token (bearer-protected install),
+  // hmFetch() injects `Authorization: Bearer <token>` on every same-origin
+  // request the dashboard makes — otherwise behaves like plain fetch().
+  window.hmFetch = function (url, init) {
+    const meta = document.querySelector('meta[name="hm-auth-token"]');
+    const token = meta ? meta.getAttribute("content") : "";
+    if (!token) return fetch(url, init);
+    const opts = init ? { ...init } : {};
+    const headers = new Headers(opts.headers || {});
+    if (!headers.has("Authorization")) headers.set("Authorization", "Bearer " + token);
+    opts.headers = headers;
+    return fetch(url, opts);
+  };
+</script>
 <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
 <script src="https://unpkg.com/htmx.org@1.9.10"></script>
 <script defer src="https://unpkg.com/alpinejs@3"></script>

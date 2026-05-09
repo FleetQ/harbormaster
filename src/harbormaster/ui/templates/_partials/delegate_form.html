@@ -66,7 +66,7 @@
             name: this.project, task: this.task, deliverable: this.deliverable,
           };
           if (this.host && this.host !== 'local') args.host = this.host;
-          const r = await fetch('/mcp/harbormaster', {
+          const r = await hmFetch('/mcp/harbormaster', {
             method: 'POST', signal: controller.signal,
             headers: {
               'Content-Type': 'application/json',

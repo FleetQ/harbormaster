@@ -5,9 +5,9 @@
 
    The form posts to /mcp/harbormaster with Accept: text/event-stream
    and consumes the chunk + result + error events the v1.0.0a14
-   streaming dispatch emits. Token-based UI auth is NOT plumbed here
-   (deferred to v3); on a bearer-protected install you'd need to
-   include the token via fetch headers — left as a config-side note.
+   streaming dispatch emits. v3.0.0a6 wires bearer-token plumbing
+   via base.html's hmFetch() helper — when an auth_token meta tag is
+   present, the Authorization header is injected automatically.
 #}
 <section x-data="askForm({
            project: {{ project_name | tojson }},
@@ -73,7 +73,7 @@
         try {
           const args = { name: this.project, question: this.question, max_turns: this.maxTurns };
           if (this.host && this.host !== 'local') args.host = this.host;
-          const r = await fetch('/mcp/harbormaster', {
+          const r = await hmFetch('/mcp/harbormaster', {
             method: 'POST',
             signal: controller.signal,
             headers: {
