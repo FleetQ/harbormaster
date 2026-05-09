@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 from harbormaster.backends import BackendError, get_backend
@@ -84,6 +85,44 @@ def run_backend(
         return f"Error: {e}"
 
     return _truncate(result.output, cap, label)
+
+
+def stream_ask_project_local(
+    *,
+    name: str,
+    prompt: str,
+    max_turns: int,
+    config: HarbormasterConfig,
+) -> Iterator[str]:
+    """Streaming variant of run_backend for `ask_project` against a local
+    project. Yields assistant text deltas as `claude -p` produces them.
+
+    Local-only: SSH stdout demux is a separate refactor and shipping
+    local-first unblocks the immediate use case (Bridge daemon running
+    on the user's machine). Callers that want non-streaming behaviour
+    keep using run_backend.
+
+    Failure modes (validate-first / backend-disabled / project lookup)
+    raise the same ValueError / BackendError that run_backend would —
+    callers (the SSE dispatcher in ui/routes.py) translate them to
+    `error` events at the MCP boundary.
+    """
+    validate_project_name(name)
+    backend = get_backend(config)
+    if backend is None:
+        raise BackendError(
+            "backend 'claude' is not enabled in config",
+            code="config_error",
+        )
+    if not hasattr(backend, "ask_local_stream"):
+        raise BackendError(
+            f"backend {backend.name!r} does not support streaming",
+            code="config_error",
+        )
+    cwd = resolve_project(name, config.projects)
+    yield from backend.ask_local_stream(
+        cwd=cwd, prompt=prompt, max_turns=max_turns,
+    )
 
 
 def _truncate(text: str, word_cap: int, source_label: str) -> str:

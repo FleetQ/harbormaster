@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from harbormaster import __version__
+from harbormaster.backends.base import BackendError
 from harbormaster.config import HarbormasterConfig
 from harbormaster.projects import discover_projects
 
@@ -127,35 +128,50 @@ def register_routes(
 
         accept = request.headers.get("accept", "")
         if "text/event-stream" in accept.lower():
-            return EventSourceResponse(_stream_dispatch(mcp, body))
+            return EventSourceResponse(_stream_dispatch(mcp, body, config))
 
         return _dispatch_mcp(mcp, body)
 
 
 async def _stream_dispatch(
-    mcp: Any, body: McpProxyRequest
+    mcp: Any, body: McpProxyRequest, config: HarbormasterConfig | None = None,
 ) -> AsyncIterator[dict[str, str]]:
     """SSE event generator for the streaming `/mcp/{server}` path.
 
-    The current MCP tool dispatch is synchronous — once a tool starts, it
-    runs to completion before yielding a value. We therefore can't emit
-    real token-by-token chunks here yet; what we *can* do is emit a
-    `heartbeat` event every `_HEARTBEAT_INTERVAL_S` seconds so the wire
-    stays warm through long-running tools (ask_project, delegate_task,
-    fan_out_ask), then emit the final envelope as a `result` or `error`
-    event.
+    Two paths:
+
+    1. `ask_project` against a local project: bypass FastMCP's sync tool
+       dispatch and call `ClaudeBackend.ask_local_stream` directly,
+       emitting each yielded text delta as a `chunk` event. The final
+       `result` event carries the assembled string for callers that
+       want a single terminal payload.
+
+    2. Everything else: dispatch through FastMCP's sync tool registry,
+       emit `heartbeat` events every `_HEARTBEAT_INTERVAL_S` seconds
+       while it runs, then emit the final envelope as a `result` or
+       `error` event.
 
     Event shapes (data is JSON-encoded for every event):
       heartbeat → {"elapsed_ms": <int>}
+      chunk     → {"text": <str>}
       result    → <MCP envelope, identical to JSON-mode response body>
       error     → {"status": <int>, "detail": <str>}
 
-    Future direction: once tools expose AsyncIterator-based streaming
-    (e.g. ask_project pipes Claude tokens), this generator will yield
-    `chunk` events between the heartbeats. The current shape is forward-
-    compatible — callers that already handle `chunk` events get nothing
-    today, callers that don't are unaffected.
+    SSH-targeted ask_project (`host` set) falls through to path 2 today
+    because remote stdout demux through ssh is a separate refactor.
     """
+    if (
+        config is not None
+        and body.method == "tools/call"
+        and isinstance(body.params, dict)
+        and body.params.get("name") == "ask_project"
+    ):
+        args = body.params.get("arguments")
+        if isinstance(args, dict) and args.get("host") in (None, "local"):
+            async for evt in _stream_ask_project_local(config, args):
+                yield evt
+            return
+
     start = time.monotonic()
     task = asyncio.create_task(asyncio.to_thread(_dispatch_mcp, mcp, body))
 
@@ -196,6 +212,120 @@ async def _stream_dispatch(
         return
 
     yield {"event": "result", "data": json.dumps(result)}
+
+
+async def _stream_ask_project_local(
+    config: HarbormasterConfig, arguments: dict[str, Any]
+) -> AsyncIterator[dict[str, str]]:
+    """Drive `ClaudeBackend.ask_local_stream` from inside the SSE dispatch.
+
+    Yields one `chunk` event per text delta the backend produces, then a
+    final `result` event with the assembled string in MCP envelope shape
+    so callers that don't speak `chunk` events still get the full answer.
+
+    Argument validation errors land as a `400` error event; backend
+    failures (timeout / exit_nonzero / parse_failure) land as `502`.
+    """
+    name = arguments.get("name")
+    question = arguments.get("question")
+    max_turns = arguments.get("max_turns", 5)
+
+    if not isinstance(name, str) or not name:
+        yield {
+            "event": "error",
+            "data": json.dumps(
+                {"status": 400, "detail": "params.arguments.name (string) is required"}
+            ),
+        }
+        return
+    if not isinstance(question, str) or not question:
+        yield {
+            "event": "error",
+            "data": json.dumps(
+                {"status": 400, "detail": "params.arguments.question (string) is required"}
+            ),
+        }
+        return
+    if not isinstance(max_turns, int) or max_turns <= 0:
+        yield {
+            "event": "error",
+            "data": json.dumps(
+                {"status": 400, "detail": "params.arguments.max_turns must be a positive int"}
+            ),
+        }
+        return
+
+    full_prompt = (
+        f"{question}\n\n"
+        "Return a concise markdown summary under 500 words. "
+        "Focus on the answer; skip unnecessary preamble."
+    )
+
+    # Build the iterator on the main thread — argument-validation /
+    # project-resolve errors surface here, BEFORE we lock a worker
+    # thread iterating the subprocess.
+    from harbormaster.tools._helpers import stream_ask_project_local
+
+    try:
+        sync_iter = stream_ask_project_local(
+            name=name, prompt=full_prompt, max_turns=max_turns, config=config,
+        )
+    except (BackendError, ValueError) as e:
+        yield {
+            "event": "error",
+            "data": json.dumps(
+                {"status": 400, "detail": f"{type(e).__name__}: {e}"}
+            ),
+        }
+        return
+
+    chunks: list[str] = []
+    sentinel = object()
+
+    def _next_or_sentinel() -> Any:
+        # PEP 479 / asyncio gotcha: StopIteration cannot be marshalled
+        # across the asyncio.to_thread Future boundary — the threadpool
+        # raises `TypeError: StopIteration interacts badly with
+        # generators and cannot be raised into a Future`. Convert to a
+        # sentinel value so the asyncio side can detect end-of-iter
+        # without ever propagating StopIteration through a Future.
+        try:
+            return next(sync_iter)
+        except StopIteration:
+            return sentinel
+
+    while True:
+        try:
+            chunk = await asyncio.to_thread(_next_or_sentinel)
+        except BackendError as e:
+            yield {
+                "event": "error",
+                "data": json.dumps(
+                    {"status": 502, "detail": f"BackendError({e.code}): {e}"}
+                ),
+            }
+            return
+        except (ValueError, FileNotFoundError) as e:
+            # Validation / project-resolve errors are raised inside the
+            # generator on first next() call — surface as 400.
+            yield {
+                "event": "error",
+                "data": json.dumps(
+                    {"status": 400, "detail": f"{type(e).__name__}: {e}"}
+                ),
+            }
+            return
+        if chunk is sentinel:
+            break
+        chunks.append(chunk)
+        yield {"event": "chunk", "data": json.dumps({"text": chunk})}
+
+    envelope = {
+        "result": {
+            "content": [{"type": "text", "text": "".join(chunks)}],
+        },
+    }
+    yield {"event": "result", "data": json.dumps(envelope)}
 
 
 def _dispatch_mcp(mcp: Any, body: McpProxyRequest) -> dict[str, Any]:
