@@ -215,3 +215,25 @@ def test_dashboard_graph_renders_with_real_viewbox(
         "Diagram rendered as a horizontal line — usually means "
         "Mermaid measured the hidden container at 0px and gave up."
     )
+
+
+# --- v7.0.0a6: language badge render assertion ------------------------
+
+
+def test_dashboard_card_renders_language_badge_helper(
+    page: Page, ui_url: str
+) -> None:
+    """The dashboard JS bundle exposes the languageBadgeClass helper.
+
+    We assert the helper exists and returns the unknown-bucket class
+    string for unrecognized inputs. The seeded conftest project does
+    not have a manifest, so its `language` defaults to 'unknown' and
+    the badge element is hidden by `x-show` — that's the expected
+    state. The helper itself must still resolve."""
+    page.goto(f"{ui_url}/")
+    page.wait_for_selector("text=demo-browser", timeout=5000)
+    cls = page.evaluate("languageBadgeClass('python')")
+    assert "blue-300" in cls
+    cls_unknown = page.evaluate("languageBadgeClass(null)")
+    assert "gray-500" in cls_unknown
+
