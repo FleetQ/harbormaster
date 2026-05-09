@@ -112,6 +112,14 @@ def run_backend(
         duration_ms=result.duration_ms,
     )
 
+    _maybe_extract_and_writeback_kg(
+        config=config,
+        project_name=name,
+        host=host,
+        answer=result.output,
+        tool=label_prefix,
+    )
+
     return _truncate(result.output, cap, label)
 
 
@@ -166,6 +174,84 @@ def _maybe_writeback_to_fleetq(
             answer=answer,
             tool=tool,
             metadata={"duration_ms": duration_ms},
+        )
+    finally:
+        writer.close()
+
+
+
+def _maybe_extract_and_writeback_kg(
+    *,
+    config: HarbormasterConfig,
+    project_name: str,
+    host: str | None,
+    answer: str,
+    tool: str,
+) -> None:
+    """Best-effort heuristic triple extraction + POST to FleetQ KG.
+
+    Skipped silently when:
+      - [fleetq] is disabled
+      - [fleetq] write_kg is false (default false; opt-in even when
+        write_trajectories is true, since KG triples are noisier and
+        operators may want trajectories without graph extraction)
+      - the [fleetq] extra is not installed
+      - the API token env var is empty
+      - the answer is empty / too short to extract from
+
+    Mirror of `_maybe_writeback_to_fleetq` — same fire-and-forget,
+    same silent-on-failure semantics. Three triple types: mentions,
+    uses, exposes (see harbormaster.fleetq.triples). Capped at
+    [fleetq].kg_max_triples_per_call to bound writeback cost on dense
+    answers.
+    """
+    if not (config.fleetq.enabled and config.fleetq.write_kg):
+        return
+    if not answer or len(answer.strip()) < 8:
+        return
+
+    api_token = os.environ.get(config.fleetq.api_token_env, "").strip()
+    if not api_token:
+        return
+
+    try:
+        from harbormaster.fleetq.kg import KGWriter
+        from harbormaster.fleetq.triples import extract_all
+    except ImportError:
+        return
+
+    # Cheap O(N) project-name lookup — discover_projects is cached at
+    # the OS level (git log + serena stat) and runs fast on every call.
+    try:
+        from harbormaster.projects import discover_projects
+        known_projects = [p.name for p in discover_projects(config.projects)]
+    except Exception:
+        logger.exception("kg: discover_projects failed; skipping mention extraction")
+        known_projects = []
+
+    triples = extract_all(
+        answer=answer,
+        source_project=project_name,
+        known_projects=known_projects,
+        max_triples=config.fleetq.kg_max_triples_per_call,
+    )
+    if not triples:
+        return
+
+    try:
+        writer = KGWriter(
+            base_url=config.fleetq.base_url,
+            api_token=api_token,
+        )
+    except ValueError:
+        return
+
+    try:
+        writer.write_triples(
+            triples=triples,
+            project_name=project_name,
+            host=host,
+            source_tool=tool,
         )
     finally:
         writer.close()

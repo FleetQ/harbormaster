@@ -72,6 +72,8 @@ class FleetQConfig(BaseModel):
     base_url: str = "https://app.fleetq.net"
     api_token_env: str = "FLEETQ_API_TOKEN"
     write_trajectories: bool = True
+    write_kg: bool = False
+    kg_max_triples_per_call: int = Field(default=50, gt=0)
     publish_a2a_cards: bool = False
     register_as_bridge: bool = False
     heartbeat_interval: int = Field(default=30, gt=0)
