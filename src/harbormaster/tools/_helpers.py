@@ -87,25 +87,35 @@ def run_backend(
     return _truncate(result.output, cap, label)
 
 
-def stream_ask_project_local(
+def make_ask_local_stream(
     *,
     name: str,
     prompt: str,
     max_turns: int,
     config: HarbormasterConfig,
 ) -> Iterator[str]:
-    """Streaming variant of run_backend for `ask_project` against a local
-    project. Yields assistant text deltas as `claude -p` produces them.
+    """Eagerly validate inputs and return the backend's streaming
+    iterator for `ask_project` against a local project.
+
+    Important: this function is **not** a generator function — `yield`
+    appears nowhere in its body. That's deliberate: argument validation
+    (project name, backend availability, project resolution) must run
+    when the function is called, not lazily on the first `next()` of
+    a returned generator. Lazy validation makes it impossible for the
+    SSE dispatcher to distinguish "bad input → 400" from "subprocess
+    died mid-stream → 502" because both errors bubble out of the same
+    `next()` call site.
 
     Local-only: SSH stdout demux is a separate refactor and shipping
     local-first unblocks the immediate use case (Bridge daemon running
     on the user's machine). Callers that want non-streaming behaviour
     keep using run_backend.
 
-    Failure modes (validate-first / backend-disabled / project lookup)
-    raise the same ValueError / BackendError that run_backend would —
-    callers (the SSE dispatcher in ui/routes.py) translate them to
-    `error` events at the MCP boundary.
+    Failure modes (raised eagerly — callers map to SSE error events):
+      - ValueError       → invalid project name / project not found
+      - BackendError     → backend disabled / streaming not supported
+                           / subprocess failure (raised lazily on first
+                           next() once iteration starts)
     """
     validate_project_name(name)
     backend = get_backend(config)
@@ -120,8 +130,56 @@ def stream_ask_project_local(
             code="config_error",
         )
     cwd = resolve_project(name, config.projects)
-    yield from backend.ask_local_stream(
+    return backend.ask_local_stream(
         cwd=cwd, prompt=prompt, max_turns=max_turns,
+    )
+
+
+def make_ask_remote_stream(
+    *,
+    name: str,
+    prompt: str,
+    max_turns: int,
+    host: str,
+    config: HarbormasterConfig,
+) -> Iterator[str]:
+    """SSH counterpart to make_ask_local_stream — eagerly validates and
+    returns the remote streaming iterator.
+
+    Same eager-validation contract as the local variant: argument
+    validation runs synchronously when the function is called, not on
+    first next(), so callers can distinguish bad input (400) from
+    backend runtime failures (502).
+
+    Failure modes (raised eagerly):
+      - ValueError      → invalid project name
+      - BackendError    → backend disabled / streaming not supported
+                          / SSH or remote-process failure (raised on
+                          first next() once iteration begins)
+    """
+    validate_project_name(name)
+    backend = get_backend(config)
+    if backend is None:
+        raise BackendError(
+            "backend 'claude' is not enabled in config",
+            code="config_error",
+        )
+    if not hasattr(backend, "ask_remote_stream"):
+        raise BackendError(
+            f"backend {backend.name!r} does not support remote streaming",
+            code="config_error",
+        )
+    host_cfg = config.hosts.get(host)
+    remote_htdocs = host_cfg.remote_htdocs if host_cfg else "~/htdocs"
+    connect_timeout = host_cfg.connect_timeout if host_cfg else 10
+    total_timeout = host_cfg.total_timeout if host_cfg else 120
+    return backend.ask_remote_stream(
+        host=host,
+        remote_cwd=f"{remote_htdocs}/{name}",
+        prompt=prompt,
+        max_turns=max_turns,
+        connect_timeout=connect_timeout,
+        total_timeout=total_timeout,
     )
 
 
