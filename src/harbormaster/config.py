@@ -86,6 +86,13 @@ class FleetQConfig(BaseModel):
     publish_a2a_cards: bool = False
     register_as_bridge: bool = False
     heartbeat_interval: int = Field(default=30, gt=0)
+    # v4.0.0a6: BridgeRelay's agent.request dispatcher worker count.
+    # 1 = single-worker (v3.0.0a5 default; serial dispatch from queue).
+    # >1 = bounded ThreadPoolExecutor inside the worker — only enable
+    # when MCP tool thread-safety has been verified for your setup
+    # (the in-process stress test in tests/integration/test_dispatcher_stress
+    # can serve as a sanity check).
+    dispatcher_max_workers: int = Field(default=1, gt=0, le=16)
 
 
 class HistoryConfig(BaseModel):

@@ -848,3 +848,116 @@ def test_relay_worker_thread_clean_shutdown(fake_pusher_factory):
     assert relay._worker_thread_handle is None
     assert relay._worker_queue is None
     assert not worker.is_alive()
+
+
+# --- v4.0.0a6: multi-worker dispatcher pool -----------------------------
+
+
+def test_relay_single_worker_default_no_pool(fake_pusher_factory):
+    """Default dispatcher_max_workers=1 → no ThreadPoolExecutor created."""
+    relay = BridgeRelay(
+        base_url="http://example",
+        api_token="t",
+        team_id="team-1",
+        app_key="key",
+        relay_url="wss://example:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=lambda payload: iter([]),
+        worker_thread=True,
+    )
+    relay.start()
+    assert relay._dispatcher_pool is None
+    relay.stop()
+
+
+def test_relay_multi_worker_creates_pool(fake_pusher_factory):
+    """dispatcher_max_workers=4 → ThreadPoolExecutor instantiated."""
+    relay = BridgeRelay(
+        base_url="http://example",
+        api_token="t",
+        team_id="team-1",
+        app_key="key",
+        relay_url="wss://example:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=lambda payload: iter([]),
+        worker_thread=True,
+        dispatcher_max_workers=4,
+    )
+    relay.start()
+    assert relay._dispatcher_pool is not None
+    relay.stop()
+    # After stop the pool reference is cleared.
+    assert relay._dispatcher_pool is None
+
+
+def test_relay_multi_worker_dispatches_concurrently(fake_pusher_factory):
+    """With dispatcher_max_workers > 1, two requests should run in
+    overlapping windows (unlike single-worker which serializes)."""
+    import threading
+    import time
+
+    in_flight = []
+    in_flight_lock = threading.Lock()
+    max_concurrent = [0]
+
+    def slow_handler(payload):
+        with in_flight_lock:
+            in_flight.append(threading.get_ident())
+            max_concurrent[0] = max(max_concurrent[0], len(in_flight))
+        time.sleep(0.05)
+        with in_flight_lock:
+            in_flight.remove(threading.get_ident())
+        yield "ok"
+
+    relay = BridgeRelay(
+        base_url="http://example",
+        api_token="t",
+        team_id="team-1",
+        app_key="key",
+        relay_url="wss://example:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=slow_handler,
+        worker_thread=True,
+        dispatcher_max_workers=4,
+    )
+    relay.start()
+
+    class _StubChannel2:
+        def __init__(self):
+            self.events = []
+        def trigger(self, event, data):
+            self.events.append((event, data))
+    relay._channel = _StubChannel2()
+
+    # Submit 4 requests in rapid succession.
+    for i in range(4):
+        relay._on_agent_request({"request_id": f"req-{i}", "method": "tools/list"})
+
+    # Give the pool time to drain.
+    deadline = time.time() + 2.0
+    while len(relay._channel.events) < 8 and time.time() < deadline:
+        time.sleep(0.01)
+
+    relay.stop()
+
+    # With max_workers=4 and slow_handler holding for 50ms, multiple
+    # dispatches should have overlapped — max_concurrent must be > 1.
+    assert max_concurrent[0] > 1, (
+        f"expected overlapping dispatches, got max_concurrent={max_concurrent[0]}"
+    )
+
+
+def test_relay_dispatcher_max_workers_clamped_to_min_1(fake_pusher_factory):
+    """dispatcher_max_workers=0 must clamp to 1 (single-worker fallback)."""
+    relay = BridgeRelay(
+        base_url="http://example",
+        api_token="t",
+        team_id="team-1",
+        app_key="key",
+        relay_url="wss://example:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=lambda payload: iter([]),
+        worker_thread=True,
+        dispatcher_max_workers=0,
+    )
+    assert relay._dispatcher_max_workers == 1
