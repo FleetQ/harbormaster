@@ -231,14 +231,58 @@ def _maybe_extract_and_writeback_kg(
         logger.exception("kg: discover_projects failed; skipping mention extraction")
         known_projects = []
 
-    triples = extract_all(
-        answer=answer,
-        source_project=project_name,
-        known_projects=known_projects,
-        max_triples=config.fleetq.kg_max_triples_per_call,
-    )
+    from harbormaster.fleetq.kg import Triple
+
+    extractor = config.fleetq.kg_extractor
+    triples: list[Triple] = []
+    # Heuristic path: cheap regex pass; runs for "heuristic" + "both".
+    if extractor in ("heuristic", "both"):
+        triples.extend(
+            extract_all(
+                answer=answer,
+                source_project=project_name,
+                known_projects=known_projects,
+                max_triples=config.fleetq.kg_max_triples_per_call,
+            )
+        )
+    # LLM path: one extra ask_local() call; runs for "llm" + "both".
+    # Local-only — remote `host` skips LLM extraction entirely (the
+    # SSH round trip per call is too expensive to justify in v2.0.0a5).
+    if extractor in ("llm", "both") and not is_remote(host):
+        try:
+            from harbormaster.backends import get_backend_for_project
+            from harbormaster.fleetq.triples_llm import extract_via_llm
+        except ImportError:
+            pass
+        else:
+            backend = get_backend_for_project(config, project_name)
+            cwd: Path | None
+            try:
+                cwd = resolve_project(project_name, config.projects)
+            except ValueError:
+                cwd = None
+                backend = None
+            if backend is not None and cwd is not None:
+                triples.extend(
+                    extract_via_llm(
+                        answer=answer,
+                        source_project=project_name,
+                        backend=backend,
+                        cwd=cwd,
+                        max_triples=config.fleetq.kg_llm_max_triples,
+                    )
+                )
     if not triples:
         return
+    # Dedup by (subject, predicate, object) — keep highest-confidence
+    # variant when the same triple is produced by both paths.
+    deduped: dict[tuple[str, str, str], Triple] = {}
+    for t in triples:
+        key = (t.subject, t.predicate, t.obj)
+        existing = deduped.get(key)
+        if existing is None or t.confidence > existing.confidence:
+            deduped[key] = t
+    triples = list(deduped.values())[: config.fleetq.kg_max_triples_per_call]
 
     try:
         writer = KGWriter(
