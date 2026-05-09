@@ -371,3 +371,205 @@ def test_mcp_endpoint_protected_by_bearer_middleware(populated_config):
         json={"method": "tools/list", "params": {}},
     )
     assert r.status_code == 200
+
+
+# ----- POST /mcp/{server} streaming (SSE) ----------------------------------
+
+
+def _parse_sse(text: str) -> list[dict[str, str]]:
+    """Split a raw SSE response body into [{event, data}, ...] entries."""
+    import contextlib
+    import json as _json
+
+    events: list[dict[str, str]] = []
+    cur: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.rstrip("\r")
+        if not line:
+            if cur:
+                events.append(cur)
+                cur = {}
+            continue
+        if line.startswith(":"):
+            continue  # comment / keep-alive
+        if line.startswith("event: "):
+            cur["event"] = line[len("event: ") :]
+        elif line.startswith("data: "):
+            cur["data"] = line[len("data: ") :]
+    if cur:
+        events.append(cur)
+    # Decode data as JSON for convenience.
+    for e in events:
+        if "data" in e:
+            with contextlib.suppress(_json.JSONDecodeError):
+                e["data_json"] = _json.loads(e["data"])
+    return events
+
+
+def test_mcp_proxy_returns_json_when_accept_is_default(app_with_mcp):
+    """No streaming Accept header → unchanged JSON behaviour (regression)."""
+    client = TestClient(app_with_mcp)
+    r = client.post(
+        "/mcp/harbormaster",
+        json={"method": "tools/list", "params": {}},
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/json")
+    assert "tools" in r.json()["result"]
+
+
+def test_mcp_proxy_streams_when_accept_event_stream(app_with_mcp):
+    """Accept: text/event-stream → SSE response with a single result event
+    for a fast tool that completes inside one heartbeat interval."""
+    client = TestClient(app_with_mcp)
+    with client.stream(
+        "POST",
+        "/mcp/harbormaster",
+        headers={"Accept": "text/event-stream"},
+        json={
+            "method": "tools/call",
+            "params": {"name": "list_hosts", "arguments": {}},
+            "timeout": 5,
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        body = resp.read().decode()
+
+    events = _parse_sse(body)
+    # Last event must be the final result; preceding events (if any) are
+    # heartbeats. list_hosts is fast (~5 ms) so we expect zero heartbeats.
+    assert events, "no SSE events were emitted"
+    final = events[-1]
+    assert final["event"] == "result"
+    payload = final["data_json"]
+    assert "result" in payload
+    assert payload["result"]["content"][0]["type"] == "text"
+
+
+def test_mcp_proxy_streams_emits_heartbeat_for_slow_tool(
+    populated_config, monkeypatch
+):
+    """Tool that exceeds one heartbeat interval should produce >=1 heartbeat
+    event before the final result. Drive the interval down to 0.05s and
+    register a tool that sleeps 0.2s to keep the test fast."""
+    import time as _time
+
+    from mcp.server.fastmcp import FastMCP
+
+    from harbormaster.ui import routes as routes_module
+
+    monkeypatch.setattr(routes_module, "_HEARTBEAT_INTERVAL_S", 0.05)
+
+    mcp = FastMCP("harbormaster-test")
+
+    @mcp.tool()
+    def slow_one() -> str:
+        _time.sleep(0.2)
+        return "done"
+
+    app = create_app(populated_config, mcp=mcp)
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/mcp/harbormaster",
+        headers={"Accept": "text/event-stream"},
+        json={
+            "method": "tools/call",
+            "params": {"name": "slow_one", "arguments": {}},
+            "timeout": 5,
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        body = resp.read().decode()
+
+    events = _parse_sse(body)
+    types = [e.get("event") for e in events]
+
+    assert types[-1] == "result", f"final event must be result, got {types}"
+    heartbeats = [e for e in events if e.get("event") == "heartbeat"]
+    assert len(heartbeats) >= 1, (
+        f"expected >=1 heartbeat for a 200ms tool with 50ms interval, "
+        f"got events={types}"
+    )
+    # Heartbeats carry monotonically non-decreasing elapsed_ms values.
+    elapsed_values = [e["data_json"]["elapsed_ms"] for e in heartbeats]
+    assert elapsed_values == sorted(elapsed_values)
+    # At least one heartbeat happened *during* the tool, not at t=0.
+    assert max(elapsed_values) >= 50
+
+
+def test_mcp_proxy_streams_error_event_on_unknown_tool(app_with_mcp):
+    """Even in streaming mode, a 404-class error from _dispatch_mcp must
+    arrive as an SSE `error` event with status=404, not as an HTTP 404
+    pre-stream (so the caller sees one consistent transport per request)."""
+    client = TestClient(app_with_mcp)
+    with client.stream(
+        "POST",
+        "/mcp/harbormaster",
+        headers={"Accept": "text/event-stream"},
+        json={
+            "method": "tools/call",
+            "params": {"name": "nonexistent_tool", "arguments": {}},
+        },
+    ) as resp:
+        assert resp.status_code == 200  # SSE wrapper is 200, error is in-band
+        body = resp.read().decode()
+
+    events = _parse_sse(body)
+    assert events[-1]["event"] == "error"
+    err = events[-1]["data_json"]
+    assert err["status"] == 404
+    assert "not found" in err["detail"]
+
+
+def test_mcp_proxy_streams_error_event_on_tool_exception(populated_config):
+    """A tool that raises arbitrary Exception must surface as the regular
+    isError envelope (consistent with JSON mode), wrapped in an SSE
+    `result` event — NOT an `error` event. Reason: in JSON mode tool
+    exceptions are 200 OK with isError=true; SSE preserves that semantics
+    so callers don't need a different code path for streaming."""
+    from mcp.server.fastmcp import FastMCP
+
+    mcp = FastMCP("harbormaster-test")
+
+    @mcp.tool()
+    def boom() -> str:
+        raise RuntimeError("simulated tool failure")
+
+    app = create_app(populated_config, mcp=mcp)
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/mcp/harbormaster",
+        headers={"Accept": "text/event-stream"},
+        json={
+            "method": "tools/call",
+            "params": {"name": "boom", "arguments": {}},
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        body = resp.read().decode()
+
+    events = _parse_sse(body)
+    assert events[-1]["event"] == "result"
+    envelope = events[-1]["data_json"]
+    assert envelope["result"]["isError"] is True
+    assert "simulated tool failure" in envelope["result"]["content"][0]["text"]
+
+
+def test_mcp_proxy_streams_handles_compound_accept_header(app_with_mcp):
+    """Real-world clients send Accept lists like
+    `text/event-stream, application/json;q=0.9` — the streaming branch
+    must trigger as long as text/event-stream appears anywhere."""
+    client = TestClient(app_with_mcp)
+    with client.stream(
+        "POST",
+        "/mcp/harbormaster",
+        headers={"Accept": "application/json, text/event-stream;q=0.9"},
+        json={"method": "tools/list", "params": {}},
+    ) as resp:
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
