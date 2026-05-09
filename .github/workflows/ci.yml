@@ -289,6 +289,35 @@ jobs:
             kill "$UI_PID" 2>/dev/null || true
           fi
 
+  smoke-fleetq:
+    # Gated live smoke against a real FleetQ instance. Skipped by default —
+    # set the `FLEETQ_SMOKE_ENABLED` repo variable to `true` and configure
+    # the `FLEETQ_TEST_BASE_URL` + `FLEETQ_TEST_API_TOKEN` secrets to enable.
+    # Build is intentionally NOT in this job's `needs:` so a skipped run on
+    # public PRs doesn't block release artifacts. Inputs are repo-admin
+    # configured (`vars.*` / `secrets.*`) — no untrusted github.event.* is
+    # consumed, consistent with the workflow-wide security note above.
+    name: Live FleetQ Bridge smoke (gated)
+    runs-on: ubuntu-24.04
+    needs: test
+    if: ${{ vars.FLEETQ_SMOKE_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra fleetq
+
+      - name: Run live FleetQ Bridge smoke
+        env:
+          FLEETQ_TEST_BASE_URL: ${{ secrets.FLEETQ_TEST_BASE_URL }}
+          FLEETQ_TEST_API_TOKEN: ${{ secrets.FLEETQ_TEST_API_TOKEN }}
+        run: uv run python tests/smoke_fleetq.py
+
   build:
     name: Build sdist + wheel
     runs-on: ubuntu-24.04
