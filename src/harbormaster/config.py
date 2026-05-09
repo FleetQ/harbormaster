@@ -77,6 +77,24 @@ class FleetQConfig(BaseModel):
     heartbeat_interval: int = Field(default=30, gt=0)
 
 
+
+class HistoryConfig(BaseModel):
+    model_config = _FORBID_EXTRA
+
+    enabled: bool = False
+    embedding_backend: Literal["fastembed", "fts5"] = "fastembed"
+    fastembed_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_dim: int = Field(default=384, gt=0)
+    db_dir: str = "~/.harbormaster"
+    retain_recent_k: int = Field(default=1000, gt=0)
+    retain_top_recalled_r: int = Field(default=100, gt=0)
+    log_ask_project: bool = True
+    log_delegate_task: bool = True
+    log_fan_out_ask: bool = True
+    default_top_k: int = Field(default=5, gt=0)
+    default_min_similarity: float = Field(default=0.6, ge=0.0, le=1.0)
+
+
 class HarbormasterConfig(BaseModel):
     model_config = _FORBID_EXTRA
 
@@ -88,6 +106,7 @@ class HarbormasterConfig(BaseModel):
     hosts: dict[str, HostConfig] = Field(default_factory=dict)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     fleetq: FleetQConfig = Field(default_factory=FleetQConfig)
+    history: HistoryConfig = Field(default_factory=HistoryConfig)
 
 
 def _expand(p: str) -> Path:

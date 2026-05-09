@@ -84,6 +84,31 @@ heartbeat_interval = 30
 Set `FLEETQ_API_TOKEN` in the harbormaster process environment to a
 Sanctum bearer token with a `team:<uuid>` ability.
 
+Q&A history (v1.2 phase 1) — opt-in semantic recall over prior
+ask_project / delegate_task trajectories:
+
+```toml
+[history]
+enabled = true                         # default false; everything else is a no-op until this is true
+embedding_backend = "fastembed"        # "fastembed" (semantic) | "fts5" (lexical only)
+fastembed_model = "BAAI/bge-small-en-v1.5"
+embedding_dim = 384                    # must match the model's output dim
+db_dir = "~/.harbormaster"             # one qa_<host>.db file per host
+retain_recent_k = 1000                 # most-recent rows always kept
+retain_top_recalled_r = 100            # most-recalled rows kept regardless of age
+log_ask_project = true                 # per-tool opt-out flags
+log_delegate_task = true
+log_fan_out_ask = true
+default_top_k = 5                      # recall_qa default if caller omits
+default_min_similarity = 0.6           # vec-path filter; ignored on FTS5 fallback
+```
+
+Install the `[history]` extra (`pipx install 'harbormaster-mcp[history]'`)
+to get `sqlite-vec` + `fastembed`. Without the extra,
+`embedding_backend = "fastembed"` falls back silently to FTS5 / bm25
+lexical recall. The fastembed ONNX model (~50MB) downloads on the
+first encode call and caches under the user's HuggingFace cache.
+
 Full TOML schema is enforced by Pydantic (`extra = "forbid"`) — typos
 fail loudly at startup.
 

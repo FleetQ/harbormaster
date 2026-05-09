@@ -44,6 +44,22 @@ fleetq = [
     # harbormaster.fleetq.relay.BridgeRelay.
     "pysher>=1.0",
 ]
+history = [
+    # sqlite-vec ships a SQLite extension and Python loader. Used by the
+    # v1.2 Q&A history store for cosine-similarity recall over question
+    # embeddings.
+    "sqlite-vec>=0.1.6",
+    # fastembed runs BAAI/bge-small-en-v1.5 locally (~50MB ONNX model,
+    # downloaded on first encode call). Default embedding backend; the
+    # store falls back to FTS5 / bm25 when the [history] extra is absent
+    # or [history].embedding_backend is set to "fts5".
+    "fastembed>=0.3",
+    # Pin onnxruntime below 1.26.0 — that release shipped without the
+    # cp312 macOS arm64 wheel (1.25.x and 1.26.x cp311/cp313 are fine).
+    # This pin can be removed once onnxruntime 1.26.1+ restores the
+    # missing wheel. Tracked upstream: https://github.com/microsoft/onnxruntime/issues
+    "onnxruntime<1.26",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -52,13 +68,16 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.8",
     "hypothesis>=6.100",
-    # UI + fleetq extras pulled in for the test suite — keeps a single
-    # `uv sync --extra dev` command working for contributors who don't want
-    # to enumerate every optional extra.
+    # UI + fleetq + history extras pulled in for the test suite — keeps
+    # a single `uv sync --extra dev` command working for contributors
+    # who don't want to enumerate every optional extra.
     "fastapi>=0.110",
     "jinja2>=3.1",
     "httpx>=0.27",
     "pysher>=1.0",
+    "sqlite-vec>=0.1.6",
+    "fastembed>=0.3",
+    "onnxruntime<1.26",
 ]
 
 [project.scripts]
@@ -94,6 +113,14 @@ files = ["src/harbormaster"]
 
 [[tool.mypy.overrides]]
 module = "pysher"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "fastembed"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "sqlite_vec"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

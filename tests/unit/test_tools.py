@@ -23,6 +23,7 @@ def test_all_v10_tools_registered():
         "ask_project",
         "delegate_task",
         "list_hosts",
+        "recall_qa",  # added in v1.0.0a17 (v1.2 phase 1)
     }
     missing = expected - names
     assert not missing, f"missing tools: {missing}"

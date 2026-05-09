@@ -22,8 +22,9 @@ Optional SSH fan-out lets the same tools target remote VPS hosts. Optional Fleet
 | `ask_project(name, question, max_turns=5, host=None)` | Spawn `claude -p` in project cwd, return ≤ 800-word summary. | ~30 s / ~90 s |
 | `delegate_task(name, task, deliverable, allow_writes=False, host=None)` | Read-only delegation; v1 fails closed for writes. | ~60 s / ~90 s |
 | `fan_out_ask(question, project_filter=None, host_filter=None, max_concurrency=5, max_turns=3)` | Parallel multi-project Q&A. Returns one section per target. | ~`max_turns × claude_p_time` × ⌈targets/max_concurrency⌉ |
+| `recall_qa(question, top_k=5, host=None, project=None, min_similarity=0.6)` | Semantic recall over prior `ask_project` / `delegate_task` answers (v1.2 phase 1). Opt-in via `[history] enabled = true`. | ~50 ms (FTS5) / ~150 ms (vec, after model warm-up) |
 
-More tools (`recall_qa`, …) land in v1.1–1.2. See [`docs/architecture-harbormaster.md`](docs/architecture-harbormaster.md).
+See [`docs/architecture-harbormaster.md`](docs/architecture-harbormaster.md) for the full design (Q&A history is §17).
 
 ## Install
 
@@ -152,13 +153,19 @@ JSON mode (no `Accept: text/event-stream`, no `stream` flag) is unchanged — fu
 
 ## Status
 
-**v1.0.0a16** — v1.1 phase complete shipped 2026-05-09. The last v1.1 deliverable (Memory writeback to FleetQ Memory domain) and an 8-section operator guide both landed. Memory writeback is opt-in via `[fleetq] write_trajectories = true`; failures are best-effort logged, never fail the originating tool call. `docs/operator-guide.md` covers deployment, TOML reference, auth, reverse-proxy config, logging, upgrades, troubleshooting, and systemd/launchd templates. After this release v1.0 + v1.1 are both feature-complete; what remains for `v1.0.0` GA is the v1.2 compounding phase.
+**v1.0.0a17** — v1.2 phase 1 (Q&A history) shipped 2026-05-09. New
+`recall_qa` MCP tool exposes semantic recall over every past
+`ask_project` / `delegate_task` trajectory, persisted to a per-host
+sqlite-vec store. Default embedding backend is fastembed
+(BAAI/bge-small-en-v1.5, runs locally, ~50MB ONNX); falls back to
+FTS5 / bm25 when the optional `[history]` extra is missing. Opt-in via
+`[history] enabled = true`. See [`docs/architecture-harbormaster.md` §17](docs/architecture-harbormaster.md).
 
 | Phase | Status | Focus |
 |-------|--------|-------|
 | v1.0 | **Complete** (a8–a14) | Local + SSH + Live UI + PyPI alpha publish pipeline + SSE chunk streaming on both sides + FleetQ Bridge HTTP-tunnel mode |
 | v1.1 | **Complete** (a13–a16) | Platform Tool seeder ✅ a13 · A2A Agent Card per project ✅ a15 · live FleetQ smoke ✅ a11 · `update_endpoints` watch ✅ a10 · Memory writeback ✅ a16 · operator guide ✅ a16 |
-| v1.2 | Pending | Q&A history (sqlite-vec), federated KG via FleetQ Memory, auto project graph (parse `composer.json` / `package.json` / `pyproject.toml`), cross-session memory recall |
+| v1.2 | **In progress** (a17→) | Q&A history with sqlite-vec + fastembed ✅ a17 · federated KG via FleetQ KnowledgeGraph (a18) · auto project graph (a19) · cross-session memory recall (a20) |
 
 The original 6-week roadmap is largely complete on the v1.0 axis. v1.1 has shipped its biggest deliverables (Bridge integration, streaming end-to-end, Platform Tool seed, A2A cards). v1.2 (compounding) is the remaining phase before dropping the alpha tag and tagging `v1.0.0` GA.
 

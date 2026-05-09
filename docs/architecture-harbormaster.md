@@ -540,7 +540,149 @@ incrementally.
 
 ---
 
-## 17. Out-of-architecture (decisions deferred)
+## 17. Q&A history with semantic recall (v1.2 phase 1)
+
+Harbormaster persists every successful `ask_project` / `delegate_task`
+trajectory to a per-host sqlite database, indexed by question
+embedding. The companion `recall_qa` tool returns prior answers that
+semantically match a new question — enabling the main session to
+short-circuit duplicate work without re-spawning a `claude -p` subagent.
+
+### Storage layout
+
+One sqlite file per host:
+
+```
+~/.harbormaster/
+  qa_local.db
+  qa_friday.db
+  qa_hetzner-1.db
+  ...
+```
+
+Per-host isolation matches the fact that a question against `friday`'s
+copy of `pricex` is semantically different from the same question
+against the local copy — different commit, different state, different
+configuration. Aggregated cross-host recall is intentionally deferred
+to v1.2 phase 4.
+
+### Schema (per-db)
+
+```sql
+CREATE TABLE qa_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    question        TEXT NOT NULL,
+    answer          TEXT NOT NULL,
+    project         TEXT NOT NULL,
+    host            TEXT NOT NULL,           -- "local" | host alias
+    tool            TEXT NOT NULL,           -- "ask" | "delegate" | ...
+    created_at      INTEGER NOT NULL,        -- unix epoch
+    duration_ms     INTEGER,                 -- ms in claude -p
+    cost_cents      INTEGER,                 -- nullable; populated when stream-json yields cost
+    recall_count    INTEGER NOT NULL DEFAULT 0,
+    last_recalled_at INTEGER
+);
+
+-- vec track (created when sqlite-vec extension loads):
+CREATE VIRTUAL TABLE qa_vec USING vec0(embedding float[384]);
+
+-- fts track (always created, used as fallback when vec is missing):
+CREATE VIRTUAL TABLE qa_fts USING fts5(
+    question, answer,
+    content='qa_log', content_rowid='id',
+    tokenize='porter unicode61'
+);
+```
+
+The vec dim (384) matches the default fastembed model
+(`BAAI/bge-small-en-v1.5`). Switching dim requires a fresh db file;
+we don't migrate vectors across dimensions.
+
+### Embedding backends
+
+| Backend | Trigger | Network | Cost | Quality |
+|---------|---------|---------|------|---------|
+| `fastembed` (default) | `[history] embedding_backend = "fastembed"` + `[history]` extra installed | One-time model download (~50MB) | $0 | Strong semantic recall |
+| `fts5` | `[history] embedding_backend = "fts5"`, OR fastembed missing at runtime | None | $0 | Lexical only (bm25) — weaker semantically but zero-friction |
+
+`get_embedding_backend(config)` falls back from `fastembed` to `fts5`
+silently when the package is unavailable so the rest of the feature
+keeps working.
+
+### Three-gate opt-in (mirrors the FleetQ writeback pattern from §10)
+
+Before `_maybe_record_qa` even opens a connection:
+
+1. `[history] enabled = true` (default `false`)
+2. `[history] log_<tool> = true` (default `true` for all tools — set
+   `log_ask_project = false` to silence one tool)
+3. The `harbormaster.history` import succeeds (i.e. base sqlite is
+   importable; the extension is optional)
+
+All three must pass. Failures inside the store are logged at WARNING
+level and never propagate — same fire-and-forget semantics as the
+FleetQ writeback. The user's MCP response is already in flight by the
+time `_maybe_record_qa` runs.
+
+### Retention
+
+After each insert, `prune(retain_recent_k, retain_top_recalled_r)`
+keeps the union of:
+
+- the K most recent rows by `created_at` (default 1000)
+- the R most-recalled rows by `recall_count` (default 100)
+
+Defaults give a long tail of "this question came up a lot, even if
+it's old" without unbounded growth. Both knobs are
+`[history].retain_recent_k` / `[history].retain_top_recalled_r`.
+
+### `recall_qa` MCP tool
+
+```python
+recall_qa(
+    question: str,
+    top_k: int | None = None,        # default from [history].default_top_k (5)
+    host: str | None = None,         # default: "local"
+    project: str | None = None,
+    min_similarity: float | None = None,  # default 0.6 (vec path only)
+) -> {
+    "enabled": bool,
+    "backend": "fastembed" | "fts5" | None,
+    "host": str,
+    "matches": [{
+        "id": int, "question": str, "answer": str,
+        "project": str, "host": str, "tool": str,
+        "created_at": int, "score": float, "recall_count": int,
+    }],
+    "message": str | None,    # present on disabled / unavailable
+}
+```
+
+Vec path: scores are cosine similarity (1.0 = exact, 0.0 = orthogonal).
+FTS path: scores are normalized bm25 (`1 / (1 + |bm25|)`), comparable
+across queries within the same db but not directly comparable to vec
+scores.
+
+### Failure modes (all silent + best-effort)
+
+| Failure | Behavior |
+|---------|----------|
+| `[history]` extra missing | `recall_qa` returns `{enabled: false, message: "install ..."}`; `_maybe_record_qa` is a no-op |
+| sqlite-vec not loadable | Falls back to FTS5 path automatically |
+| fastembed missing | Falls back to FTS5 path automatically |
+| Embedding dim mismatch | Skips vec insert with WARNING; FTS5 row still written |
+| sqlite I/O error during insert | Logs exception, rolls back, returns `None` from `record()` |
+
+### Out of scope for phase 1 (filed for later phases)
+
+- **Cross-host federation**: aggregating recall across all `qa_*.db`
+  files. Phase 4 territory after v1.2 phase 2 (FleetQ KG) lands.
+- **Auto-grounding**: prepending top-3 recall matches to the
+  `claude -p` prompt for free context loading. Phase 4.
+- **Embedding upgrade-in-place**: switching `embedding_dim` requires
+  starting a fresh db file today; no migration tool ships.
+
+## 18. Out-of-architecture (decisions deferred)
 
 - Tauri / Electron native wrapper.
 - Multi-user UI (post-v1).
