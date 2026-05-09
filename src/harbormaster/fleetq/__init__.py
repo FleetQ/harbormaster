@@ -9,6 +9,7 @@ See `docs/fleetq-bridge-contract.md` for the discovered FleetQ API contract.
 from harbormaster.fleetq.bridge import BridgeClient, BridgeError, RegisterResponse
 from harbormaster.fleetq.endpoints import HARBORMASTER_TOOLS, build_manifest
 from harbormaster.fleetq.heartbeat import HeartbeatLoop
+from harbormaster.fleetq.memory import MemoryWriter
 from harbormaster.fleetq.relay import BridgeRelay
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
     "BridgeError",
     "BridgeRelay",
     "HeartbeatLoop",
+    "MemoryWriter",
     "RegisterResponse",
     "build_manifest",
 ]

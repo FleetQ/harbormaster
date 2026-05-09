@@ -46,6 +46,11 @@ def run_backend(
     is purely orchestration: validate the project name, pick the backend,
     pick local-vs-remote, dispatch, and translate exceptions to strings at
     the MCP boundary.
+
+    On successful completion, optionally writes the trajectory back to
+    FleetQ Memory (when [fleetq] is enabled and write_trajectories is
+    true). Writeback failures are logged but never propagate — the
+    user's response is already in flight by the time we attempt it.
     """
     try:
         validate_project_name(name)
@@ -84,7 +89,73 @@ def run_backend(
     except BackendError as e:
         return f"Error: {e}"
 
+    _maybe_writeback_to_fleetq(
+        config=config,
+        project_name=name,
+        host=host,
+        prompt=prompt,
+        answer=result.output,
+        tool=label_prefix,
+        duration_ms=result.duration_ms,
+    )
+
     return _truncate(result.output, cap, label)
+
+
+def _maybe_writeback_to_fleetq(
+    *,
+    config: HarbormasterConfig,
+    project_name: str,
+    host: str | None,
+    prompt: str,
+    answer: str,
+    tool: str,
+    duration_ms: int,
+) -> None:
+    """Best-effort POST of the trajectory to FleetQ /api/v1/memory.
+
+    Skipped silently when:
+      - [fleetq] is disabled
+      - write_trajectories is false
+      - the [fleetq] extra is not installed
+      - the API token env var is empty
+
+    Network / HTTP failures are logged at WARNING level but never
+    propagate. This function is fire-and-forget from the caller's
+    perspective — the MCP tool's response is already being prepared
+    by the time we get here.
+    """
+    if not (config.fleetq.enabled and config.fleetq.write_trajectories):
+        return
+
+    api_token = os.environ.get(config.fleetq.api_token_env, "").strip()
+    if not api_token:
+        return
+
+    try:
+        from harbormaster.fleetq.memory import MemoryWriter
+    except ImportError:
+        return
+
+    try:
+        writer = MemoryWriter(
+            base_url=config.fleetq.base_url,
+            api_token=api_token,
+        )
+    except ValueError:
+        return
+
+    try:
+        writer.write_trajectory(
+            project_name=project_name,
+            host=host,
+            question=prompt,
+            answer=answer,
+            tool=tool,
+            metadata={"duration_ms": duration_ms},
+        )
+    finally:
+        writer.close()
 
 
 def make_local_backend_stream(
