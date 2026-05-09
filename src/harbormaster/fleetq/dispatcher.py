@@ -46,6 +46,62 @@ logger = logging.getLogger(__name__)
 
 SERVER_NAME = "harbormaster"
 
+# v5.0.0a3: tools verified safe to run concurrently under the v4.0.0a6
+# dispatcher pool. Operators with custom plugin tools should add them
+# to this set explicitly OR list them under [fleetq] dispatcher_unsafe_tools
+# to keep them on the single-worker path.
+#
+# All current first-party tools passed the v5.0.0a2 fake-claude stress;
+# read-only tools are inherently safe; backend-invoking tools were proven
+# safe by the 50-concurrent stress test. Any future tool that holds
+# process-global state (e.g. a write-side cache) must be added to the
+# operator's unsafe list until proven otherwise.
+SAFE_FOR_PARALLEL: frozenset[str] = frozenset({
+    # read-only
+    "list_projects",
+    "list_hosts",
+    "project_status",
+    "project_graph",
+    "recall_qa",
+    # backend-invoking (subprocess-isolated)
+    "ask_project",
+    "delegate_task",
+    "fan_out_ask",
+})
+
+
+def is_tool_safe_for_parallel(
+    payload: dict[str, Any],
+    *,
+    unsafe_tools: frozenset[str] | None = None,
+) -> bool:
+    """Decide whether a given dispatch payload is safe to run on the pool.
+
+    tools/list calls have no tool name and are inherently safe (pure
+    introspection). For tools/call, the tool name is checked against the
+    SAFE_FOR_PARALLEL allowlist AND the operator's optional deny list.
+
+    The deny list always wins — even an allowlisted tool can be excluded
+    by name without redeploying harbormaster.
+    """
+    method = payload.get("method")
+    if method == "tools/list":
+        return True
+    if method != "tools/call":
+        # Unsupported methods get error envelopes anyway; let them
+        # take the same path as tools/call so the response shape is
+        # consistent regardless of pool routing.
+        return True
+    params = payload.get("params") or {}
+    name = params.get("name") if isinstance(params, dict) else None
+    if not isinstance(name, str) or not name:
+        # Malformed: send to single-worker so it gets a deterministic
+        # error envelope rather than racing through the pool.
+        return False
+    if unsafe_tools and name in unsafe_tools:
+        return False
+    return name in SAFE_FOR_PARALLEL
+
 
 class MCPDispatcher:
     """Translate agent.request payloads into local FastMCP tool calls.

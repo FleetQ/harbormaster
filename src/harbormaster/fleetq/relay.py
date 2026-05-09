@@ -105,6 +105,7 @@ class BridgeRelay:
         worker_thread: bool = True,
         worker_queue_max: int = 64,
         dispatcher_max_workers: int = 1,
+        dispatcher_unsafe_tools: list[str] | None = None,
     ) -> None:
         if not team_id:
             raise ValueError("team_id is required (from RegisterResponse)")
@@ -139,6 +140,12 @@ class BridgeRelay:
         self.worker_thread_enabled = worker_thread
         self._worker_queue_max = worker_queue_max
         self._dispatcher_max_workers = max(1, int(dispatcher_max_workers))
+        # v5.0.0a3: per-tool deny list — tools listed here always run
+        # on the single-worker path even when the pool is enabled.
+        # Stored as frozenset for fast membership checks in the hot path.
+        self._dispatcher_unsafe_tools: frozenset[str] = frozenset(
+            dispatcher_unsafe_tools or []
+        )
         self._worker_queue: queue.Queue[
             tuple[str, dict[str, Any]] | None
         ] | None = None
@@ -471,14 +478,24 @@ class BridgeRelay:
                 return
             request_id, payload = item
             if self._dispatcher_pool is not None:
-                # Submit to pool; failures inside the worker are caught
-                # by _dispatch_chunk_handler one layer down.
-                self._dispatcher_pool.submit(
-                    self._dispatch_chunk_handler,
-                    request_id=request_id,
-                    payload=payload,
+                # v5.0.0a3: per-tool safety gate. Pool-eligible tools
+                # are submitted to the executor; tools flagged unsafe
+                # (or unknown to SAFE_FOR_PARALLEL) fall through to
+                # the inline single-worker path below.
+                from harbormaster.fleetq.dispatcher import (
+                    is_tool_safe_for_parallel,
                 )
-                continue
+
+                if is_tool_safe_for_parallel(
+                    payload, unsafe_tools=self._dispatcher_unsafe_tools
+                ):
+                    self._dispatcher_pool.submit(
+                        self._dispatch_chunk_handler,
+                        request_id=request_id,
+                        payload=payload,
+                    )
+                    continue
+                # else: fall through to inline dispatch (single-worker)
             try:
                 self._dispatch_chunk_handler(
                     request_id=request_id, payload=payload

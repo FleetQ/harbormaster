@@ -93,6 +93,12 @@ class FleetQConfig(BaseModel):
     # (the in-process stress test in tests/integration/test_dispatcher_stress
     # can serve as a sanity check).
     dispatcher_max_workers: int = Field(default=1, gt=0, le=16)
+    # v5.0.0a3: deny list for the pool. Tools listed here always run
+    # on the single-worker path even when dispatcher_max_workers > 1
+    # AND the tool is in dispatcher.SAFE_FOR_PARALLEL. Use this for
+    # third-party plugin tools or to selectively serialise a tool that
+    # turns out to share state without redeploying harbormaster.
+    dispatcher_unsafe_tools: list[str] = Field(default_factory=list)
 
 
 class HistoryConfig(BaseModel):

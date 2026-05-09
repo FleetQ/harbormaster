@@ -251,3 +251,57 @@ def test_dispatch_relay_integration_chunks_streamed_to_publish() -> None:
     assert final_event == "client-relay.chunk"
     assert final_data["done"] is True
     assert final_data["chunk"] == ""
+
+
+# --- v5.0.0a3: per-tool thread-safety map -------------------------------
+
+
+def test_safe_for_parallel_set_includes_all_first_party_tools() -> None:
+    from harbormaster.fleetq.dispatcher import SAFE_FOR_PARALLEL
+
+    expected = {
+        "list_projects", "list_hosts", "project_status", "project_graph",
+        "recall_qa", "ask_project", "delegate_task", "fan_out_ask",
+    }
+    # Set must contain at least the v3-shipped tools; future tools are
+    # added explicitly so this assertion catches surprise additions.
+    assert expected.issubset(SAFE_FOR_PARALLEL)
+
+
+def test_is_tool_safe_for_parallel_tools_list_is_safe() -> None:
+    from harbormaster.fleetq.dispatcher import is_tool_safe_for_parallel
+
+    assert is_tool_safe_for_parallel({"method": "tools/list"}) is True
+
+
+def test_is_tool_safe_for_parallel_known_tool_is_safe() -> None:
+    from harbormaster.fleetq.dispatcher import is_tool_safe_for_parallel
+
+    payload = {"method": "tools/call", "params": {"name": "list_projects", "arguments": {}}}
+    assert is_tool_safe_for_parallel(payload) is True
+
+
+def test_is_tool_safe_for_parallel_unknown_tool_is_unsafe() -> None:
+    from harbormaster.fleetq.dispatcher import is_tool_safe_for_parallel
+
+    payload = {"method": "tools/call", "params": {"name": "third_party_plugin_tool", "arguments": {}}}
+    assert is_tool_safe_for_parallel(payload) is False
+
+
+def test_is_tool_safe_for_parallel_deny_list_overrides_allowlist() -> None:
+    from harbormaster.fleetq.dispatcher import is_tool_safe_for_parallel
+
+    payload = {"method": "tools/call", "params": {"name": "ask_project", "arguments": {}}}
+    # Default: ask_project is allowed.
+    assert is_tool_safe_for_parallel(payload) is True
+    # Operator marks it unsafe → falls through to single-worker.
+    assert is_tool_safe_for_parallel(payload, unsafe_tools=frozenset({"ask_project"})) is False
+
+
+def test_is_tool_safe_for_parallel_malformed_payload_is_unsafe() -> None:
+    """Missing tool name → route to single-worker for deterministic
+    error envelope rather than racing through the pool."""
+    from harbormaster.fleetq.dispatcher import is_tool_safe_for_parallel
+
+    assert is_tool_safe_for_parallel({"method": "tools/call", "params": {}}) is False
+    assert is_tool_safe_for_parallel({"method": "tools/call"}) is False
