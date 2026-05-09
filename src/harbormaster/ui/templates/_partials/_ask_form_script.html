@@ -1,0 +1,103 @@
+{# v3.0.0a7: askForm() Alpine component extracted into its own partial
+   so multiple pages (dashboard cards + project detail) share one
+   implementation. Include this once per page that uses askForm().
+#}
+<script>
+  function askForm(initial) {
+    return {
+      project: initial.project,
+      host: initial.host,
+      question: '', maxTurns: 5,
+      streamText: '', chunks: 0, error: '',
+      loading: false, hasResult: false, elapsedMs: 0,
+      _abortController: null,
+
+      async ask() {
+        if (this.question.trim().length < 3) return;
+        this.streamText = ''; this.chunks = 0; this.error = '';
+        this.hasResult = false; this.loading = true;
+        this.elapsedMs = 0;
+        const t0 = performance.now();
+        const controller = new AbortController();
+        this._abortController = controller;
+        try {
+          const args = { name: this.project, question: this.question, max_turns: this.maxTurns };
+          if (this.host && this.host !== 'local') args.host = this.host;
+          const r = await hmFetch('/mcp/harbormaster', {
+            method: 'POST',
+            signal: controller.signal,
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'text/event-stream',
+            },
+            body: JSON.stringify({
+              method: 'tools/call',
+              params: { name: 'ask_project', arguments: args },
+            }),
+          });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          await this._consumeSseStream(r);
+          this.hasResult = true;
+        } catch (e) {
+          if (e.name !== 'AbortError') this.error = e.message;
+        } finally {
+          this.loading = false;
+          this.elapsedMs = performance.now() - t0;
+          this._abortController = null;
+        }
+      },
+
+      abort() {
+        if (this._abortController) this._abortController.abort();
+      },
+
+      async _consumeSseStream(response) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split('\n\n');
+          buffer = events.pop() || '';
+          for (const block of events) {
+            const ev = this._parseEvent(block);
+            if (ev.event === 'chunk') {
+              try {
+                const parsed = JSON.parse(ev.data);
+                this.streamText += (parsed.delta ?? parsed.chunk ?? '');
+                this.chunks += 1;
+              } catch (_) { /* drop malformed chunk */ }
+            } else if (ev.event === 'result') {
+              try {
+                const parsed = JSON.parse(ev.data);
+                if (parsed.content && parsed.content[0] && parsed.content[0].text) {
+                  // If we never received chunks, render the final result.
+                  if (!this.chunks) this.streamText = parsed.content[0].text;
+                }
+              } catch (_) { /* drop malformed result */ }
+            } else if (ev.event === 'error') {
+              try {
+                const parsed = JSON.parse(ev.data);
+                this.error = parsed.detail || parsed.message || ev.data;
+              } catch (_) { this.error = ev.data; }
+            } else if (ev.event === 'heartbeat') {
+              // No-op; just keeps the connection alive.
+            }
+          }
+        }
+      },
+
+      _parseEvent(block) {
+        let event = 'message';
+        const dataParts = [];
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataParts.push(line.slice(5).trimStart());
+        }
+        return { event, data: dataParts.join('\n') };
+      },
+    };
+  }
+</script>

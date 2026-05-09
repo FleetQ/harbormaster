@@ -1477,3 +1477,56 @@ def test_ask_form_uses_hmfetch_in_project_detail(populated_config, tmp_path):
     if r.status_code == 200:
         assert "hmFetch('/mcp/harbormaster'" in r.text
         assert '<meta name="hm-auth-token" content="zzz">' in r.text
+
+
+# --- v3.0.0a7: inline ask form on dashboard cards ------------------------
+
+
+def test_dashboard_includes_ask_form_script(populated_config):
+    """askForm() Alpine component must be defined on the dashboard so
+    per-card inline ask forms can mount it without project_detail."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "function askForm(initial)" in r.text
+    # Ensure the component is the actual SSE-streaming one, not a stub.
+    assert "_consumeSseStream" in r.text
+
+
+def test_dashboard_renders_ask_button_per_card(populated_config):
+    """Each card has an Ask toggle and a collapsed inline form."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    # The Alpine x-data for per-card toggle.
+    assert 'x-data="{ askExpanded: false }"' in r.text
+    # The inline askForm() x-data binding using p.name from the x-for scope.
+    assert "askForm({ project: p.name" in r.text
+
+
+def test_dashboard_card_ask_form_includes_abort_and_streaming(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # Stop button (abort) reachable from the card form.
+    assert '@click="abort()"' in r.text
+    # Stream output element bound to streamText.
+    assert 'x-text="streamText"' in r.text
+
+
+def test_project_detail_still_uses_ask_form_partial(populated_config, tmp_path):
+    """The partial's form markup must remain available on project_detail —
+    extracting the script is a refactor, not a remove."""
+    proj_dir = tmp_path / "demo-detail"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# detail")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-detail")
+    if r.status_code == 200:
+        # Both the form markup (textarea placeholder) and the function
+        # definition must be present.
+        assert "function askForm(initial)" in r.text
+        assert "x-data=\"askForm({" in r.text
