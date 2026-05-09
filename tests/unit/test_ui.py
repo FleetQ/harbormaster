@@ -1578,3 +1578,38 @@ def test_dashboard_ask_form_also_dispatches_event(populated_config):
     client = TestClient(create_app(populated_config))
     r = client.get("/")
     assert "hm:trajectory:dirty" in r.text
+
+
+# --- v3.0.0a9: mobile graph + URL state ---------------------------------
+
+
+def test_dashboard_graph_viewport_has_touch_friendly_classes(populated_config):
+    """Mobile-friendly graph viewport: touch-pan + scrollable container."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    # touch-pan-x / touch-pan-y let mobile browsers handle native pan.
+    assert "touch-pan-x" in r.text and "touch-pan-y" in r.text
+    # max-h-[60vh] keeps the panel from blowing out on small screens.
+    assert "max-h-[60vh]" in r.text
+
+
+def test_fan_out_form_emits_url_state_helpers(populated_config):
+    """Fan-out form ships restoreFromUrl + persistToUrl + uses
+    window.history.replaceState so URL stays sharable."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/tools/fan-out")
+    assert r.status_code == 200
+    assert "restoreFromUrl()" in r.text
+    assert "persistToUrl()" in r.text
+    assert "window.history.replaceState" in r.text
+    # URLSearchParams roundtrip params known to the form
+    assert "p.get('q')" in r.text
+    assert "p.set('q'" in r.text
+    assert "p.get('targets')" in r.text
+
+
+def test_fan_out_form_initialises_via_x_init(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/tools/fan-out")
+    assert 'x-init="restoreFromUrl()"' in r.text

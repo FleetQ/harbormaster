@@ -159,7 +159,13 @@
     another project's manifest name. Try enabling <code class="text-cyan-400">transitive</code>
     to also consider lockfile-resolved deps.
   </div>
-  <div class="overflow-x-auto" x-show="!graphLoading">
+  <!-- v3.0.0a9: mobile-friendly graph viewport.
+       overflow-x-auto + max-h on small screens lets touch users scroll;
+       the pinch-zoom-on-svg pattern works once mermaid renders the SVG
+       in place of the <pre>. touch-pan-x lets the browser handle
+       horizontal panning natively. -->
+  <div class="overflow-x-auto overflow-y-auto max-h-[60vh] touch-pan-x touch-pan-y border border-gray-900 rounded bg-gray-950/40 p-2"
+       x-show="!graphLoading">
     <pre class="mermaid text-xs leading-tight" x-ref="diagram" x-text="mermaidMarkup"></pre>
   </div>
 </section>
