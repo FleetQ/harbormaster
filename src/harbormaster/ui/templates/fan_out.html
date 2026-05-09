@@ -76,6 +76,13 @@
       </button>
       <button type="button" x-show="loading" @click="abort()"
               class="text-amber-400 hover:text-amber-300 underline text-xs">stop</button>
+      <!-- v4.0.0a2: copy share link. Persists URL first, then copies. -->
+      <button type="button" @click="copyShareLink()"
+              :disabled="question.trim().length < 3"
+              class="text-xs px-2 py-1 rounded border border-gray-800 hover:border-cyan-700 disabled:border-gray-900 disabled:text-gray-700 transition">
+        <span x-show="!shareLinkCopied">copy link</span>
+        <span x-show="shareLinkCopied" class="text-emerald-400">copied ✓</span>
+      </button>
       <span class="text-xs text-gray-500 ml-auto" x-show="hasResult"
             x-text="`${(elapsedMs/1000).toFixed(1)}s`"></span>
     </div>
@@ -93,6 +100,7 @@
       selected: [], question: '', maxConcurrency: 5, maxTurns: 3,
       host: 'local',
       resultText: '', error: '', loading: false, hasResult: false, elapsedMs: 0,
+      shareLinkCopied: false,
       _abortController: null,
 
       selectAll() { this.selected = [...this.projects]; this.persistToUrl(); },
@@ -170,6 +178,26 @@
       },
 
       abort() { if (this._abortController) this._abortController.abort(); },
+
+      // v4.0.0a2: copy a shareable link to the operator's clipboard.
+      // Persists the current form state to URL first, then copies.
+      // Falls back to a console message if clipboard API is unavailable
+      // (older browsers, file:// origins).
+      async copyShareLink() {
+        this.persistToUrl();
+        const url = window.location.href;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(url);
+          } else {
+            console.warn('clipboard API unavailable; URL: ' + url);
+          }
+          this.shareLinkCopied = true;
+          setTimeout(() => { this.shareLinkCopied = false; }, 2000);
+        } catch (e) {
+          console.warn('copy failed: ' + e.message);
+        }
+      },
     };
   }
 </script>
