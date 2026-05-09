@@ -20,6 +20,17 @@ from harbormaster.history.auto_reembed import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_retry_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v5.0.0a1: collapse the retry backoff to zero in unit tests so a
+    deliberately-failing stub doesn't add 7s per host to the suite.
+    The retry behaviour itself is verified by a dedicated test below."""
+    monkeypatch.setattr(
+        "harbormaster.history.auto_reembed._RETRY_BACKOFF_SECONDS",
+        (0.0, 0.0, 0.0),
+    )
+
+
 @pytest.fixture
 def state_path(tmp_path: Path) -> Path:
     return tmp_path / "reembed-state.json"
@@ -241,3 +252,121 @@ def test_maybe_start_kicks_off_thread_when_both_enabled(
     assert not thread.is_alive()
     final = read_state(tmp_path / "state.json")
     assert final.phase == "done"
+
+
+# --- v5.0.0a1: exponential-backoff retry --------------------------------
+
+
+def test_runner_retries_transient_open_failure_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """First two open() calls fail; the third succeeds. Runner must
+    record the host as processed (no error)."""
+    from harbormaster.config import HarbormasterConfig, HistoryConfig
+    from harbormaster.history import QAStore
+
+    config = HarbormasterConfig(
+        history=HistoryConfig(
+            enabled=True,
+            embedding_backend="fts5",
+            db_dir=str(tmp_path / "db"),
+            auto_reembed_on_drift=True,
+        ),
+    )
+
+    attempts = {"count": 0}
+
+    def flaky_open(*, db_dir: str, host: str | None, embedding_backend: Any, embedding_dim: int) -> Any:
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise RuntimeError(f"transient blip {attempts['count']}")
+        return _StubStore(drift=False, processed_rows=0)
+
+    monkeypatch.setattr(QAStore, "open", flaky_open)
+
+    state_path = tmp_path / "state.json"
+    run_auto_reembed(config, state_path=state_path)
+
+    assert attempts["count"] == 3
+    final = read_state(state_path)
+    # Recovered → done, not failed.
+    assert final.phase == "done"
+    assert final.error is None
+
+
+def test_runner_gives_up_after_4_attempts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Permanent failure: open() raises every time. Runner gives up
+    after 1 initial + 3 retries = 4 attempts and surfaces the error."""
+    from harbormaster.config import HarbormasterConfig, HistoryConfig
+    from harbormaster.history import QAStore
+
+    config = HarbormasterConfig(
+        history=HistoryConfig(
+            enabled=True,
+            embedding_backend="fts5",
+            db_dir=str(tmp_path / "db"),
+            auto_reembed_on_drift=True,
+        ),
+    )
+
+    attempts = {"count": 0}
+
+    def always_fail(*, db_dir: str, host: str | None, embedding_backend: Any, embedding_dim: int) -> Any:
+        attempts["count"] += 1
+        raise RuntimeError("permanent corruption")
+
+    monkeypatch.setattr(QAStore, "open", always_fail)
+
+    state_path = tmp_path / "state.json"
+    run_auto_reembed(config, state_path=state_path)
+
+    # 1 initial + 3 retries = 4 calls per host (only 1 host: local).
+    assert attempts["count"] == 4
+    final = read_state(state_path)
+    assert final.phase == "failed"
+    assert final.error is not None
+    assert "after 4 attempts" in final.error
+
+
+def test_runner_retries_transient_reembed_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Open succeeds, but reembed fails twice before succeeding."""
+    from harbormaster.config import HarbormasterConfig, HistoryConfig
+    from harbormaster.history import QAStore
+
+    config = HarbormasterConfig(
+        history=HistoryConfig(
+            enabled=True,
+            embedding_backend="fts5",
+            db_dir=str(tmp_path / "db"),
+            auto_reembed_on_drift=True,
+        ),
+    )
+
+    class _FlakyReembed(_StubStore):
+        def __init__(self) -> None:
+            super().__init__(drift=True, processed_rows=10)
+            self._reembed_attempts = 0
+
+        def reembed(self, *, batch_size: int = 100, resume: bool = True) -> tuple[int, int]:
+            self._reembed_attempts += 1
+            if self._reembed_attempts < 3:
+                raise RuntimeError(f"sqlite locked {self._reembed_attempts}")
+            return 10, 10
+
+    flaky = _FlakyReembed()
+
+    def open_stub(*, db_dir: str, host: str | None, embedding_backend: Any, embedding_dim: int) -> Any:
+        return flaky
+
+    monkeypatch.setattr(QAStore, "open", open_stub)
+
+    state_path = tmp_path / "state.json"
+    run_auto_reembed(config, state_path=state_path)
+
+    final = read_state(state_path)
+    assert final.phase == "done"
+    assert flaky._reembed_attempts == 3

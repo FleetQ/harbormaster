@@ -73,6 +73,44 @@
   </article>
 </section>
 
+<!-- v5.0.0a1: auto-reembed runner status. Polls /api/history/state
+     every 3s while phase is "running"; idles otherwise. -->
+<section x-data="reembedPanel()" x-init="loadOnce()"
+         class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40"
+         x-show="state.available && (state.phase !== 'idle' || state.auto_reembed_enabled)">
+  <header class="flex items-center justify-between mb-2 gap-2 flex-wrap">
+    <h3 class="text-sm font-bold text-gray-300">Auto-reembed</h3>
+    <span class="text-xs px-2 py-0.5 rounded" :class="phaseBadgeClass()"
+          x-text="phaseLabel()"></span>
+  </header>
+  <div x-show="state.phase === 'running'" class="text-xs text-gray-400">
+    <div class="flex items-baseline justify-between gap-2 mb-1">
+      <span x-text="state.current_host ? `processing host: ${state.current_host}` : 'preparing…'"></span>
+      <span class="text-gray-500"
+            x-text="state.total ? `${state.processed} / ${state.total}` : ''"></span>
+    </div>
+    <div class="h-1.5 bg-gray-800 rounded overflow-hidden">
+      <div class="h-full bg-cyan-600 transition-all"
+           :style="`width: ${state.total ? (state.processed / state.total * 100) : 0}%`"></div>
+    </div>
+  </div>
+  <div x-show="state.phase === 'done'" class="text-xs text-emerald-400">
+    <span x-text="state.total ? `Completed ${state.total} host${state.total === 1 ? '' : 's'}` : 'Done'"></span>
+    <span x-show="state.finished_at" class="text-gray-500"
+          x-text="` · ${formatDuration(state.started_at, state.finished_at)}`"></span>
+  </div>
+  <div x-show="state.phase === 'failed'" class="text-xs">
+    <p class="text-rose-400 mb-1">Auto-reembed failed.</p>
+    <p class="text-gray-400 break-words" x-text="state.error"></p>
+  </div>
+  <div x-show="state.phase === 'idle' && state.auto_reembed_enabled"
+       class="text-xs text-gray-500">
+    Idle — no embedding drift detected. Auto-reembed runs on next startup
+    if the configured embedding model changes.
+  </div>
+  <p x-show="error" class="text-xs text-red-400" x-text="error"></p>
+</section>
+
 <!-- v2.1.0a3: recall search. Hits /api/recall (which wraps the
      recall_qa MCP tool) and renders match cards inline. -->
 <section x-data="recallPanel()" x-init="restoreFromUrl()"
@@ -436,6 +474,69 @@
         } finally {
           this.loading = false;
         }
+      },
+    };
+  }
+
+  // v5.0.0a1: auto-reembed status panel — polls /api/history/state.
+  function reembedPanel() {
+    return {
+      state: { available: false, phase: 'idle', auto_reembed_enabled: false },
+      error: '',
+      _pollHandle: null,
+
+      async loadOnce() {
+        await this.fetchState();
+        this._maybeStartPolling();
+      },
+
+      async fetchState() {
+        try {
+          const r = await hmFetch('/api/history/state');
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          this.state = await r.json();
+          this.error = '';
+        } catch (e) {
+          this.error = e.message;
+        }
+      },
+
+      _maybeStartPolling() {
+        // Poll every 3s while running; stop when we hit a terminal phase.
+        if (this.state.phase === 'running' && !this._pollHandle) {
+          this._pollHandle = setInterval(async () => {
+            await this.fetchState();
+            if (this.state.phase !== 'running') {
+              clearInterval(this._pollHandle);
+              this._pollHandle = null;
+            }
+          }, 3000);
+        }
+      },
+
+      phaseLabel() {
+        const labels = {
+          idle: 'idle', running: 'running', done: 'completed', failed: 'failed',
+        };
+        return labels[this.state.phase] || this.state.phase;
+      },
+
+      phaseBadgeClass() {
+        const map = {
+          running: 'bg-cyan-900/50 text-cyan-300',
+          done: 'bg-emerald-900/50 text-emerald-300',
+          failed: 'bg-rose-900/50 text-rose-300',
+          idle: 'bg-gray-800 text-gray-400',
+        };
+        return map[this.state.phase] || map.idle;
+      },
+
+      formatDuration(start, end) {
+        if (!start || !end) return '';
+        const seconds = Math.max(0, end - start);
+        if (seconds < 60) return `${seconds.toFixed(1)}s`;
+        if (seconds < 3600) return `${(seconds / 60).toFixed(1)}m`;
+        return `${(seconds / 3600).toFixed(1)}h`;
       },
     };
   }
