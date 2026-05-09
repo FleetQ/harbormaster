@@ -1979,3 +1979,39 @@ def test_trajectory_list_reconciles_in_place(populated_config, tmp_path):
         assert "_optimistic: false" in r.text
         # Orphan handling preserved
         assert "orphans" in r.text
+
+
+# --- v5.0.0a5: graph zoom UX polish -------------------------------------
+
+
+def test_graph_zoom_has_double_tap_reset(populated_config):
+    """Double-tap detection within 300ms calls reset()."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "_lastTapTime" in r.text
+    assert "now - this._lastTapTime < 300" in r.text
+
+
+def test_graph_zoom_keyboard_shortcuts(populated_config):
+    """Desktop keyboard shortcuts: +/-, arrows, Escape."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # @keydown.window listener wired.
+    assert '@keydown.window="onKeyDown($event)"' in r.text
+    # All key cases covered.
+    for key in ["'+'", "'-'", "'='", "'ArrowLeft'", "'ArrowRight'", "'ArrowUp'", "'ArrowDown'", "'Escape'"]:
+        assert f"case {key}:" in r.text, f"missing case {key}"
+
+
+def test_graph_zoom_keyboard_skips_form_fields(populated_config):
+    """Keyboard handler must not fire when typing into INPUT / TEXTAREA / SELECT."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'" in r.text
+
+
+def test_graph_zoom_reset_button_mentions_keyboard_hint(populated_config):
+    """Reset button title hints at the keyboard shortcut."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "press Esc or double-tap" in r.text

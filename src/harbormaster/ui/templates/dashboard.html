@@ -204,11 +204,13 @@
        on desktop; reset button returns to scale=1, translate=0,0. -->
   <div x-data="graphZoom()"
        x-show="!graphLoading"
-       class="relative">
+       x-init="bindKeyboard()"
+       @keydown.window="onKeyDown($event)"
+       class="relative" tabindex="0">
     <div class="absolute top-2 right-2 z-10 flex gap-1">
       <button type="button" @click="reset()"
               class="text-xs bg-gray-900/80 hover:bg-gray-800 border border-gray-700 px-2 py-0.5 rounded"
-              :title="`reset zoom (current: ${scale.toFixed(2)}×)`">
+              :title="`reset zoom (current: ${scale.toFixed(2)}×) — press Esc or double-tap`">
         reset
       </button>
     </div>
@@ -594,6 +596,9 @@
         this.dragging = false;
       },
 
+      // v5.0.0a5: double-tap timestamp tracking for tap-to-reset.
+      _lastTapTime: 0,
+
       onTouchStart(e) {
         if (e.touches.length === 2) {
           // Pinch start.
@@ -601,6 +606,14 @@
           this._pinchInitialDist = this._touchDist(e);
           this._pinchInitialScale = this.scale;
         } else if (e.touches.length === 1) {
+          // v5.0.0a5: double-tap-to-reset detection (within 300ms).
+          const now = Date.now();
+          if (now - this._lastTapTime < 300) {
+            this.reset();
+            this._lastTapTime = 0;
+            return;
+          }
+          this._lastTapTime = now;
           // Single-finger pan start.
           this.dragging = true;
           this._dragStartX = e.touches[0].clientX;
@@ -639,6 +652,45 @@
         const a = e.touches[0], b = e.touches[1];
         const dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
         return Math.hypot(dx, dy);
+      },
+
+      // v5.0.0a5: keyboard shortcuts on desktop. Only fire when no
+      // input element has focus (so typing into the recall search box
+      // doesn't accidentally pan the graph).
+      bindKeyboard() {
+        // bindKeyboard is intentionally a no-op marker — the actual
+        // listener is wired via @keydown.window on the panel. This
+        // method exists so the alpine x-init has a hook to call.
+      },
+
+      onKeyDown(e) {
+        // Skip when typing into a form field.
+        const tag = (e.target && e.target.tagName) || '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        const PAN_STEP = 30;
+        const ZOOM_STEP = 0.1;
+        switch (e.key) {
+          case '+':
+          case '=':
+            this.scale = this._clampScale(this.scale + ZOOM_STEP);
+            e.preventDefault();
+            break;
+          case '-':
+          case '_':
+            this.scale = this._clampScale(this.scale - ZOOM_STEP);
+            e.preventDefault();
+            break;
+          case 'ArrowLeft':
+            this.tx += PAN_STEP; e.preventDefault(); break;
+          case 'ArrowRight':
+            this.tx -= PAN_STEP; e.preventDefault(); break;
+          case 'ArrowUp':
+            this.ty += PAN_STEP; e.preventDefault(); break;
+          case 'ArrowDown':
+            this.ty -= PAN_STEP; e.preventDefault(); break;
+          case 'Escape':
+            this.reset(); e.preventDefault(); break;
+        }
       },
     };
   }
