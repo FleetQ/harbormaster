@@ -2349,3 +2349,61 @@ def test_detect_language_fallback_when_parser_fails(tmp_path):
     (proj / "CLAUDE.md").write_text("# x")
     (proj / "pyproject.toml").write_text("not valid [toml")  # parser will fail
     assert _detect_language(proj) == "python"
+
+
+# --- v6.0.0a4: keyboard shortcut help popover ---------------------------
+
+
+def test_dashboard_renders_help_popover_factory(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "function helpPopover()" in r.text
+    assert 'x-data="helpPopover()"' in r.text
+
+
+def test_help_popover_listens_for_question_mark_and_escape(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # Window-level keydown listener.
+    assert '@keydown.window="onKeyDown($event)"' in r.text
+    # Both keys handled in onKeyDown.
+    assert "if (e.key === '?')" in r.text
+    assert "e.key === 'Escape'" in r.text
+
+
+def test_help_popover_form_field_guard(populated_config):
+    """Same INPUT/TEXTAREA/SELECT guard as graphZoom — typing into a
+    form field must not toggle the popover."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # Both helpPopover and graphZoom use the same guard idiom.
+    assert r.text.count(
+        "tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'"
+    ) >= 2
+
+
+def test_help_popover_lists_graph_zoom_shortcuts(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # Graph zoom keys appear in the shortcut map.
+    assert "'+ / ='" in r.text
+    assert "'↑ ↓ ← →'" in r.text
+    # Touch double-tap mentioned.
+    assert "double-tap" in r.text
+
+
+def test_help_popover_has_pointer_friendly_button(populated_config):
+    """Fixed-position button at bottom-right toggles open state."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "fixed bottom-4 right-4" in r.text
+    # Toggle binding.
+    assert '@click="open = !open"' in r.text
+
+
+def test_help_popover_dismiss_on_outside_click(populated_config):
+    """The popover dismisses when clicking outside it."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert '@click.away="open = false"' in r.text
