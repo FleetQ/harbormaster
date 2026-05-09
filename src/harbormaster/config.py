@@ -107,6 +107,14 @@ class HistoryConfig(BaseModel):
     auto_ground_top_k: int = Field(default=3, gt=0)
     auto_ground_max_chars: int = Field(default=8000, gt=0)
     auto_ground_min_similarity: float = Field(default=0.55, ge=0.0, le=1.0)
+    # v3.0.0a4: parallelize host="all" recall across local + every
+    # configured host. Each per-host QAStore.open + recall runs in a
+    # worker thread; results are merged identically to the sequential
+    # path. Default off so existing deployments see no behavioural
+    # change; opt-in for setups with many hosts where serial fan-out
+    # latency adds up.
+    parallel_recall: bool = False
+    parallel_recall_max_workers: int = Field(default=4, gt=0, le=32)
 
 
 class PluginsConfig(BaseModel):

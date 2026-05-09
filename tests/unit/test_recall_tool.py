@@ -313,3 +313,132 @@ def test_recall_qa_host_all_isolates_failures_per_host(
     assert "broken" not in {m["host"] for m in out["matches"]}
     # Local hit still landed.
     assert any(m["host"] == "local" for m in out["matches"])
+
+
+# --- v3.0.0a4: parallel recall ------------------------------------------
+
+
+def test_recall_qa_host_all_parallel_path_returns_same_result(tmp_path: Path):
+    """parallel_recall=True must produce the same merged results as the
+    sequential path — only the timing changes."""
+    from harbormaster.config import HostConfig
+
+    config = HarbormasterConfig(
+        history=HistoryConfig(
+            enabled=True,
+            embedding_backend="fts5",
+            db_dir=str(tmp_path),
+            parallel_recall=True,
+            parallel_recall_max_workers=4,
+        ),
+        hosts={
+            "friday": HostConfig(ssh_host="friday.local"),
+            "jarvis": HostConfig(ssh_host="jarvis.local"),
+        },
+    )
+    _seed_host_store(config, None, [("local hint about authentication", "L", "p1")])
+    _seed_host_store(config, "friday", [("friday hint about authentication", "F", "p1")])
+    _seed_host_store(config, "jarvis", [("jarvis hint about authentication", "J", "p1")])
+
+    mcp = build_server(config)
+    fn = _tools_by_name(mcp)["recall_qa"].fn
+    out = fn(question="authentication", host="all", top_k=10)
+
+    assert out["host"] == "all"
+    assert out["parallel"] is True
+    assert set(out["hosts_searched"]) == {"local", "friday", "jarvis"}
+    assert len(out["matches"]) == 3
+    assert {m["host"] for m in out["matches"]} == {"local", "friday", "jarvis"}
+
+
+def test_recall_qa_host_all_parallel_isolates_per_host_failures(
+    tmp_path: Path, monkeypatch
+):
+    """Per-host failure isolation must hold under the parallel path —
+    one broken store must not poison the rest."""
+    from harbormaster.config import HostConfig
+
+    config = HarbormasterConfig(
+        history=HistoryConfig(
+            enabled=True,
+            embedding_backend="fts5",
+            db_dir=str(tmp_path),
+            parallel_recall=True,
+        ),
+        hosts={
+            "broken": HostConfig(ssh_host="broken.local"),
+            "friday": HostConfig(ssh_host="friday.local"),
+        },
+    )
+    _seed_host_store(config, None, [("authentication on local", "L", "p1")])
+    _seed_host_store(config, "friday", [("authentication on friday", "F", "p1")])
+
+    from harbormaster.history import QAStore
+
+    real_open = QAStore.open
+
+    def flaky_open(*, host=None, **kwargs):
+        if host == "broken":
+            raise RuntimeError("simulated open failure")
+        return real_open(host=host, **kwargs)
+
+    monkeypatch.setattr(QAStore, "open", flaky_open)
+
+    mcp = build_server(config)
+    fn = _tools_by_name(mcp)["recall_qa"].fn
+    out = fn(question="authentication", host="all", top_k=5)
+
+    assert out["parallel"] is True
+    assert out["host"] == "all"
+    assert "errors" in out
+    assert "broken" in out["errors"]
+    hosts_in = {m["host"] for m in out["matches"]}
+    assert "local" in hosts_in
+    assert "friday" in hosts_in
+    assert "broken" not in hosts_in
+
+
+def test_recall_qa_host_all_single_target_skips_pool(tmp_path: Path):
+    """When only the local target exists (no [hosts.*] configured) the
+    pool is bypassed even with parallel_recall=True — no point spinning
+    a thread for a single sequential call."""
+    config = HarbormasterConfig(
+        history=HistoryConfig(
+            enabled=True,
+            embedding_backend="fts5",
+            db_dir=str(tmp_path),
+            parallel_recall=True,
+        ),
+    )
+    _seed_host_store(config, None, [("authentication on local", "L", "p1")])
+
+    mcp = build_server(config)
+    fn = _tools_by_name(mcp)["recall_qa"].fn
+    out = fn(question="authentication", host="all", top_k=5)
+
+    assert out["parallel"] is False
+    assert out["hosts_searched"] == ["local"]
+
+
+def test_recall_qa_host_all_default_sequential(tmp_path: Path):
+    """Default config does NOT opt in to parallel — the response field
+    must reflect that for diagnostic visibility."""
+    from harbormaster.config import HostConfig
+
+    config = HarbormasterConfig(
+        history=HistoryConfig(
+            enabled=True,
+            embedding_backend="fts5",
+            db_dir=str(tmp_path),
+            # parallel_recall defaults to False
+        ),
+        hosts={"friday": HostConfig(ssh_host="friday.local")},
+    )
+    _seed_host_store(config, None, [("authentication on local", "L", "p1")])
+    _seed_host_store(config, "friday", [("authentication on friday", "F", "p1")])
+
+    mcp = build_server(config)
+    fn = _tools_by_name(mcp)["recall_qa"].fn
+    out = fn(question="authentication", host="all", top_k=5)
+
+    assert out["parallel"] is False

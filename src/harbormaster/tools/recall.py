@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
@@ -141,12 +142,8 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         # own machine and reads back from the same files.
         if host == "all":
             targets: list[str | None] = [None, *sorted(config.hosts.keys())]
-            all_matches: list[QAMatch] = []
-            errors: dict[str, str] = {}
-            for target in targets:
-                # Per-host fetch uses the configured top_k unmodified —
-                # over-fetching slightly so the global score sort has
-                # enough headroom across hosts.
+
+            def _one(target: str | None) -> tuple[str | None, list[QAMatch], str | None]:
                 per_host_matches, err = _recall_one_host(
                     config=config,
                     host=target,
@@ -156,6 +153,30 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                     min_similarity=effective_min_sim,
                     backend=backend,
                 )
+                return target, per_host_matches, err
+
+            # v3.0.0a4: optionally parallelise the per-host fan-out via a
+            # bounded thread pool. Sequential fall-back keeps existing
+            # behaviour bit-identical for users who haven't opted in.
+            results: list[tuple[str | None, list[QAMatch], str | None]] = []
+            if config.history.parallel_recall and len(targets) > 1:
+                # Cap workers at min(configured, target_count) — no point
+                # spinning up 4 threads to query 2 hosts.
+                workers = min(
+                    config.history.parallel_recall_max_workers,
+                    len(targets),
+                )
+                with ThreadPoolExecutor(
+                    max_workers=workers,
+                    thread_name_prefix="recall-fanout",
+                ) as pool:
+                    results = list(pool.map(_one, targets))
+            else:
+                results = [_one(t) for t in targets]
+
+            all_matches: list[QAMatch] = []
+            errors: dict[str, str] = {}
+            for target, per_host_matches, err in results:
                 if err is not None:
                     errors[target if target is not None else "local"] = err
                     continue
@@ -168,6 +189,9 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                 "backend": backend.name,
                 "host": "all",
                 "hosts_searched": [t if t is not None else "local" for t in targets],
+                "parallel": (
+                    config.history.parallel_recall and len(targets) > 1
+                ),
                 "matches": [m.to_dict() for m in merged],
             }
             if errors:
