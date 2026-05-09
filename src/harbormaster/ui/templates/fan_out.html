@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Fan-out · Harbormaster{% endblock %}
+{% block content %}
+
+<nav class="mb-4 text-sm text-gray-400">
+  <a href="/" class="hover:text-cyan-400">← Dashboard</a>
+  <span class="mx-2 text-gray-700">/</span>
+  <span class="text-gray-300">Fan-out ask</span>
+</nav>
+
+<header class="mb-6">
+  <h2 class="text-xl font-bold">Fan-out ask</h2>
+  <p class="text-sm text-gray-400 mt-1">
+    Ask the same question across multiple projects in parallel.
+    Returns one section per target. Powered by
+    <code class="text-cyan-400">fan_out_ask</code> (v1.0.0a13+).
+  </p>
+</header>
+
+<section x-data='fanOutForm({
+           projects: {{ project_names | tojson }},
+           hosts: {{ host_labels | tojson }},
+         })'
+         class="border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+  <form @submit.prevent="run()" class="space-y-3">
+    <div>
+      <label class="text-sm text-gray-300 font-bold mb-1 block">Question</label>
+      <textarea x-model="question" rows="3" required minlength="3"
+                :disabled="loading"
+                placeholder="e.g. what testing strategy is in use?"
+                class="w-full bg-gray-950 border border-gray-800 rounded px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none resize-y"></textarea>
+    </div>
+    <div class="flex flex-wrap gap-4 text-xs text-gray-400">
+      <label class="flex items-center gap-1.5">
+        max_concurrency
+        <input type="number" min="1" max="10" x-model.number="maxConcurrency"
+               class="w-14 bg-gray-950 border border-gray-800 rounded px-2 py-1 text-center">
+      </label>
+      <label class="flex items-center gap-1.5">
+        max_turns
+        <input type="number" min="1" max="10" x-model.number="maxTurns"
+               class="w-14 bg-gray-950 border border-gray-800 rounded px-2 py-1 text-center">
+      </label>
+      <label class="flex items-center gap-1.5">
+        host
+        <select x-model="host" class="bg-gray-950 border border-gray-800 rounded px-2 py-1">
+          <template x-for="h in hosts"><option :value="h" x-text="h"></option></template>
+        </select>
+      </label>
+    </div>
+    <div>
+      <div class="flex items-baseline justify-between mb-1">
+        <label class="text-sm text-gray-300 font-bold">Targets</label>
+        <div class="text-xs text-gray-500 flex gap-3">
+          <button type="button" @click="selectAll()" class="hover:text-cyan-400">all</button>
+          <button type="button" @click="selectNone()" class="hover:text-cyan-400">none</button>
+          <span x-text="`${selected.length} of ${projects.length} selected`"></span>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1 max-h-48 overflow-y-auto border border-gray-800 rounded p-2">
+        <template x-for="p in projects" :key="p">
+          <label class="flex items-center gap-1.5 text-xs hover:bg-gray-800/50 px-1 py-0.5 rounded cursor-pointer">
+            <input type="checkbox" :value="p" x-model="selected" class="accent-cyan-500">
+            <span class="truncate" x-text="p"></span>
+          </label>
+        </template>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <button type="submit"
+              :disabled="loading || question.trim().length < 3 || selected.length === 0"
+              class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold px-4 py-2 rounded transition">
+        <span x-show="!loading">Run fan-out</span>
+        <span x-show="loading">…</span>
+      </button>
+      <button type="button" x-show="loading" @click="abort()"
+              class="text-amber-400 hover:text-amber-300 underline text-xs">stop</button>
+      <span class="text-xs text-gray-500 ml-auto" x-show="hasResult"
+            x-text="`${(elapsedMs/1000).toFixed(1)}s`"></span>
+    </div>
+  </form>
+  <div x-show="error" class="mt-3 text-xs text-red-400" x-text="error"></div>
+  <pre x-show="resultText"
+       class="mt-4 text-sm whitespace-pre-wrap break-words border border-gray-800 rounded p-3 bg-gray-950/50 text-gray-200 leading-relaxed"
+       x-text="resultText"></pre>
+</section>
+
+<script>
+  function fanOutForm(initial) {
+    return {
+      projects: initial.projects, hosts: initial.hosts,
+      selected: [], question: '', maxConcurrency: 5, maxTurns: 3,
+      host: 'local',
+      resultText: '', error: '', loading: false, hasResult: false, elapsedMs: 0,
+      _abortController: null,
+
+      selectAll() { this.selected = [...this.projects]; },
+      selectNone() { this.selected = []; },
+
+      async run() {
+        if (this.question.trim().length < 3 || this.selected.length === 0) return;
+        this.resultText = ''; this.error = ''; this.hasResult = false;
+        this.loading = true; this.elapsedMs = 0;
+        const t0 = performance.now();
+        const controller = new AbortController();
+        this._abortController = controller;
+        try {
+          const args = {
+            question: this.question,
+            project_filter: this.selected.join(','),
+            max_concurrency: this.maxConcurrency,
+            max_turns: this.maxTurns,
+          };
+          if (this.host && this.host !== 'local') args.host_filter = this.host;
+          const r = await fetch('/mcp/harbormaster', {
+            method: 'POST', signal: controller.signal,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              method: 'tools/call',
+              params: { name: 'fan_out_ask', arguments: args },
+            }),
+          });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const body = await r.json();
+          // fan_out_ask returns aggregated text in result.content[0].text
+          const text = body?.result?.content?.[0]?.text;
+          this.resultText = text || JSON.stringify(body, null, 2);
+          this.hasResult = true;
+        } catch (e) {
+          if (e.name !== 'AbortError') this.error = e.message;
+        } finally {
+          this.loading = false;
+          this.elapsedMs = performance.now() - t0;
+          this._abortController = null;
+        }
+      },
+
+      abort() { if (this._abortController) this._abortController.abort(); },
+    };
+  }
+</script>
+
+{% endblock %}

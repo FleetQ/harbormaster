@@ -362,6 +362,50 @@ def test_api_recall_host_all_passes_through(populated_config, tmp_path):
     assert "hosts_searched" in body
 
 
+# ----- v2.1.0a5 — delegate_task form + fan-out page -----------------------
+
+
+def test_project_detail_includes_delegate_form(populated_config):
+    client = TestClient(create_app(populated_config))
+    body = client.get("/projects/alpha").text
+    assert "Delegate task" in body
+    assert "deliverable" in body
+    assert "delegateForm" in body
+
+
+def test_fan_out_page_renders(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/tools/fan-out")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    body = r.text
+    assert "Fan-out" in body
+    assert "fan_out_ask" in body
+    # Project chips populated from discovery
+    assert "alpha" in body
+    assert "beta" in body
+    # Concurrency control
+    assert "max_concurrency" in body
+
+
+def test_fan_out_page_links_in_nav(populated_config):
+    client = TestClient(create_app(populated_config))
+    body = client.get("/").text
+    assert "/tools/fan-out" in body
+
+
+def test_fan_out_page_lists_configured_hosts(populated_config):
+    populated_config.hosts = {
+        "friday": __import__(
+            "harbormaster.config", fromlist=["HostConfig"]
+        ).HostConfig(ssh_host="friday-real"),
+    }
+    client = TestClient(create_app(populated_config))
+    body = client.get("/tools/fan-out").text
+    assert "friday" in body
+    assert "local" in body
+
+
 # ----- v2.1.0a4 — "Ask this project" SSE form ------------------------------
 
 
