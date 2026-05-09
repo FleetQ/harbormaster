@@ -391,6 +391,51 @@ class QAStore:
         row = self._conn.execute("SELECT COUNT(*) AS n FROM qa_log").fetchone()
         return int(row["n"])
 
+    def list_recent(
+        self,
+        *,
+        project: str | None = None,
+        limit: int = 20,
+    ) -> list[QAMatch]:
+        """Return the most recent records by created_at desc, optionally
+        filtered by project (v2.1.0a6).
+
+        Powers the UI trajectory history view at /api/trajectories.
+        Score is set to 1.0 — there's no relevance ranking on a pure
+        chronological list, but the QAMatch shape stays uniform so
+        callers can render the same way they render `recall()` results.
+        """
+        if limit <= 0:
+            return []
+        sql = (
+            "SELECT id, question, answer, project, host, tool, "
+            "created_at, recall_count FROM qa_log"
+        )
+        params: list[object] = []
+        if project is not None:
+            sql += " WHERE project = ?"
+            params.append(project)
+        # Secondary sort on `id` so same-second inserts have a stable order
+        # (created_at is unix-seconds; the underlying autoincrement id is
+        # monotonic and breaks the tie deterministically).
+        sql += " ORDER BY created_at DESC, id DESC LIMIT ?"
+        params.append(limit)
+        rows = self._conn.execute(sql, params).fetchall()
+        return [
+            QAMatch(
+                id=int(r["id"]),
+                question=str(r["question"]),
+                answer=str(r["answer"]),
+                project=str(r["project"]),
+                host=str(r["host"]),
+                tool=str(r["tool"]),
+                created_at=int(r["created_at"]),
+                score=1.0,
+                recall_count=int(r["recall_count"]),
+            )
+            for r in rows
+        ]
+
     @property
     def vec_available(self) -> bool:
         """True iff this connection can use the vec0 ANN path."""
