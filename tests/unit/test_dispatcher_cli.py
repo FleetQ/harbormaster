@@ -95,3 +95,82 @@ def test_dispatcher_status_missing_config_path_handled_gracefully(
     # Either succeeds with defaults or fails cleanly with rc=1.
     # Both are acceptable; the key is no traceback.
     assert rc in (0, 1)
+
+
+# --- v7.0.0a5: --json output -----------------------------------------------
+
+
+def test_dispatcher_status_json_default_single_worker(
+    empty_config: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--json emits a single JSON object with the canonical schema."""
+    import json
+
+    rc = main(["status", "--config", str(empty_config), "--json"])
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    payload = json.loads(out)
+
+    assert payload["dispatcher_max_workers"] == 1
+    assert payload["single_worker"] is True
+    assert isinstance(payload["safe_for_parallel"], list)
+    # Sorted, contains every SAFE_FOR_PARALLEL tool.
+    assert payload["safe_for_parallel"] == sorted(SAFE_FOR_PARALLEL)
+    assert payload["unsafe_tools"] == []
+    # No deny list → effective set == safe_for_parallel.
+    assert payload["effective_parallel_set"] == sorted(SAFE_FOR_PARALLEL)
+
+
+def test_dispatcher_status_json_with_pool_and_deny_list(
+    pool_config: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--json correctly serialises max_workers=4 + deny list annotations."""
+    import json
+
+    rc = main(["status", "--config", str(pool_config), "--json"])
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    payload = json.loads(out)
+
+    assert payload["dispatcher_max_workers"] == 4
+    assert payload["single_worker"] is False
+    # Unsafe tools sorted by name with in_allowlist annotation.
+    unsafe_names = [u["name"] for u in payload["unsafe_tools"]]
+    assert "delegate_task" in unsafe_names
+    assert "third_party_plugin" in unsafe_names
+    # delegate_task is in the allowlist; third_party_plugin is not.
+    by_name = {u["name"]: u for u in payload["unsafe_tools"]}
+    assert by_name["delegate_task"]["in_allowlist"] is True
+    assert by_name["third_party_plugin"]["in_allowlist"] is False
+    # Effective parallel set excludes the deny-listed entries.
+    assert "delegate_task" not in payload["effective_parallel_set"]
+    assert "ask_project" in payload["effective_parallel_set"]
+
+
+def test_dispatcher_status_text_output_unchanged_without_json_flag(
+    empty_config: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without --json the text format is preserved byte-for-byte."""
+    rc = main(["status", "--config", str(empty_config)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    # Same human-readable markers as the v6 baseline.
+    assert "dispatcher_max_workers: 1" in out
+    assert "single-worker" in out
+    assert "✓ ask_project" in out
+    assert "deny list: (empty)" in out
+
+
+def test_dispatcher_status_json_output_is_single_line(
+    empty_config: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--json must emit exactly one JSON object (one trailing newline).
+    Scripted consumers parse stdout via `head -1 | jq`."""
+    rc = main(["status", "--config", str(empty_config), "--json"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    # Strip trailing newline only; assert no internal newlines.
+    body = out.rstrip("\n")
+    assert "\n" not in body, (
+        f"--json must emit exactly one line (got {body.count(chr(10)) + 1})"
+    )
