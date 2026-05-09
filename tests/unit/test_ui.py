@@ -1530,3 +1530,51 @@ def test_project_detail_still_uses_ask_form_partial(populated_config, tmp_path):
         # definition must be present.
         assert "function askForm(initial)" in r.text
         assert "x-data=\"askForm({" in r.text
+
+
+# --- v3.0.0a8: ask→trajectory cross-section refresh events --------------
+
+
+def test_ask_form_dispatches_trajectory_dirty_event(populated_config, tmp_path):
+    """askForm() must dispatch hm:trajectory:dirty on stream completion
+    so any trajectoryList scope on the same page can refresh."""
+    proj_dir = tmp_path / "demo-x8"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# x8")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-x8")
+    if r.status_code == 200:
+        assert "hm:trajectory:dirty" in r.text
+        assert "window.dispatchEvent" in r.text
+
+
+def test_trajectory_list_listens_for_dirty_events(populated_config, tmp_path):
+    """trajectoryList must listen on the window for hm:trajectory:dirty
+    and reload only when the project in the event matches."""
+    proj_dir = tmp_path / "demo-x8b"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# x8b")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-x8b")
+    if r.status_code == 200:
+        # The listener with project-match guard.
+        assert "x-on:hm:trajectory:dirty.window" in r.text
+        assert "$event.detail.project === project" in r.text
+
+
+def test_dashboard_ask_form_also_dispatches_event(populated_config):
+    """The shared askForm() function lives in _ask_form_script.html;
+    dashboard cards reuse it, so the dispatch must be present here too.
+    Dashboard has no trajectory section, so the event has no listener
+    on this page — but the dispatch is harmless (no-op when no listener)."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "hm:trajectory:dirty" in r.text

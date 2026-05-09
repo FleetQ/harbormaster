@@ -54,11 +54,15 @@
 
 <!-- v2.1.0a6: trajectory history. Pulls from /api/trajectories
      filtered by this project. Each row is a collapsible Q&A pair. -->
+<!-- v3.0.0a8: cross-section refresh — listen for hm:trajectory:dirty
+     events dispatched on stream completion by ask/delegate forms,
+     and reload trajectories when the dispatched project matches. -->
 <section x-data="trajectoryList({
            project: {{ project_name | tojson }},
            host: {{ host | tojson }},
          })"
          x-init="load()"
+         x-on:hm:trajectory:dirty.window="if ($event.detail && $event.detail.project === project) load()"
          class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40">
   <header class="mb-3 flex items-baseline justify-between gap-2 flex-wrap">
     <h3 class="text-base font-bold text-gray-300">Recent Q&amp;A</h3>

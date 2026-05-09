@@ -38,6 +38,14 @@
           if (!r.ok) throw new Error('HTTP ' + r.status);
           await this._consumeSseStream(r);
           this.hasResult = true;
+          // v3.0.0a8: notify any other Alpine scope on this page that
+          // the trajectory store for this project is dirty. The
+          // project_detail page's trajectoryList listens on the window
+          // and re-loads when project matches; pages without a listener
+          // simply ignore the event.
+          window.dispatchEvent(new CustomEvent('hm:trajectory:dirty', {
+            detail: { project: this.project, host: this.host || 'local' },
+          }));
         } catch (e) {
           if (e.name !== 'AbortError') this.error = e.message;
         } finally {
