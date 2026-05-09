@@ -86,16 +86,27 @@
     No prior trajectories yet — ask or delegate something above and it will record here.
   </p>
   <ul class="space-y-2">
-    <template x-for="t in trajectories" :key="t.id">
+    <!-- v5.0.0a4: keyed by content tuple instead of t.id so the
+         optimistic→real reconciliation preserves the DOM node and the
+         CSS transition can cross-fade the border / bg colour cleanly. -->
+    <template x-for="t in trajectories"
+              :key="t.project + ':' + t.tool + ':' + t.question">
       <li x-data="{ open: false }"
+          class="rounded border transition-colors duration-200"
           :class="t._optimistic
-            ? 'border border-cyan-700/40 rounded bg-cyan-950/30'
-            : 'border border-gray-800 rounded bg-gray-950/50'">
+            ? 'border-cyan-700/40 bg-cyan-950/30'
+            : 'border-gray-800 bg-gray-950/50'">
         <button type="button" @click="open = !open"
                 class="w-full text-left px-3 py-2 hover:bg-gray-900/50 transition flex items-baseline justify-between gap-2">
           <span class="text-sm text-gray-200 truncate" x-text="t.question"></span>
-          <span class="text-xs text-gray-500 shrink-0 flex gap-2">
-            <span x-show="t._optimistic" class="text-cyan-400 font-bold">●&nbsp;new</span>
+          <span class="text-xs text-gray-500 shrink-0 flex gap-2 items-center">
+            <!-- v5.0.0a4: writing-back spinner shows on optimistics
+                 older than 5s — signals "writeback might be slow".
+                 The "● new" badge stays for fresh optimistics. -->
+            <span x-show="t._optimistic && isStale(t)"
+                  class="inline-block w-2 h-2 border border-amber-400 border-t-transparent rounded-full animate-spin"
+                  title="writing back…"></span>
+            <span x-show="t._optimistic && !isStale(t)" class="text-cyan-400 font-bold">●&nbsp;new</span>
             <span x-text="t.tool"></span>
             <span x-text="formatDate(t.created_at || t.timestamp_s)"></span>
             <span x-text="open ? '▾' : '▸'"></span>
@@ -121,6 +132,30 @@
     return {
       project: initial.project, host: initial.host,
       trajectories: [], message: '', error: '', limit: 20,
+      // v5.0.0a4: tick used to flag stale optimistics; updated every
+      // 1s. Bound to isStale() so the spinner appears live without a
+      // full reload.
+      now: Date.now() / 1000,
+      _tickHandle: null,
+
+      init() {
+        this._tickHandle = setInterval(() => {
+          this.now = Date.now() / 1000;
+        }, 1000);
+      },
+
+      destroy() {
+        if (this._tickHandle) clearInterval(this._tickHandle);
+      },
+
+      isStale(entry) {
+        // True when an optimistic entry is older than 5s — signals
+        // "writeback might be slow"; renders the spinner instead of
+        // the "● new" badge.
+        if (!entry || !entry._optimistic) return false;
+        const age = this.now - (entry.timestamp_s || 0);
+        return age > 5;
+      },
 
       async load() {
         this.message = ''; this.error = '';
@@ -133,20 +168,34 @@
           const r = await hmFetch('/api/trajectories?' + params.toString());
           if (!r.ok) throw new Error('HTTP ' + r.status);
           const data = await r.json();
-          // v4.0.0a4: reconcile optimistic entries.
-          // Server-assigned trajectories replace any optimistic entries
-          // whose (question, project, tool) tuple matches. Any optimistic
-          // entry that has no server match yet (writeback in flight)
-          // stays at the top until the next load resolves it.
+          // v4.0.0a4 → v5.0.0a4: reconcile in-place when possible.
+          // The DOM keys on (project, tool, question) so an optimistic
+          // entry that gets a server match keeps its <li> mounted —
+          // only the _optimistic flag flips, and Tailwind's
+          // transition-colors animates the border / bg cross-fade.
           const fresh = data.trajectories || [];
-          const optimistic = (this.trajectories || []).filter(
-            t => t._optimistic && !fresh.some(
-              s => s.project === t.project &&
-                   s.tool === t.tool &&
-                   s.question === t.question,
-            ),
+          const optimistics = (this.trajectories || []).filter(t => t._optimistic);
+          const reconciled = fresh.map((s) => {
+            const match = optimistics.find(o =>
+              o.project === s.project &&
+              o.tool === s.tool &&
+              o.question === s.question
+            );
+            if (match) {
+              // In-place upgrade: keep DOM, drop the optimistic flag.
+              return { ...match, ...s, _optimistic: false };
+            }
+            return s;
+          });
+          // Orphans (writeback in flight) bubble to the top.
+          const orphans = optimistics.filter(o =>
+            !fresh.some(s =>
+              s.project === o.project &&
+              s.tool === o.tool &&
+              s.question === o.question
+            )
           );
-          this.trajectories = [...optimistic, ...fresh];
+          this.trajectories = [...orphans, ...reconciled];
           if (data.message) this.message = data.message;
         } catch (e) {
           this.error = e.message;
