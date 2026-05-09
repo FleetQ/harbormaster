@@ -70,6 +70,61 @@ def register_routes(
             {"version": __version__},
         )
 
+    @app.get("/projects/{name}", response_class=HTMLResponse)
+    async def project_detail(
+        name: str, request: Request, host: str | None = None,
+    ) -> HTMLResponse:
+        """Per-project detail page (v2.1.0a2).
+
+        Renders git log + Serena memories + path for the named project.
+        Local-only when `host` is None; pass `?host=<label>` for remote.
+        404s when the project isn't discoverable in the configured glob
+        (local) or absent on the remote host.
+        """
+        from harbormaster.projects import validate_project_name
+        from harbormaster.tools.projects import _local_status, _remote_status
+
+        try:
+            validate_project_name(name)
+        except ValueError as e:
+            raise HTTPException(400, f"invalid project name: {e}") from e
+
+        if host is not None and host != "local":
+            md = _remote_status(host, name, config)
+            project_dict: dict[str, object] | None = None
+        else:
+            # Find the project metadata for the header card.
+            project_dict = next(
+                (p.as_dict() for p in discover_projects(config.projects)
+                 if p.name == name),
+                None,
+            )
+            if project_dict is None:
+                raise HTTPException(
+                    404,
+                    f"project {name!r} not found in configured globs. "
+                    f"Check [projects].glob in your config.",
+                )
+            md = _local_status(name, config)
+
+        # _local_status / _remote_status start their error responses with
+        # "Error:" — surface those as 404 / 500 rather than a confusing
+        # success page that just shows the error string.
+        if isinstance(md, str) and md.startswith("Error:"):
+            raise HTTPException(404, md)
+
+        return templates.TemplateResponse(
+            request,
+            "project_detail.html",
+            {
+                "version": __version__,
+                "project_name": name,
+                "host": host or "local",
+                "project": project_dict,
+                "status_markdown": md,
+            },
+        )
+
     @app.get("/api/health")
     async def api_health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
