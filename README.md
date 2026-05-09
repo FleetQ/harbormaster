@@ -134,7 +134,7 @@ Every project-targeting tool accepts an optional `host` parameter. With `host` s
 
 ## Status
 
-**v1.0.0a9** — `POST /mcp/{server}` HTTP-direct routing endpoint shipped 2026-05-08. **End-to-end FleetQ → harbormaster MCP routing now functional** (with the matching agent-fleet PR https://github.com/escapeboy/agent-fleet-o/pull/72 applied). The 6-week roadmap to general availability:
+**v1.0.0a10** — Polish + foundations sprint shipped 2026-05-09. SSE streaming on `/mcp/{server}` (heartbeats keep long ask_project / delegate_task / fan_out_ask calls alive through reverse-proxy timeouts), `update_endpoints` config-watch loop (manifest drift gets pushed automatically without a process restart), gated live FleetQ Bridge CI smoke, and 4xx pass-through on the agent-fleet side so daemon errors no longer get masked as generic 502s. v1.0.0a9 was the first published release on PyPI; v1.0.0a10 builds on it. The 6-week roadmap to general availability:
 
 | Phase | Weeks | Focus |
 |-------|-------|-------|
