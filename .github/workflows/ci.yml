@@ -318,10 +318,92 @@ jobs:
           FLEETQ_TEST_API_TOKEN: ${{ secrets.FLEETQ_TEST_API_TOKEN }}
         run: uv run python tests/smoke_fleetq.py
 
+  smoke-mcp-streaming:
+    # Live SSE wire-shape check. Drives /mcp/harbormaster with
+    # `Accept: text/event-stream` and asserts the response is text/event-stream
+    # with a final `event: result` line. Doesn't need a real claude binary —
+    # tools/list returns the static tool registry, so the test is fast and
+    # deterministic. This catches wire-shape regressions on the daemon side
+    # that unit-mocked tests can't see.
+    name: MCP HTTP-direct SSE wire-shape smoke
+    runs-on: ubuntu-24.04
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Generate auth token
+        id: token
+        run: |
+          {
+            echo "token=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Start harbormaster-ui with mcp bound
+        env:
+          HARBORMASTER_UI_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          # The UI app exposes /mcp/{server} when launched with mcp bound;
+          # harbormaster-ui's CLI does that by default since v1.0.0a4.
+          uv run harbormaster-ui --host 127.0.0.1 --port 17534 &
+          echo "UI_PID=$!" >> "$GITHUB_ENV"
+          for _ in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 1 http://127.0.0.1:17534/api/health || echo 0)
+            if [ "$status" = "401" ]; then
+              echo "UI up — auth middleware live"
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "UI did not become healthy within 15s"
+          exit 1
+
+      - name: Drive /mcp/harbormaster with SSE accept and assert wire shape
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          # Capture full body, then verify content-type + SSE event shape.
+          body=$(curl -s -i --max-time 10 \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Accept: text/event-stream' \
+            -H 'Content-Type: application/json' \
+            -d '{"method":"tools/list","params":{}}' \
+            http://127.0.0.1:17534/mcp/harbormaster)
+
+          echo "$body" | head -20
+
+          echo "$body" | grep -qi '^content-type: text/event-stream' || {
+            echo "FAIL: Content-Type was not text/event-stream"
+            exit 1
+          }
+          echo "$body" | grep -q '^event: result$' || {
+            echo "FAIL: response did not contain 'event: result'"
+            exit 1
+          }
+          echo "$body" | grep -q '"name":"ask_project"' || {
+            echo "FAIL: response did not list ask_project tool"
+            exit 1
+          }
+          echo "OK: SSE wire shape verified"
+
+      - name: Stop background server
+        if: always()
+        run: |
+          if [ -n "${UI_PID:-}" ]; then
+            kill "$UI_PID" 2>/dev/null || true
+          fi
+
   build:
     name: Build sdist + wheel
     runs-on: ubuntu-24.04
-    needs: [test, smoke-http, smoke-ui, smoke-ui-auth, smoke-ui-with-token]
+    needs: [test, smoke-http, smoke-ui, smoke-ui-auth, smoke-ui-with-token, smoke-mcp-streaming]
     steps:
       - uses: actions/checkout@v4
 

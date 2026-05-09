@@ -125,12 +125,30 @@ Every project-targeting tool accepts an optional `host` parameter. With `host` s
 3. Ensure project paths exist with their `CLAUDE.md` / `.serena/` in place.
 4. Confirm passwordless SSH from your machine (`BatchMode=yes` is enforced).
 
+## Streaming
+
+`POST /mcp/{server}` accepts `Accept: text/event-stream` for incremental output. Long-running tools (`ask_project`, `delegate_task`, `fan_out_ask`, all 30–90s) emit heartbeat events on the wire while they run, then a final `result` event with the same MCP envelope JSON-mode would return. `ask_project` against a local project additionally emits per-token `chunk` events as `claude -p --output-format stream-json` produces them.
+
+Direct curl example (bypasses FleetQ — for testing or a custom consumer):
+
+```bash
+curl -N -X POST http://127.0.0.1:7531/mcp/harbormaster \
+  -H 'Accept: text/event-stream' \
+  -H 'Content-Type: application/json' \
+  -d '{"method":"tools/call","params":{"name":"ask_project","arguments":{"name":"alpha","question":"summarize"}}}'
+```
+
+Through the FleetQ Bridge, set `stream: true` in the request body — the Bridge forwards `text/event-stream` bytes verbatim with `X-Accel-Buffering: no` so reverse proxies don't buffer.
+
+JSON mode (no `Accept: text/event-stream`, no `stream` flag) is unchanged — fully backward-compatible.
+
 ## v1 limits
 
 - Read-only delegation (`allow_writes=True` returns an error).
 - 60 s local / 90 s remote subprocess timeout.
 - 800-word output cap (full output dumped to `/tmp/harbormaster-*.md` on truncation).
 - Remote `list_projects` returns a flat list of directory names (rich metadata is local-only — gathering it remotely would mean N round-trips).
+- Per-token `chunk` events are local-only — `ask_project` over SSH still falls back to heartbeat + final result (remote stdout demux is a separate refactor).
 
 ## Status
 
