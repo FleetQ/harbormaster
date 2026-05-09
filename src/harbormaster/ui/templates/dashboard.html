@@ -1,6 +1,104 @@
 {% extends "base.html" %}
 {% block title %}Dashboard · Harbormaster{% endblock %}
 {% block content %}
+
+<!-- v2.1.0a1: bridge + plugin status strip. Sticky on desktop,
+     collapsible on mobile. Loads async, doesn't block project grid. -->
+<section x-data="statusStrip()" x-init="loadAll()"
+         class="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+  <article class="border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+    <header class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-bold text-gray-300">FleetQ Bridge</h3>
+      <span class="text-xs px-2 py-0.5 rounded"
+            :class="bridge.fleetq_enabled
+              ? (bridge.api_token_present ? 'bg-emerald-900/50 text-emerald-300'
+                                          : 'bg-amber-900/50 text-amber-300')
+              : 'bg-gray-800 text-gray-400'"
+            x-text="bridgeStateLabel()"></span>
+    </header>
+    <dl class="text-xs space-y-1 text-gray-400" x-show="!bridgeError">
+      <div><dt class="inline text-gray-500">enabled:</dt>
+        <dd class="inline ml-1" x-text="bridge.fleetq_enabled"></dd></div>
+      <div><dt class="inline text-gray-500">register_as_bridge:</dt>
+        <dd class="inline ml-1" x-text="bridge.register_as_bridge"></dd></div>
+      <div><dt class="inline text-gray-500">base_url:</dt>
+        <dd class="inline ml-1 text-cyan-400" x-text="bridge.base_url"></dd></div>
+      <div><dt class="inline text-gray-500">token (env var):</dt>
+        <dd class="inline ml-1"
+            :class="bridge.api_token_present ? 'text-emerald-400' : 'text-amber-400'"
+            x-text="bridge.api_token_present ? `${bridge.api_token_env} ✓` : `${bridge.api_token_env} (empty)`"></dd></div>
+      <div><dt class="inline text-gray-500">writeback:</dt>
+        <dd class="inline ml-1"
+            x-text="`trajectories=${bridge.write_trajectories}, kg=${bridge.write_kg} (${bridge.kg_extractor})`"></dd></div>
+    </dl>
+    <p x-show="bridgeError" class="text-xs text-red-400" x-text="bridgeError"></p>
+  </article>
+
+  <article class="border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+    <header class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-bold text-gray-300">Plugins</h3>
+      <span class="text-xs px-2 py-0.5 rounded"
+            :class="plugins.enabled ? 'bg-emerald-900/50 text-emerald-300'
+                                    : 'bg-gray-800 text-gray-400'"
+            x-text="plugins.enabled ? `enabled (${pluginCounts().loaded} loaded)` : 'disabled'"></span>
+    </header>
+    <div x-show="!pluginsError" class="text-xs space-y-1">
+      <p class="text-gray-500" x-show="(plugins.plugins || []).length === 0">
+        No entry points discovered.
+      </p>
+      <template x-for="row in (plugins.plugins || [])" :key="row.entry_point + ':' + row.dist_name">
+        <div class="flex items-baseline gap-2">
+          <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide"
+                :class="{
+                  'bg-emerald-900/50 text-emerald-300': row.status === 'loaded',
+                  'bg-gray-800 text-gray-400': ['disabled','not-allowlisted'].includes(row.status),
+                  'bg-amber-900/50 text-amber-300': row.status === 'missing',
+                  'bg-rose-900/50 text-rose-300': row.status === 'no-dist-name',
+                }"
+                x-text="row.status"></span>
+          <span class="text-gray-300 truncate" x-text="row.dist_name || '<unknown>'"></span>
+          <span class="text-gray-500 text-[10px]" x-show="row.entry_point" x-text="`(${row.entry_point})`"></span>
+        </div>
+      </template>
+    </div>
+    <p x-show="pluginsError" class="text-xs text-red-400" x-text="pluginsError"></p>
+  </article>
+</section>
+
+<!-- v2.1.0a1: project graph render. Mermaid markup comes from
+     /api/graph; we re-render with mermaid.run() after the DOM has the
+     fresh markup so the layout adapts to includeDevDeps / transitive. -->
+<section x-data="graphPanel()" x-init="loadGraph()"
+         class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+  <header class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+    <h2 class="text-lg font-bold">Project graph</h2>
+    <div class="flex items-center gap-3 text-xs text-gray-400">
+      <label class="flex items-center gap-1.5">
+        <input type="checkbox" x-model="includeDevDeps" @change="loadGraph()" class="accent-cyan-500">
+        dev deps
+      </label>
+      <label class="flex items-center gap-1.5">
+        <input type="checkbox" x-model="transitive" @change="loadGraph()" class="accent-cyan-500">
+        transitive (lockfiles)
+      </label>
+      <span x-show="graph.projects_discovered !== undefined"
+            x-text="`${graph.projects_discovered} projects · ${(graph.graph?.edges?.length ?? 0)} edges${graph.projects_with_lockfile !== undefined ? ' · ' + graph.projects_with_lockfile + ' with lockfile' : ''}`"></span>
+    </div>
+  </header>
+  <div x-show="graphError" class="text-xs text-red-400" x-text="graphError"></div>
+  <div x-show="graphLoading" class="text-xs text-gray-500">Rendering…</div>
+  <div x-show="!graphLoading && (graph.graph?.edges?.length ?? 0) === 0"
+       class="text-xs text-gray-500">
+    No edges yet — graph edges only appear when one project's dep matches
+    another project's manifest name. Try enabling <code class="text-cyan-400">transitive</code>
+    to also consider lockfile-resolved deps.
+  </div>
+  <div class="overflow-x-auto" x-show="!graphLoading">
+    <pre class="mermaid text-xs leading-tight" x-ref="diagram" x-text="mermaidMarkup"></pre>
+  </div>
+</section>
+
+<!-- Project grid (carried forward from v2.0). -->
 <section x-data="{ projects: [], loading: true, error: null }"
          x-init="(async () => {
            try {
@@ -13,8 +111,7 @@
              loading = false;
            }
          })()">
-
-  <header class="mb-6 flex items-baseline justify-between">
+  <header class="mb-4 flex items-baseline justify-between">
     <h2 class="text-lg font-bold">Projects</h2>
     <span class="text-sm text-gray-400"
           x-show="!loading"
@@ -59,4 +156,81 @@
     </template>
   </div>
 </section>
+
+<script>
+  function statusStrip() {
+    return {
+      bridge: {}, bridgeError: null,
+      plugins: {}, pluginsError: null,
+
+      async loadAll() {
+        await Promise.all([this.loadBridge(), this.loadPlugins()]);
+      },
+      async loadBridge() {
+        try {
+          const r = await fetch('/api/bridge/status');
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          this.bridge = await r.json();
+        } catch (e) { this.bridgeError = e.message; }
+      },
+      async loadPlugins() {
+        try {
+          const r = await fetch('/api/plugins');
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          this.plugins = await r.json();
+        } catch (e) { this.pluginsError = e.message; }
+      },
+      bridgeStateLabel() {
+        if (!this.bridge.fleetq_enabled) return 'disabled';
+        if (!this.bridge.api_token_present) return 'token missing';
+        return 'configured';
+      },
+      pluginCounts() {
+        const rows = this.plugins.plugins || [];
+        return {
+          loaded: rows.filter(r => r.status === 'loaded').length,
+          missing: rows.filter(r => r.status === 'missing').length,
+        };
+      },
+    };
+  }
+
+  function graphPanel() {
+    return {
+      includeDevDeps: false, transitive: false,
+      graph: {}, mermaidMarkup: '', graphLoading: true, graphError: null,
+
+      async loadGraph() {
+        this.graphLoading = true; this.graphError = null;
+        try {
+          const params = new URLSearchParams();
+          if (this.includeDevDeps) params.set('include_dev_deps', 'true');
+          if (this.transitive) params.set('transitive', 'true');
+          const url = '/api/graph' + (params.toString() ? '?' + params : '');
+          const r = await fetch(url);
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          this.graph = await r.json();
+          this.mermaidMarkup = this.graph.mermaid || 'graph LR\n  empty[No projects]';
+          // Wait for the next frame so the new markup is in the DOM
+          // before mermaid runs over it.
+          requestAnimationFrame(async () => {
+            const node = this.$refs.diagram;
+            if (node && window.__hmMermaid) {
+              // Force re-process: clear `data-processed` if mermaid set it.
+              node.removeAttribute('data-processed');
+              try {
+                await window.__hmMermaid.run({ nodes: [node] });
+              } catch (e) { this.graphError = 'mermaid: ' + e.message; }
+            }
+          });
+        } catch (e) {
+          this.graphError = e.message;
+        } finally {
+          this.graphLoading = false;
+        }
+      },
+    };
+  }
+</script>
+
 {% endblock %}

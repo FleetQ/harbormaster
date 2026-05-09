@@ -8,6 +8,19 @@
 <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
 <script src="https://unpkg.com/htmx.org@1.9.10"></script>
 <script defer src="https://unpkg.com/alpinejs@3"></script>
+<!-- v2.1.0a1: project-graph render. ESM build of mermaid 10.9.1 so the
+     dashboard can render `/api/graph["mermaid"]` markup on demand
+     instead of dumping raw text on the user. -->
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: "dark",
+    themeVariables: { darkMode: true },
+    securityLevel: "loose",
+  });
+  window.__hmMermaid = mermaid;
+</script>
 <style>
   body { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 </style>
