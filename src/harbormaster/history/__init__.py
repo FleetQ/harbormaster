@@ -35,6 +35,16 @@ from harbormaster.history.embed import (
     FTS5Backend,
     get_embedding_backend,
 )
+from harbormaster.history.reembed_history import (
+    MAX_HISTORY_RECORDS,
+    ReembedRunRecord,
+)
+from harbormaster.history.reembed_history import (
+    append_run as append_reembed_run,
+)
+from harbormaster.history.reembed_history import (
+    read_runs as read_reembed_runs,
+)
 from harbormaster.history.schema import (
     HISTORY_VEC_DIM,
     EmbeddingMeta,
@@ -51,15 +61,19 @@ __all__ = [
     "FastembedBackend",
     "FTS5Backend",
     "HISTORY_VEC_DIM",
+    "MAX_HISTORY_RECORDS",
     "QAMatch",
     "QARecord",
     "QAStore",
+    "ReembedRunRecord",
     "ReembedState",
+    "append_reembed_run",
     "connect",
     "ensure_schema",
     "get_embedding_backend",
     "maybe_start_auto_reembed_thread",
     "read_embedding_meta",
+    "read_reembed_runs",
     "read_reembed_state",
     "request_reembed_cancel",
     "trigger_manual_reembed",

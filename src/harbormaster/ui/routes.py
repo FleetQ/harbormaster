@@ -276,6 +276,23 @@ def register_routes(
                 "auto_reembed_enabled": False,
             }
 
+    @app.get("/api/history/reembed/runs")
+    async def api_history_reembed_runs() -> dict[str, object]:
+        """v7.0.0a4: rolling log of completed reembed runs.
+
+        Returns ``{"runs": [...]}`` where each entry is a
+        ReembedRunRecord (started_at, finished_at, total, succeeded,
+        failed, cancelled, model). Capped at the most recent
+        MAX_HISTORY_RECORDS (50) runs. Returns ``{"runs": []}`` when
+        the [history] extra is not installed or the file is missing.
+        """
+        try:
+            from harbormaster.history import read_reembed_runs
+        except ImportError:
+            return {"runs": []}
+        runs = read_reembed_runs()
+        return {"runs": [r.model_dump(mode="json") for r in runs]}
+
     @app.post("/api/history/reembed/cancel")
     async def api_history_reembed_cancel() -> dict[str, object]:
         """v7.0.0a3: request cooperative cancel of a running reembed.
