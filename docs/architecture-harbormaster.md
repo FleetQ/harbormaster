@@ -682,7 +682,81 @@ scores.
 - **Embedding upgrade-in-place**: switching `embedding_dim` requires
   starting a fresh db file today; no migration tool ships.
 
-## 18. Federated KnowledgeGraph via FleetQ (v1.2 phase 2)
+## 18. Auto project graph (v1.2 phase 3)
+
+Harbormaster parses the manifest file of every discovered project and
+exposes a cross-project dependency graph. No LLM, no FleetQ, no
+network — pure file parsing on a per-process in-memory cache, refreshed
+on manifest mtime change.
+
+### Supported manifest formats
+
+| Language | File | Name source | Deps source |
+|----------|------|-------------|-------------|
+| Python | `pyproject.toml` | `[project].name` (PEP 621) or `[tool.poetry].name` | `[project].dependencies` + `[project.optional-dependencies]` |
+| JavaScript / TypeScript | `package.json` | `name` | `dependencies` + `devDependencies` + `peerDependencies` |
+| PHP | `composer.json` | `name` (vendor/pkg) | `require` + `require-dev` (php / ext-* filtered) |
+| Rust | `Cargo.toml` | `[package].name` | `[dependencies]` + `[dev-dependencies]` + `[build-dependencies]` |
+| Go | `go.mod` | `module` directive | `require` lines / blocks (indirect deps filtered) |
+
+### Edge filter
+
+Only edges whose target matches **another known project's name** are
+emitted. This keeps the graph readable — pure-library deps from npm /
+pip / composer / crates.io are not turned into nodes. The matcher
+recognises composer-style aliases (`vendor/pkg` matches `pkg` too).
+
+### Wire shape
+
+`GET /api/graph` (UI) and `project_graph(format="json")` (MCP tool):
+
+```json
+{
+  "projects_discovered": 39,
+  "manifests": [
+    {"name": "harbormaster-mcp", "language": "python", "path": "/.../harbormaster",
+     "manifest_file": "/.../harbormaster/pyproject.toml",
+     "version": "1.0.0a17", "description": "...",
+     "deps": ["mcp", "pydantic"], "dev_deps": [...]}
+  ],
+  "graph": {
+    "nodes": [{"name": "...", "language": "...", "path": "..."}],
+    "edges": [{"src": "alpha", "dst": "beta", "kind": "dep"}]
+  },
+  "mermaid": "graph LR\n  alpha[\"alpha\"]\n  beta[\"beta\"]\n  alpha --> beta"
+}
+```
+
+`project_graph(format="mermaid")` adds the `mermaid` field; `format="json"`
+omits it.
+
+### Cache invariants
+
+- One `ManifestCache` per process; not shared between `harbormaster-mcp`
+  and `harbormaster-ui`. Parsing is fast enough that no IPC is worth the
+  coupling.
+- Cache key: project root path. Cache value: `(manifest_file, mtime_ns,
+  ProjectManifest | None)`. `None` is also cached to skip re-stat'ing
+  empty dirs.
+- Invalidation: automatic on manifest mtime change; explicit via
+  `cache.invalidate(path | None)`.
+
+### Out of scope (filed for later)
+
+- **Dashboard Mermaid widget** — the `/api/graph` endpoint ships now,
+  but the rendered widget on `/` is a follow-up. Operators who want the
+  visualisation today can hit `/api/graph` and pipe `.mermaid` into any
+  Mermaid renderer.
+- **Lockfile-driven version pinning** — the parser collects deps but
+  not their resolved versions. Adding lockfile parsing (`uv.lock`,
+  `package-lock.json`, `composer.lock`, `Cargo.lock`, `go.sum`) is
+  v2 territory.
+- **Transitive deps** — only direct deps from the manifest. We don't
+  resolve transitives (would require a registry call per dep).
+- **Cross-host graph** — local-only. SSH host fan-out is v1.2 phase 4
+  territory after the FleetQ KG lands.
+
+## 19. Federated KnowledgeGraph via FleetQ (v1.2 phase 2)
 
 Builds on the a16 Memory writeback hook. After every successful
 `ask_project` / `delegate_task`, harbormaster runs three heuristic
@@ -764,7 +838,7 @@ higher-noise triples first when the answer is dense.
 - **Cross-host triple aggregation** — local-only writes today; the
   FleetQ side aggregates across all harbormasters reporting to it.
 
-## 19. Out-of-architecture (decisions deferred)
+## 20. Out-of-architecture (decisions deferred)
 
 - Tauri / Electron native wrapper.
 - Multi-user UI (post-v1).
