@@ -35,7 +35,14 @@ SUPPORTED_LANGUAGES = ("python", "javascript", "php", "rust", "go")
 
 @dataclass(frozen=True)
 class ProjectManifest:
-    """Normalised view of one project's manifest file."""
+    """Normalised view of one project's manifest file.
+
+    `transitive_deps` (v2.0.0a1) holds the lockfile-resolved dependency
+    set when a lockfile is present alongside the manifest — uv.lock,
+    poetry.lock, requirements.txt, package-lock.json, composer.lock,
+    Cargo.lock, go.sum. Empty tuple when no lockfile was found.
+    `lockfile` carries the absolute path of the lockfile that was used.
+    """
 
     name: str
     language: str
@@ -45,12 +52,15 @@ class ProjectManifest:
     description: str | None = None
     deps: tuple[str, ...] = field(default_factory=tuple)
     dev_deps: tuple[str, ...] = field(default_factory=tuple)
+    lockfile: str | None = None
+    transitive_deps: tuple[str, ...] = field(default_factory=tuple)
 
     def as_dict(self) -> dict[str, object]:
         d = asdict(self)
         # tuples → lists for JSON
         d["deps"] = list(self.deps)
         d["dev_deps"] = list(self.dev_deps)
+        d["transitive_deps"] = list(self.transitive_deps)
         return d
 
 
@@ -271,11 +281,41 @@ _PARSERS = (
 
 def parse_project(path: Path) -> ProjectManifest | None:
     """Try each known manifest format. Returns the first that parses
-    successfully, or None when no manifest is present."""
-    for parser in _PARSERS:
-        result = parser(path)
-        if result is not None:
+    successfully, or None when no manifest is present.
+
+    When a manifest is found, also probe for a lockfile in the same
+    directory (uv.lock, poetry.lock, requirements.txt, package-lock.json,
+    composer.lock, Cargo.lock, go.sum) and attach the resolved transitive
+    deps to the manifest. A missing or unparseable lockfile is fine — the
+    manifest's direct deps still drive the graph.
+    """
+    # Imported lazily so manifest-only callers (e.g., tools that only
+    # read the manifest tree) don't pay the lockfile import cost.
+    from harbormaster.graph.lockfile import parse_lockfile
+
+    for parser_fn in _PARSERS:
+        result = parser_fn(path)
+        if result is None:
+            continue
+        lockfile_match = parse_lockfile(path, result.language)
+        if lockfile_match is None:
             return result
+        lockfile_path, packages = lockfile_match
+        # Drop the project's own name from its transitive set — it's
+        # never a dep of itself.
+        packages.discard(result.name)
+        return ProjectManifest(
+            name=result.name,
+            language=result.language,
+            path=result.path,
+            manifest_file=result.manifest_file,
+            version=result.version,
+            description=result.description,
+            deps=result.deps,
+            dev_deps=result.dev_deps,
+            lockfile=str(lockfile_path),
+            transitive_deps=tuple(sorted(packages)),
+        )
     return None
 
 

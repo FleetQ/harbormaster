@@ -26,11 +26,18 @@ logger = logging.getLogger("harbormaster.graph.cache")
 @dataclass(frozen=True)
 class _Entry:
     """Cache entry. `manifest` is None when no parser matched the path
-    (we still cache the negative result to skip re-stat'ing)."""
+    (we still cache the negative result to skip re-stat'ing).
+
+    `lockfile_path` and `lockfile_mtime_ns` track the lockfile companion
+    when one was found at parse time (v2.0.0a1). Either an mtime change
+    on the manifest OR the lockfile invalidates the entry.
+    """
 
     manifest_file: Path | None
     mtime_ns: int  # 0 when manifest_file is None
     manifest: ProjectManifest | None
+    lockfile_path: Path | None = None
+    lockfile_mtime_ns: int = 0
 
 
 class ManifestCache:
@@ -42,8 +49,8 @@ class ManifestCache:
 
     def get(self, path: Path) -> ProjectManifest | None:
         """Return the manifest for `path`, parsing iff the cache is
-        missing or stale. Stale = manifest file mtime newer than the
-        cached entry.
+        missing or stale. Stale = manifest OR lockfile mtime changed
+        since the cached entry.
         """
         path = path.resolve()
         cached = self._entries.get(path)
@@ -57,7 +64,16 @@ class ManifestCache:
                 with self._lock:
                     self._entries.pop(path, None)
             else:
-                if current_mtime == cached.mtime_ns:
+                lock_ok = True
+                if cached.lockfile_path is not None:
+                    try:
+                        current_lock_mtime = cached.lockfile_path.stat().st_mtime_ns
+                    except OSError:
+                        lock_ok = False
+                    else:
+                        if current_lock_mtime != cached.lockfile_mtime_ns:
+                            lock_ok = False
+                if current_mtime == cached.mtime_ns and lock_ok:
                     return cached.manifest
 
         if cached is not None and cached.manifest_file is None:
@@ -77,10 +93,22 @@ class ManifestCache:
                     mtime = manifest_path.stat().st_mtime_ns
                 except OSError:
                     mtime = 0
+                lockfile_path: Path | None = None
+                lockfile_mtime_ns = 0
+                if manifest.lockfile is not None:
+                    lp = Path(manifest.lockfile)
+                    try:
+                        lockfile_mtime_ns = lp.stat().st_mtime_ns
+                        lockfile_path = lp
+                    except OSError:
+                        lockfile_path = None
+                        lockfile_mtime_ns = 0
                 self._entries[path] = _Entry(
                     manifest_file=manifest_path,
                     mtime_ns=mtime,
                     manifest=manifest,
+                    lockfile_path=lockfile_path,
+                    lockfile_mtime_ns=lockfile_mtime_ns,
                 )
         return manifest
 
