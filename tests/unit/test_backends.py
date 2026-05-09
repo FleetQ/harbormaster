@@ -267,6 +267,113 @@ def test_ask_local_stream_uses_stream_json_output_format(backend, monkeypatch, t
     assert "--verbose" in captured["cmd"]
 
 
+# ----- ask_remote_stream (SSH variant) -------------------------------------
+
+
+def test_ask_remote_stream_yields_assistant_text_blocks(backend, monkeypatch):
+    """SSH stream: same yielding semantics as local — assistant text only."""
+    lines = [
+        '{"type":"system","subtype":"init"}\n',
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"remote "}]}}\n',
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"answer"}]}}\n',
+        '{"type":"result","result":"remote answer"}\n',
+    ]
+
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda *a, **kw: _FakePopenProc(stdout_lines=lines),
+    )
+    chunks = list(backend.ask_remote_stream(
+        host="friday", remote_cwd="~/htdocs/x", prompt="hi",
+        max_turns=1, connect_timeout=10, total_timeout=60,
+    ))
+    assert chunks == ["remote ", "answer"]
+
+
+def test_ask_remote_stream_drops_non_json_noise(backend, monkeypatch):
+    """ssh banner / motd / shell prompt land on stdout sometimes; must
+    be silently filtered, not raise parse_failure."""
+    lines = [
+        "Welcome to Ubuntu 24.04\n",
+        "Last login: Thu May 09 08:00:00 2026\n",
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"clean"}]}}\n',
+    ]
+
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda *a, **kw: _FakePopenProc(stdout_lines=lines),
+    )
+    chunks = list(backend.ask_remote_stream(
+        host="friday", remote_cwd="~/htdocs/x", prompt="hi",
+        max_turns=1, connect_timeout=10, total_timeout=60,
+    ))
+    # Banners dropped; only the assistant text reached the caller.
+    assert chunks == ["clean"]
+
+
+def test_ask_remote_stream_raises_ssh_error_on_rc_255(backend, monkeypatch):
+    """SSH exit code 255 means ssh itself failed (auth / connect / host
+    key) — surface as ssh_error, not generic exit_nonzero."""
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda *a, **kw: _FakePopenProc(
+            stdout_lines=[],
+            stderr="ssh: connect to host friday port 22: Connection refused",
+            returncode=255,
+        ),
+    )
+    with pytest.raises(BackendError) as excinfo:
+        list(backend.ask_remote_stream(
+            host="friday", remote_cwd="~/htdocs/x", prompt="hi",
+            max_turns=1, connect_timeout=10, total_timeout=60,
+        ))
+    assert excinfo.value.code == "ssh_error"
+    assert "Connection refused" in str(excinfo.value)
+
+
+def test_ask_remote_stream_raises_exit_nonzero_for_remote_claude_failure(
+    backend, monkeypatch
+):
+    """rc != 0 and != 255 means remote claude itself failed."""
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda *a, **kw: _FakePopenProc(
+            stdout_lines=[],
+            stderr="claude: rate limited",
+            returncode=2,
+        ),
+    )
+    with pytest.raises(BackendError) as excinfo:
+        list(backend.ask_remote_stream(
+            host="friday", remote_cwd="~/htdocs/x", prompt="hi",
+            max_turns=1, connect_timeout=10, total_timeout=60,
+        ))
+    assert excinfo.value.code == "exit_nonzero"
+
+
+def test_ask_remote_stream_uses_t_q_flags_to_suppress_motd(backend, monkeypatch):
+    """ssh -T (no PTY) + ssh -q (quiet) suppress the remote login banner
+    that would otherwise pollute stdout. Verify both flags are present."""
+    captured: dict[str, list[str]] = {}
+
+    def fake_popen(cmd, **kw):
+        captured["cmd"] = cmd
+        return _FakePopenProc(stdout_lines=[])
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    list(backend.ask_remote_stream(
+        host="friday", remote_cwd="~/htdocs/x", prompt="hi",
+        max_turns=1, connect_timeout=10, total_timeout=60,
+    ))
+
+    assert "-T" in captured["cmd"]
+    assert "-q" in captured["cmd"]
+    # And it's still using stream-json output format on the remote
+    remote_cmd = captured["cmd"][-1]
+    assert "--output-format stream-json" in remote_cmd
+    assert "--verbose" in remote_cmd
+
+
 def test_ask_remote_quotes_user_inputs(backend, monkeypatch):
     """Adversarial prompt with shell metas must not break the remote command."""
     captured = {}

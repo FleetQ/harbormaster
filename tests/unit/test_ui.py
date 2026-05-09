@@ -694,8 +694,10 @@ async def test_stream_ask_project_local_502_on_backend_error_mid_stream(
 
 @pytest.mark.asyncio
 async def test_stream_ask_project_local_400_on_unknown_project(populated_config):
-    """resolve_project raising ValueError surfaces as a 400 error event,
-    not a 502 — the project name is caller input, not a backend bug."""
+    """resolve_project raising ValueError now surfaces as a deterministic
+    400 — the eager validation in make_ask_local_stream catches it
+    before any subprocess is spawned, so we can guarantee 400 instead
+    of "maybe-400-maybe-502 depending on iteration timing."""
     import json as _json
 
     from harbormaster.ui.routes import _stream_ask_project_local
@@ -708,9 +710,5 @@ async def test_stream_ask_project_local_400_on_unknown_project(populated_config)
 
     assert events[-1]["event"] == "error"
     err = _json.loads(events[-1]["data"])
-    # ValueError from resolve_project is escalated to 502 today (it's
-    # raised mid-iteration). That's defensible — the validation lives
-    # inside the generator. Acceptable for either status as long as
-    # we get an error event back, not a 200 result.
-    assert err["status"] in (400, 502)
+    assert err["status"] == 400
     assert "nonexistent" in err["detail"]

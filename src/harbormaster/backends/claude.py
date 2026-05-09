@@ -198,6 +198,115 @@ class ClaudeBackend:
             if isinstance(text, str) and text:
                 yield text
 
+    def ask_remote_stream(
+        self, *,
+        host: str,
+        remote_cwd: str,
+        prompt: str,
+        max_turns: int,
+        connect_timeout: int,
+        total_timeout: int,
+    ) -> Iterator[str]:
+        """SSH variant of ask_local_stream — pipe stream-json output through
+        ssh and yield assistant text deltas as they arrive.
+
+        Defenses against ssh-noise that can land on stdout:
+          - `ssh -T -q` (no PTY, suppressed banner) — appended via
+            build_ssh_argv shape
+          - filter lines that don't parse as JSON; only yield from
+            recognised assistant `text` blocks. Login banners / MOTD
+            from the remote shell get silently dropped instead of
+            polluting the SSE chunk stream.
+
+        Failure modes:
+          - SSH-layer error (rc 255: connection refused / auth) →
+            BackendError(code='ssh_error')
+          - Local-side timeout exceeded → BackendError(code='timeout')
+            with the ssh subprocess killed and reaped
+          - Remote claude exit non-zero → BackendError(code='exit_nonzero')
+            with stderr tail
+
+        The `finally` block always reaps the subprocess so we don't
+        leak zombies if the consumer breaks out of iteration early.
+        """
+        from harbormaster.ssh import build_ssh_argv
+
+        # Build the same remote command shape as ask_remote, but with
+        # stream-json output. shlex.quote on every interpolated value.
+        qcwd = shlex.quote(remote_cwd)
+        qprompt = shlex.quote(prompt)
+        qbin = shlex.quote(self.cfg.binary)
+        qmaxturns = shlex.quote(str(max_turns))
+        remote_cmd = (
+            f"cd {qcwd} && {qbin} -p "
+            f"--permission-mode bypassPermissions "
+            f"--max-turns {qmaxturns} "
+            f"--output-format stream-json --verbose "
+            f"-- {qprompt}"
+        )
+
+        argv = build_ssh_argv(host, remote_cmd, connect_timeout=connect_timeout)
+        # `-T` (no PTY) + `-q` (quiet) keep ssh's own banner / motd off
+        # stdout. Insert right after the `ssh` token.
+        ssh_idx = argv.index("ssh")
+        argv = [*argv[:ssh_idx + 1], "-T", "-q", *argv[ssh_idx + 1:]]
+
+        proc = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        deadline = time.monotonic() + total_timeout
+        assert proc.stdout is not None  # noqa: S101 - PIPE was requested
+
+        try:
+            for line in proc.stdout:
+                if time.monotonic() > deadline:
+                    proc.kill()
+                    proc.wait(timeout=2)
+                    raise BackendError(
+                        f"timeout: ssh+claude exceeded {total_timeout}s",
+                        code="timeout",
+                    )
+                line = line.strip()
+                if not line:
+                    continue
+                # Tolerate non-JSON lines (login banner / shell prompt
+                # / ssh status messages). Only assistant text deltas
+                # reach the caller.
+                try:
+                    yield from self._extract_assistant_text(line)
+                except BackendError as e:
+                    if e.code == "parse_failure":
+                        # Non-JSON noise; skip silently.
+                        continue
+                    raise
+        finally:
+            stderr_tail = ""
+            if proc.stderr is not None:
+                stderr_tail = (proc.stderr.read() or "")[-500:]
+                proc.stderr.close()
+            proc.stdout.close()
+            try:
+                rc = proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                rc = proc.wait()
+            if rc == 255:
+                # ssh's own non-zero exit — connection refused, auth,
+                # host key verification, etc.
+                raise BackendError(
+                    f"ssh to {host!r} failed (rc=255): {stderr_tail or '(no stderr)'}",
+                    code="ssh_error",
+                )
+            if rc != 0:
+                raise BackendError(
+                    f"remote claude -p exit {rc}: {stderr_tail or '(no stderr)'}",
+                    code="exit_nonzero",
+                )
+
     # ----- private helpers --------------------------------------------------
 
     def _build_remote_command(
