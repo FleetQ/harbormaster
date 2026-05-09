@@ -21,6 +21,7 @@
            projects: {{ project_names | tojson }},
            hosts: {{ host_labels | tojson }},
          })'
+         x-init="restoreFromUrl()"
          class="border border-gray-800 rounded-lg p-4 bg-gray-900/40">
   <form @submit.prevent="run()" class="space-y-3">
     <div>
@@ -94,11 +95,44 @@
       resultText: '', error: '', loading: false, hasResult: false, elapsedMs: 0,
       _abortController: null,
 
-      selectAll() { this.selected = [...this.projects]; },
-      selectNone() { this.selected = []; },
+      selectAll() { this.selected = [...this.projects]; this.persistToUrl(); },
+      selectNone() { this.selected = []; this.persistToUrl(); },
+
+      // v3.0.0a9: URL state encoding so an operator can copy/share a
+      // pre-filled fan-out form. Read on mount; write on submit + on
+      // selectAll/None. Avoids per-keystroke history pollution.
+      restoreFromUrl() {
+        const p = new URLSearchParams(window.location.search);
+        const q = p.get('q'); if (q) this.question = q;
+        const h = p.get('host'); if (h && this.hosts.includes(h)) this.host = h;
+        const c = parseInt(p.get('concurrency') || '', 10);
+        if (!isNaN(c) && c >= 1 && c <= 10) this.maxConcurrency = c;
+        const t = parseInt(p.get('turns') || '', 10);
+        if (!isNaN(t) && t >= 1 && t <= 10) this.maxTurns = t;
+        const sel = p.get('targets');
+        if (sel) {
+          const want = new Set(sel.split(','));
+          this.selected = this.projects.filter(x => want.has(x));
+        }
+      },
+
+      persistToUrl() {
+        const p = new URLSearchParams();
+        if (this.question.trim()) p.set('q', this.question.trim());
+        if (this.host && this.host !== 'local') p.set('host', this.host);
+        if (this.maxConcurrency !== 5) p.set('concurrency', String(this.maxConcurrency));
+        if (this.maxTurns !== 3) p.set('turns', String(this.maxTurns));
+        if (this.selected.length > 0 && this.selected.length !== this.projects.length) {
+          p.set('targets', this.selected.join(','));
+        }
+        const qs = p.toString();
+        const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+        window.history.replaceState(null, '', url);
+      },
 
       async run() {
         if (this.question.trim().length < 3 || this.selected.length === 0) return;
+        this.persistToUrl();
         this.resultText = ''; this.error = ''; this.hasResult = false;
         this.loading = true; this.elapsedMs = 0;
         const t0 = performance.now();
