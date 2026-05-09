@@ -53,10 +53,20 @@ def _default_pusher_factory(
     port: int,
     secure: bool,
 ) -> Any:
-    """Lazy import — only triggered when the relay actually starts."""
+    """Lazy import — only triggered when the relay actually starts.
+
+    pysher's `Pusher.__init__` exposes the WebSocket host parameter
+    as `custom_host=`, NOT `host=`. Passing `host=` lands in pysher's
+    `**thread_kwargs` and eventually reaches `Thread.__init__()`,
+    which raises `TypeError: unexpected keyword argument 'host'`.
+    Symptom: the FleetQ Reverb relay subscriber refused to start in
+    every harbormaster-mcp invocation; bridge registered + heartbeat
+    worked, but no inbound MCP calls from FleetQ were received.
+    v2.0.1 regression fix.
+    """
     import pysher
 
-    return pysher.Pusher(key=key, host=host, port=port, secure=secure)
+    return pysher.Pusher(key=key, custom_host=host, port=port, secure=secure)
 
 
 class BridgeRelay:
