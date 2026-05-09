@@ -75,6 +75,14 @@ class FleetQConfig(BaseModel):
     write_trajectories: bool = True
     write_kg: bool = False
     kg_max_triples_per_call: int = Field(default=50, gt=0)
+    # v2.0.0a5: which extractor produces the triples written back to
+    # FleetQ KG. "heuristic" is free (regex; default); "llm" calls the
+    # configured backend once per answer; "both" merges + dedups.
+    kg_extractor: Literal["heuristic", "llm", "both"] = "heuristic"
+    # Cap on per-call LLM triple count. The extractor honours this in
+    # the prompt instruction AND post-parse truncation, so the operator
+    # has a hard ceiling regardless of model behaviour.
+    kg_llm_max_triples: int = Field(default=20, gt=0)
     publish_a2a_cards: bool = False
     register_as_bridge: bool = False
     heartbeat_interval: int = Field(default=30, gt=0)
