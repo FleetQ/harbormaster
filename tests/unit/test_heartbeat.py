@@ -206,3 +206,151 @@ def test_thread_named_for_diagnosability():
         assert hb._thread.name == "fleetq-heartbeat"
     finally:
         hb.stop()
+
+
+# ----- endpoints_factory drift detection -----------------------------------
+
+
+def test_endpoints_factory_pushes_update_when_manifest_changes():
+    """If the factory returns a manifest different from what was registered,
+    the loop must call client.update_endpoints with the new value."""
+    client = _make_client()
+
+    initial = {"mcp_servers": [{"name": "harbormaster"}]}
+    drifted = {"mcp_servers": [{"name": "harbormaster"}, {"name": "extra"}]}
+    factory_state = {"current": initial}
+
+    def factory() -> dict:
+        return factory_state["current"]
+
+    hb = HeartbeatLoop(
+        client,
+        endpoints=initial,
+        interval=1,
+        endpoints_factory=factory,
+    )
+    hb.start()
+    try:
+        # Wait for at least one heartbeat tick so the factory's identity
+        # output is observed (and ignored — no drift yet).
+        deadline = time.monotonic() + 5.0
+        while client.heartbeat.call_count < 1 and time.monotonic() < deadline:
+            time.sleep(0.1)
+
+        # Identity output should NOT have triggered an update.
+        assert client.update_endpoints.call_count == 0
+
+        # Now drift the factory output.
+        factory_state["current"] = drifted
+
+        # Wait for the next tick to detect the drift and push it.
+        deadline = time.monotonic() + 5.0
+        while client.update_endpoints.call_count < 1 and time.monotonic() < deadline:
+            time.sleep(0.1)
+
+        assert client.update_endpoints.call_count >= 1
+        client.update_endpoints.assert_called_with(drifted)
+    finally:
+        hb.stop()
+
+
+def test_endpoints_factory_does_not_push_when_unchanged():
+    """When the factory consistently returns the same manifest as the last
+    push, no update_endpoints calls should ever be issued."""
+    client = _make_client()
+    initial = {"mcp_servers": [{"name": "harbormaster"}]}
+
+    hb = HeartbeatLoop(
+        client,
+        endpoints=initial,
+        interval=1,
+        endpoints_factory=lambda: dict(initial),
+    )
+    hb.start()
+    try:
+        # Wait for at least three heartbeat ticks so the factory has had
+        # multiple opportunities to misbehave.
+        deadline = time.monotonic() + 5.0
+        while client.heartbeat.call_count < 3 and time.monotonic() < deadline:
+            time.sleep(0.1)
+    finally:
+        hb.stop()
+    assert client.update_endpoints.call_count == 0
+
+
+def test_endpoints_factory_swallows_factory_exceptions():
+    """A raising factory must not kill the heartbeat thread — the loop
+    should keep heartbeating and try the factory again next tick."""
+    client = _make_client()
+
+    call_count = {"n": 0}
+
+    def factory() -> dict:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("config file vanished")
+        return {"mcp_servers": [{"name": "harbormaster"}, {"name": "recovered"}]}
+
+    hb = HeartbeatLoop(
+        client,
+        endpoints={"mcp_servers": [{"name": "harbormaster"}]},
+        interval=1,
+        endpoints_factory=factory,
+    )
+    hb.start()
+    try:
+        # Wait for the second factory call (after the first raised) to
+        # produce drift and push.
+        deadline = time.monotonic() + 5.0
+        while client.update_endpoints.call_count < 1 and time.monotonic() < deadline:
+            time.sleep(0.1)
+    finally:
+        hb.stop()
+    assert client.update_endpoints.call_count >= 1
+
+
+def test_endpoints_factory_swallows_update_endpoints_failures():
+    """A failing update_endpoints must not advance the drift baseline,
+    so the next tick retries the same diff."""
+    client = _make_client()
+    client.update_endpoints.side_effect = [
+        BridgeError("temporary 500"),
+        None,  # second attempt succeeds
+    ]
+
+    drifted = {"mcp_servers": [{"name": "harbormaster"}, {"name": "extra"}]}
+
+    hb = HeartbeatLoop(
+        client,
+        endpoints={"mcp_servers": [{"name": "harbormaster"}]},
+        interval=1,
+        endpoints_factory=lambda: drifted,
+    )
+    hb.start()
+    try:
+        # Wait for two update_endpoints attempts (first raises, second wins).
+        deadline = time.monotonic() + 6.0
+        while client.update_endpoints.call_count < 2 and time.monotonic() < deadline:
+            time.sleep(0.1)
+    finally:
+        hb.stop()
+    assert client.update_endpoints.call_count >= 2
+    # Both attempts pushed the same diff (baseline didn't advance after the
+    # first raise).
+    assert client.update_endpoints.call_args_list[0].args[0] == drifted
+    assert client.update_endpoints.call_args_list[1].args[0] == drifted
+
+
+def test_no_endpoints_factory_means_static_manifest():
+    """Backwards-compatible default: without a factory, no update_endpoints
+    calls are ever issued, even after many heartbeats."""
+    client = _make_client()
+    hb = HeartbeatLoop(client, endpoints={"mcp_servers": []}, interval=1)
+    hb.start()
+    try:
+        deadline = time.monotonic() + 4.0
+        while client.heartbeat.call_count < 3 and time.monotonic() < deadline:
+            time.sleep(0.1)
+    finally:
+        hb.stop()
+    assert client.update_endpoints.call_count == 0

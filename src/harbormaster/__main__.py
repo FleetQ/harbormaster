@@ -197,7 +197,16 @@ def _maybe_start_fleetq_bridge(config: HarbormasterConfig):  # type: ignore[no-u
         bridge_version=__version__,
     )
     endpoints = build_manifest()
-    loop = HeartbeatLoop(client, endpoints, interval=config.fleetq.heartbeat_interval)
+    # Pass build_manifest as the drift detector so that any future change in
+    # what harbormaster announces (new MCP server discovered locally, hosts
+    # added at runtime, etc.) is reflected on FleetQ without a process
+    # restart. Today the manifest is static so this is a no-op in practice.
+    loop = HeartbeatLoop(
+        client,
+        endpoints,
+        interval=config.fleetq.heartbeat_interval,
+        endpoints_factory=build_manifest,
+    )
     loop.start()
 
     relay = None
