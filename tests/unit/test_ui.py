@@ -362,6 +362,50 @@ def test_api_recall_host_all_passes_through(populated_config, tmp_path):
     assert "hosts_searched" in body
 
 
+# ----- v2.1.0a4 — "Ask this project" SSE form ------------------------------
+
+
+def test_project_detail_includes_ask_form(populated_config):
+    client = TestClient(create_app(populated_config))
+    body = client.get("/projects/alpha").text
+    # Section header
+    assert "Ask " in body
+    # Form bits
+    assert "<textarea" in body
+    assert "max_turns" in body
+    # SSE wiring
+    assert "/mcp/harbormaster" in body
+    assert "text/event-stream" in body
+    # Stream consumer
+    assert "askForm" in body
+    assert "AbortController" in body
+
+
+def test_project_detail_ask_form_passes_project_name_via_alpine(populated_config):
+    """The Alpine x-data initializer must contain the project name so
+    the fetch payload knows which project to invoke."""
+    client = TestClient(create_app(populated_config))
+    body = client.get("/projects/alpha").text
+    assert '"alpha"' in body  # tojson rendered project name
+
+
+def test_project_detail_ask_form_passes_host_via_alpine(populated_config):
+    """Use an existing configured host so _remote_status doesn't bail
+    before we reach the template render."""
+    from unittest.mock import patch
+
+    populated_config.hosts = {
+        "somehost": __import__(
+            "harbormaster.config", fromlist=["HostConfig"]
+        ).HostConfig(ssh_host="not-real"),
+    }
+    client = TestClient(create_app(populated_config))
+    with patch("harbormaster.tools.projects._remote_status") as m:
+        m.return_value = "## remote\nBranch: main\n"
+        body = client.get("/projects/alpha?host=somehost").text
+    assert '"somehost"' in body
+
+
 def test_project_detail_remote_host_reaches_remote_status(populated_config):
     """When ?host= is passed (and != 'local'), the route delegates to
     `_remote_status` which returns either remote markdown OR an
