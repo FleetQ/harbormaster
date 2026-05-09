@@ -95,6 +95,10 @@ class HistoryConfig(BaseModel):
     log_fan_out_ask: bool = True
     default_top_k: int = Field(default=5, gt=0)
     default_min_similarity: float = Field(default=0.6, ge=0.0, le=1.0)
+    auto_ground: bool = False
+    auto_ground_top_k: int = Field(default=3, gt=0)
+    auto_ground_max_chars: int = Field(default=8000, gt=0)
+    auto_ground_min_similarity: float = Field(default=0.55, ge=0.0, le=1.0)
 
 
 class HarbormasterConfig(BaseModel):
