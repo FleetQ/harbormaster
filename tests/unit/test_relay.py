@@ -421,3 +421,240 @@ def test_agent_request_handles_garbage_payload(
         ch.fire("agent.request", "this isn't json")
     # No exception, log line still emitted
     assert any("agent.request received" in rec.message for rec in caplog.records)
+
+
+# ----- v2.0.0a7 publish surface (chunk_handler + client-relay events) ----
+
+
+def test_publish_chunk_raises_before_subscribe(fake_pusher_factory):
+    r = BridgeRelay(
+        base_url="https://x",
+        api_token="t",
+        team_id="team",
+        app_key="a",
+        relay_url="wss://x:443",
+        pusher_factory=fake_pusher_factory,
+    )
+    with pytest.raises(RuntimeError, match="cannot publish_chunk"):
+        r.publish_chunk(request_id="abc", chunk="hi", done=False)
+
+
+def test_publish_error_raises_before_subscribe(fake_pusher_factory):
+    r = BridgeRelay(
+        base_url="https://x",
+        api_token="t",
+        team_id="team",
+        app_key="a",
+        relay_url="wss://x:443",
+        pusher_factory=fake_pusher_factory,
+    )
+    with pytest.raises(RuntimeError, match="cannot publish_error"):
+        r.publish_error(request_id="abc", error="boom")
+
+
+def _subscribed_relay(relay, fake_pusher_factory, httpserver):
+    """Drive the relay through connect → auth → subscribe so the channel
+    object is captured and `publish_*` becomes available."""
+    httpserver.expect_request(
+        "/api/v1/bridge/broadcasting-auth"
+    ).respond_with_json({"auth": "k:hex"})
+    relay.start()
+    p = fake_pusher_factory.captured[0]
+    p.fire_connection_event(
+        "pusher:connection_established", json.dumps({"socket_id": "s"})
+    )
+    return p.subscriptions["private-daemon.team-uuid-9"]
+
+
+def test_publish_chunk_triggers_client_relay_event(
+    relay, fake_pusher_factory, httpserver
+):
+    ch = _subscribed_relay(relay, fake_pusher_factory, httpserver)
+    relay.publish_chunk(request_id="r1", chunk="hello", done=False)
+    ch.trigger.assert_called_once()
+    event, data = ch.trigger.call_args.args
+    assert event == "client-relay.chunk"
+    assert data == {
+        "request_id": "r1",
+        "chunk": "hello",
+        "done": False,
+        "usage": None,
+    }
+
+
+def test_publish_chunk_passes_done_and_usage(
+    relay, fake_pusher_factory, httpserver
+):
+    ch = _subscribed_relay(relay, fake_pusher_factory, httpserver)
+    relay.publish_chunk(
+        request_id="r1",
+        chunk="",
+        done=True,
+        usage={"prompt_tokens": 10, "completion_tokens": 20},
+    )
+    _, data = ch.trigger.call_args.args
+    assert data["done"] is True
+    assert data["usage"] == {"prompt_tokens": 10, "completion_tokens": 20}
+
+
+def test_publish_error_triggers_client_relay_error(
+    relay, fake_pusher_factory, httpserver
+):
+    ch = _subscribed_relay(relay, fake_pusher_factory, httpserver)
+    relay.publish_error(request_id="r1", error="exec failed")
+    ch.trigger.assert_called_once()
+    event, data = ch.trigger.call_args.args
+    assert event == "client-relay.error"
+    assert data == {"request_id": "r1", "error": "exec failed"}
+
+
+def test_chunk_handler_streams_yielded_chunks_with_final_sentinel(
+    fake_pusher_factory, httpserver
+):
+    """When chunk_handler is wired, agent.request payloads are dispatched
+    to the handler and each yielded text chunk is published as a
+    client-relay.chunk event. The final empty-chunk done=true sentinel
+    closes the FleetQ-side popChunk loop."""
+
+    def handler(payload):
+        assert payload["request_id"] == "r-1"
+        yield "Hel"
+        yield "lo "
+        yield "world"
+
+    httpserver.expect_request(
+        "/api/v1/bridge/broadcasting-auth"
+    ).respond_with_json({"auth": "k:hex"})
+
+    r = BridgeRelay(
+        base_url=httpserver.url_for("").rstrip("/"),
+        api_token="t",
+        team_id="team-uuid-9",
+        app_key="a",
+        relay_url="wss://x:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=handler,
+    )
+    try:
+        r.start()
+        p = fake_pusher_factory.captured[0]
+        p.fire_connection_event(
+            "pusher:connection_established", json.dumps({"socket_id": "s"})
+        )
+        ch = p.subscriptions["private-daemon.team-uuid-9"]
+        ch.fire(
+            "agent.request",
+            json.dumps({"request_id": "r-1", "method": "ask", "server": "harbormaster"}),
+        )
+    finally:
+        r.stop()
+
+    triggered = [(call.args[0], call.args[1]) for call in ch.trigger.call_args_list]
+    # 3 chunks (text deltas) + 1 final sentinel (done=true)
+    assert len(triggered) == 4
+    for event, _ in triggered:
+        assert event == "client-relay.chunk"
+    assert [d["chunk"] for _, d in triggered] == ["Hel", "lo ", "world", ""]
+    assert [d["done"] for _, d in triggered] == [False, False, False, True]
+    assert all(d["request_id"] == "r-1" for _, d in triggered)
+
+
+def test_chunk_handler_exception_publishes_client_relay_error(
+    fake_pusher_factory, httpserver, caplog
+):
+    def boom(payload):
+        yield "Partial"
+        raise RuntimeError("handler failed mid-stream")
+
+    httpserver.expect_request(
+        "/api/v1/bridge/broadcasting-auth"
+    ).respond_with_json({"auth": "k:hex"})
+
+    r = BridgeRelay(
+        base_url=httpserver.url_for("").rstrip("/"),
+        api_token="t",
+        team_id="team-uuid-9",
+        app_key="a",
+        relay_url="wss://x:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=boom,
+    )
+    try:
+        r.start()
+        p = fake_pusher_factory.captured[0]
+        p.fire_connection_event(
+            "pusher:connection_established", json.dumps({"socket_id": "s"})
+        )
+        ch = p.subscriptions["private-daemon.team-uuid-9"]
+        with caplog.at_level(logging.ERROR, logger="harbormaster.fleetq.relay"):
+            ch.fire(
+                "agent.request",
+                json.dumps({"request_id": "r-1", "method": "x"}),
+            )
+    finally:
+        r.stop()
+
+    events = [(c.args[0], c.args[1]) for c in ch.trigger.call_args_list]
+    # First a chunk (text delta), then a client-relay.error
+    assert events[0][0] == "client-relay.chunk"
+    assert events[0][1]["chunk"] == "Partial"
+    error_events = [e for e in events if e[0] == "client-relay.error"]
+    assert len(error_events) == 1
+    assert error_events[0][1] == {
+        "request_id": "r-1",
+        "error": "handler failed mid-stream",
+    }
+
+
+def test_chunk_handler_skipped_when_no_request_id(
+    fake_pusher_factory, httpserver, caplog
+):
+    """A payload without request_id can't be routed back — must skip
+    dispatch + log a warning, never call the handler."""
+    handler_called: list[bool] = []
+
+    def handler(_payload):
+        handler_called.append(True)
+        yield "noop"
+
+    httpserver.expect_request(
+        "/api/v1/bridge/broadcasting-auth"
+    ).respond_with_json({"auth": "k:hex"})
+
+    r = BridgeRelay(
+        base_url=httpserver.url_for("").rstrip("/"),
+        api_token="t",
+        team_id="team-uuid-9",
+        app_key="a",
+        relay_url="wss://x:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=handler,
+    )
+    try:
+        r.start()
+        p = fake_pusher_factory.captured[0]
+        p.fire_connection_event(
+            "pusher:connection_established", json.dumps({"socket_id": "s"})
+        )
+        ch = p.subscriptions["private-daemon.team-uuid-9"]
+        with caplog.at_level(logging.WARNING, logger="harbormaster.fleetq.relay"):
+            ch.fire("agent.request", json.dumps({"method": "x"}))
+    finally:
+        r.stop()
+
+    assert handler_called == []
+    ch.trigger.assert_not_called()
+
+
+def test_chunk_handler_default_none_keeps_v1_log_only_behaviour(
+    relay, fake_pusher_factory, httpserver, caplog
+):
+    """Without chunk_handler set, agent.request logs as v1 — no triggers."""
+    ch = _subscribed_relay(relay, fake_pusher_factory, httpserver)
+    with caplog.at_level(logging.INFO, logger="harbormaster.fleetq.relay"):
+        ch.fire(
+            "agent.request",
+            json.dumps({"request_id": "r-1", "method": "x"}),
+        )
+    ch.trigger.assert_not_called()
+    assert any("agent.request received" in r.message for r in caplog.records)
