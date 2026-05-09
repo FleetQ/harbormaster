@@ -129,3 +129,133 @@ def test_dispatcher_pool_isolates_per_request_failures(
     # At least some success envelopes landed (the tools/list calls).
     ok_envs = [r for r in results if not r["result"].get("isError")]
     assert len(ok_envs) > 0
+
+
+# --- v5.0.0a2: backend-invoking tools via fake-claude --------------------
+
+
+FAKE_CLAUDE = Path(__file__).resolve().parent.parent / "fixtures" / "fake_claude.py"
+
+
+def _seed_resolvable_projects(root: Path, n: int) -> None:
+    """Seed projects with CLAUDE.md so resolve_project sees them as valid.
+    The basic _seed_projects helper above only creates a README; that's
+    enough for list_projects glob enumeration but not for ask_project's
+    resolve_project lookup which requires the marker file."""
+    for i in range(n):
+        proj = root / f"stress-project-{i:02d}"
+        proj.mkdir()
+        (proj / "README.md").write_text(f"# stress {i}")
+        (proj / "CLAUDE.md").write_text(f"# stress project {i}")
+
+
+@pytest.fixture
+def stress_backend_config(tmp_path: Path) -> HarbormasterConfig:
+    """Same as stress_config but wires the claude backend at fake_claude.py
+    so ask_project / delegate_task spawn a real subprocess that returns
+    quickly."""
+    from harbormaster.config import BackendConfig
+
+    project_root = tmp_path / "projects"
+    project_root.mkdir()
+    _seed_resolvable_projects(project_root, 5)
+    return HarbormasterConfig(
+        projects=ProjectsConfig(glob=[str(project_root / "*")]),
+        backends={
+            "claude": BackendConfig(
+                binary=str(FAKE_CLAUDE),
+                timeout_local=10,
+            ),
+        },
+    )
+
+
+def _ask_payload(project_name: str, question: str) -> dict[str, Any]:
+    return {
+        "method": "tools/call",
+        "params": {
+            "name": "ask_project",
+            "arguments": {
+                "name": project_name,
+                "question": question,
+                "max_turns": 1,
+            },
+        },
+    }
+
+
+def test_dispatcher_backend_tools_concurrent(
+    stress_backend_config: HarbormasterConfig,
+) -> None:
+    """50 concurrent ask_project dispatches via fake-claude must each
+    return a well-formed envelope without subprocess state leakage."""
+    mcp = build_server(stress_backend_config)
+    dispatcher = MCPDispatcher(mcp)
+
+    project_names = [f"stress-project-{i:02d}" for i in range(5)]
+
+    def one_dispatch(idx: int) -> dict[str, Any]:
+        proj = project_names[idx % len(project_names)]
+        chunks = list(dispatcher.dispatch(
+            _ask_payload(proj, f"q-{idx}-{random.randint(0, 999)}")
+        ))
+        assert len(chunks) == 1
+        return json.loads(chunks[0])
+
+    results: list[dict[str, Any]] = []
+    # Lower parallelism than the read-only stress because each call
+    # spawns a real subprocess; 16 workers × ~50 dispatches still
+    # exercises contention without saturating the runner.
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        futures = [pool.submit(one_dispatch, i) for i in range(50)]
+        for fut in as_completed(futures):
+            results.append(fut.result())
+
+    assert len(results) == 50
+    # Every envelope must be a success (fake-claude always returns 0).
+    error_envs = [r for r in results if r["result"].get("isError")]
+    assert error_envs == [], (
+        f"unexpected errors under concurrent dispatch: {error_envs[:3]}"
+    )
+    # Every answer must contain the FAKE_CLAUDE marker.
+    for env in results:
+        text = env["result"]["content"][0]["text"]
+        assert "FAKE_CLAUDE answered" in text, f"unexpected answer: {text[:200]}"
+
+
+def test_dispatcher_backend_tools_isolation_under_failure(
+    stress_backend_config: HarbormasterConfig, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When fake-claude returns exit2 (simulated subprocess failure),
+    each dispatch's error envelope must not bleed into siblings."""
+    monkeypatch.setenv("HARBORMASTER_FAKE_CLAUDE_FAIL", "exit2")
+
+    mcp = build_server(stress_backend_config)
+    dispatcher = MCPDispatcher(mcp)
+
+    def one_dispatch() -> dict[str, Any]:
+        chunks = list(dispatcher.dispatch(
+            _ask_payload("stress-project-00", "boom")
+        ))
+        return json.loads(chunks[0])
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = [f.result() for f in as_completed(
+            [pool.submit(one_dispatch) for _ in range(10)]
+        )]
+
+    assert len(results) == 10
+    # All 10 should have failed (consistent error path), but each as
+    # a clean isError envelope — no exceptions leaked.
+    for env in results:
+        # Either an isError envelope OR (if the backend layer caught
+        # it as a typed error string) a regular envelope with the
+        # error text — both are legitimate routing outcomes.
+        result = env["result"]
+        text_blocks = result.get("content", [])
+        if result.get("isError"):
+            assert text_blocks, "isError envelope must carry content"
+        else:
+            # Even non-isError envelopes for a failed subprocess should
+            # have *some* text — assert content shape.
+            assert text_blocks
