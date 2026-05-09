@@ -177,6 +177,57 @@
     if the configured embedding model changes.
   </div>
   <p x-show="error" class="text-xs text-red-400" x-text="error"></p>
+
+  <!-- v7.0.0a4: collapsible last-5-runs history table.
+       Lazy-loads via fetchRuns() the first time the user opens it. -->
+  <details class="mt-3 text-xs" x-show="state.available"
+           @toggle="if ($event.target.open) loadRuns()">
+    <summary class="cursor-pointer text-gray-500 hover:text-gray-300">
+      <span>recent runs</span>
+      <span class="text-gray-600" x-show="runs.length"
+            x-text="`(${runs.length})`"></span>
+    </summary>
+    <div class="mt-2">
+      <p x-show="runsLoading" class="text-gray-500">loading…</p>
+      <p x-show="!runsLoading && runs.length === 0" class="text-gray-500">
+        no completed runs yet
+      </p>
+      <table x-show="!runsLoading && runs.length > 0"
+             class="w-full text-left border-collapse">
+        <thead class="text-gray-500">
+          <tr>
+            <th class="pr-2 py-0.5 font-normal">finished</th>
+            <th class="pr-2 py-0.5 font-normal">duration</th>
+            <th class="pr-2 py-0.5 font-normal text-emerald-400">ok</th>
+            <th class="pr-2 py-0.5 font-normal text-rose-400">fail</th>
+            <th class="pr-2 py-0.5 font-normal text-amber-400">cancel</th>
+            <th class="py-0.5 font-normal">model</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="r in runs.slice(-5).reverse()"
+                    :key="r.started_at">
+            <tr class="border-t border-gray-800">
+              <td class="pr-2 py-0.5 text-gray-400"
+                  x-text="formatRelative(r.finished_at)"></td>
+              <td class="pr-2 py-0.5 text-gray-400"
+                  x-text="formatDuration(r.started_at, r.finished_at)"></td>
+              <td class="pr-2 py-0.5 text-emerald-300"
+                  x-text="r.succeeded"></td>
+              <td class="pr-2 py-0.5"
+                  :class="r.failed ? 'text-rose-300' : 'text-gray-600'"
+                  x-text="r.failed"></td>
+              <td class="pr-2 py-0.5"
+                  :class="r.cancelled ? 'text-amber-300' : 'text-gray-600'"
+                  x-text="r.cancelled"></td>
+              <td class="py-0.5 text-gray-500 text-[10px]"
+                  x-text="r.model || ''"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </details>
 </section>
 
 <!-- v2.1.0a3: recall search. Hits /api/recall (which wraps the
@@ -734,7 +785,11 @@
       error: '',
       triggering: false,
       cancelling: false,
+      runs: [],          // v7.0.0a4: completed-run history
+      runsLoading: false,
+      _runsLoaded: false,
       _pollHandle: null,
+      _lastTerminalSeen: null,  // tracks last terminal phase for runs refresh
 
       async loadOnce() {
         await this.fetchState();
@@ -760,9 +815,42 @@
             if (this.state.phase !== 'running') {
               clearInterval(this._pollHandle);
               this._pollHandle = null;
+              // v7.0.0a4: when we exit running, the run history just
+              // grew by one record. Refresh if the table was already
+              // open (open === _runsLoaded after first toggle).
+              if (this._runsLoaded) {
+                this.loadRuns();
+              }
             }
           }, 3000);
         }
+      },
+
+      // v7.0.0a4: lazy-load the run history table. Called from
+      // <details>'s @toggle when the user opens it; subsequent
+      // terminal-phase transitions refresh in place.
+      async loadRuns() {
+        this.runsLoading = !this._runsLoaded;
+        try {
+          const r = await hmFetch('/api/history/reembed/runs');
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const body = await r.json();
+          this.runs = body.runs || [];
+          this._runsLoaded = true;
+        } catch (e) {
+          this.error = e.message;
+        } finally {
+          this.runsLoading = false;
+        }
+      },
+
+      formatRelative(epochSeconds) {
+        if (!epochSeconds) return '';
+        const ageS = Math.max(0, (Date.now() / 1000) - epochSeconds);
+        if (ageS < 60) return `${Math.round(ageS)}s ago`;
+        if (ageS < 3600) return `${Math.round(ageS / 60)}m ago`;
+        if (ageS < 86400) return `${Math.round(ageS / 3600)}h ago`;
+        return `${Math.round(ageS / 86400)}d ago`;
       },
 
       async triggerManual() {

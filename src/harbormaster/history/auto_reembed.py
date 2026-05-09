@@ -248,6 +248,31 @@ def run_auto_reembed(config: Any, *, state_path: Path | None = None) -> None:
     state.cancel_requested = False
     _write_state(state, state_path)
 
+    # v7.0.0a4: append a completed-run record to the rolling history
+    # log. Best-effort — the writer swallows all errors so we never
+    # crash the runner thread on a history-file failure.
+    try:
+        from harbormaster.history.reembed_history import (
+            _resolve_model_label,
+            append_run,
+            record_from_state_and_errors,
+        )
+
+        assert state.started_at is not None
+        assert state.finished_at is not None
+        record = record_from_state_and_errors(
+            started_at=state.started_at,
+            finished_at=state.finished_at,
+            total=state.total,
+            processed=state.processed,
+            errors=errors,
+            cancelled=cancelled,
+            model=_resolve_model_label(config),
+        )
+        append_run(record)
+    except Exception as e:  # noqa: BLE001 - history is best-effort
+        logger.warning("auto_reembed: failed to log run history (%s)", e)
+
 
 def maybe_start_auto_reembed_thread(config: Any) -> threading.Thread | None:
     """Spawn the auto-reembed thread when both the config flag is set
