@@ -87,15 +87,20 @@ def run_backend(
     return _truncate(result.output, cap, label)
 
 
-def make_ask_local_stream(
+def make_local_backend_stream(
     *,
-    name: str,
+    project_name: str,
     prompt: str,
     max_turns: int,
     config: HarbormasterConfig,
 ) -> Iterator[str]:
     """Eagerly validate inputs and return the backend's streaming
-    iterator for `ask_project` against a local project.
+    iterator against a local project.
+
+    Tool-agnostic: callers (ask_project, delegate_task, future tools)
+    are responsible for building the full prompt before invoking this.
+    This function only worries about backend availability + project
+    resolution, NOT tool-specific framing.
 
     Important: this function is **not** a generator function — `yield`
     appears nowhere in its body. That's deliberate: argument validation
@@ -106,18 +111,13 @@ def make_ask_local_stream(
     died mid-stream → 502" because both errors bubble out of the same
     `next()` call site.
 
-    Local-only: SSH stdout demux is a separate refactor and shipping
-    local-first unblocks the immediate use case (Bridge daemon running
-    on the user's machine). Callers that want non-streaming behaviour
-    keep using run_backend.
-
     Failure modes (raised eagerly — callers map to SSE error events):
       - ValueError       → invalid project name / project not found
       - BackendError     → backend disabled / streaming not supported
                            / subprocess failure (raised lazily on first
                            next() once iteration starts)
     """
-    validate_project_name(name)
+    validate_project_name(project_name)
     backend = get_backend(config)
     if backend is None:
         raise BackendError(
@@ -129,27 +129,25 @@ def make_ask_local_stream(
             f"backend {backend.name!r} does not support streaming",
             code="config_error",
         )
-    cwd = resolve_project(name, config.projects)
+    cwd = resolve_project(project_name, config.projects)
     return backend.ask_local_stream(
         cwd=cwd, prompt=prompt, max_turns=max_turns,
     )
 
 
-def make_ask_remote_stream(
+def make_remote_backend_stream(
     *,
-    name: str,
+    project_name: str,
     prompt: str,
     max_turns: int,
     host: str,
     config: HarbormasterConfig,
 ) -> Iterator[str]:
-    """SSH counterpart to make_ask_local_stream — eagerly validates and
+    """SSH counterpart to make_local_backend_stream — eagerly validates and
     returns the remote streaming iterator.
 
-    Same eager-validation contract as the local variant: argument
-    validation runs synchronously when the function is called, not on
-    first next(), so callers can distinguish bad input (400) from
-    backend runtime failures (502).
+    Tool-agnostic: callers build the full prompt; this function only
+    handles backend lookup and host-config resolution.
 
     Failure modes (raised eagerly):
       - ValueError      → invalid project name
@@ -157,7 +155,7 @@ def make_ask_remote_stream(
                           / SSH or remote-process failure (raised on
                           first next() once iteration begins)
     """
-    validate_project_name(name)
+    validate_project_name(project_name)
     backend = get_backend(config)
     if backend is None:
         raise BackendError(
@@ -175,7 +173,7 @@ def make_ask_remote_stream(
     total_timeout = host_cfg.total_timeout if host_cfg else 120
     return backend.ask_remote_stream(
         host=host,
-        remote_cwd=f"{remote_htdocs}/{name}",
+        remote_cwd=f"{remote_htdocs}/{project_name}",
         prompt=prompt,
         max_turns=max_turns,
         connect_timeout=connect_timeout,
