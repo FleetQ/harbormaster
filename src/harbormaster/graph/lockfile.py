@@ -1,4 +1,4 @@
-"""Per-language lockfile parsers (v2.0.0a1).
+"""Per-language lockfile parsers (v2.0.0a1, extended in v3.0.0a3).
 
 Each parser returns the set of package names recorded in the lockfile —
 not the manifest's direct deps, but the *transitive* set that the
@@ -12,14 +12,14 @@ falls back to manifest-only direct deps (v1 behaviour).
 
 Supported lockfiles:
     Python:     uv.lock, poetry.lock, requirements.txt
-    JavaScript: package-lock.json
+    JavaScript: package-lock.json, pnpm-lock.yaml, yarn.lock (v1 + Berry)
     PHP:        composer.lock
     Rust:       Cargo.lock
     Go:         go.sum
 
-`pnpm-lock.yaml` and `yarn.lock` are deliberately deferred — both are
-YAML / custom formats that need a heavier parser; the v2.0.0a1 cut
-covers the formats most projects on this user's machine actually use.
+The pnpm + yarn parsers are line-based regex passes — no YAML parser
+dependency is added, since both formats expose package names in
+predictable positions that don't need full YAML semantics.
 """
 
 from __future__ import annotations
@@ -208,6 +208,130 @@ def parse_cargo_lock(path: Path) -> set[str] | None:
     return out
 
 
+def parse_pnpm_lock(path: Path) -> set[str] | None:
+    """Parse a pnpm-lock.yaml — package names from the ``packages:`` map.
+
+    Handles both pnpm v6 (``/name@version:``) and v9+ (``name@version:``)
+    formats, with or without surrounding quotes, scoped or unscoped:
+
+        packages:
+          /react@18.2.0:
+          '/@types/node@20.10.0':
+          react@18.2.0:
+          '@types/node@20.10.0':
+
+    Done with a state-machine line scan rather than a YAML parser to
+    avoid pulling in PyYAML for a one-off use case. The package names
+    are always at indent-2 (direct children of ``packages:``); deeper
+    indents (resolution / dependencies / etc.) are skipped automatically.
+    """
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.debug("pnpm-lock.yaml read failed for %s: %s", path, e)
+        return None
+
+    out: set[str] = set()
+    in_packages = False
+    for raw in text.splitlines():
+        if not in_packages:
+            if raw == "packages:":
+                in_packages = True
+            continue
+        # Top-level dedent ends the packages section.
+        if raw and not raw[0].isspace():
+            in_packages = False
+            continue
+        # Direct children of ``packages:`` are exactly 2 spaces deep.
+        if not raw.startswith("  ") or raw.startswith("    "):
+            continue
+        # Trim leading/trailing whitespace + colon + quotes + leading slash.
+        key = raw.strip().rstrip(":").strip().strip("'\"").lstrip("/")
+        if "@" not in key:
+            continue
+        name = _split_npm_selector_name(key)
+        if name:
+            out.add(name)
+    return out if out else None
+
+
+def parse_yarn_lock(path: Path) -> set[str] | None:
+    """Parse a yarn.lock — supports both v1 (custom format) and Berry (YAML).
+
+    Both formats use the same key-at-column-zero pattern that we exploit:
+
+        # v1
+        "@types/node@^20.0.0":
+          version "20.10.0"
+          resolved "..."
+
+        react@^18.0.0, react@^18.2.0:
+          version "18.2.0"
+
+        # Berry
+        "@types/node@npm:^20.0.0":
+          version: 20.10.0
+
+    A "top-level key" is any line at indent zero ending in ``:``. The
+    selector left of the version spec yields the package name.
+    """
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.debug("yarn.lock read failed for %s: %s", path, e)
+        return None
+
+    out: set[str] = set()
+    for raw in text.splitlines():
+        if not raw or raw[0].isspace() or raw.startswith("#"):
+            continue
+        if not raw.endswith(":"):
+            continue
+        key = raw[:-1].strip()
+        if not key or key == "__metadata":
+            continue
+        # yarn allows comma-separated selectors sharing one resolved entry.
+        for selector in key.split(", "):
+            selector = selector.strip().strip('"')
+            if not selector:
+                continue
+            name = _split_npm_selector_name(selector)
+            if name:
+                out.add(name)
+    return out if out else None
+
+
+def _split_npm_selector_name(selector: str) -> str | None:
+    """Extract the package name from an npm-style selector.
+
+    Examples:
+        ``react@^18.0.0`` → ``react``
+        ``@types/node@^20.0.0`` → ``@types/node``
+        ``@types/node@npm:^20.0.0`` → ``@types/node``
+
+    The leading ``@`` of a scoped name is preserved; the version-spec
+    ``@`` is the one *after* the optional scope ``/``.
+    """
+    if not selector:
+        return None
+    if selector.startswith("@"):
+        slash = selector.find("/")
+        if slash == -1:
+            return None
+        at = selector.find("@", slash)
+        if at == -1:
+            return None
+        return selector[:at]
+    at = selector.find("@")
+    if at == -1:
+        return None
+    return selector[:at]
+
+
 _GO_SUM_LINE_RE = re.compile(r"^(\S+)\s+v\S+\s+h1:")
 
 
@@ -237,7 +361,11 @@ LOCKFILE_CANDIDATES: dict[str, tuple[tuple[str, LockfileParser], ...]] = {
         ("poetry.lock", parse_poetry_lock),
         ("requirements.txt", parse_requirements_txt),
     ),
-    "javascript": (("package-lock.json", parse_package_lock_json),),
+    "javascript": (
+        ("package-lock.json", parse_package_lock_json),
+        ("pnpm-lock.yaml", parse_pnpm_lock),
+        ("yarn.lock", parse_yarn_lock),
+    ),
     "php": (("composer.lock", parse_composer_lock),),
     "rust": (("Cargo.lock", parse_cargo_lock),),
     "go": (("go.sum", parse_go_sum),),
