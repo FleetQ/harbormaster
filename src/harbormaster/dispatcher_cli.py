@@ -1,4 +1,4 @@
-"""`harbormaster-mcp dispatcher ...` subcommand (v6.0.0a6).
+"""`harbormaster-mcp dispatcher ...` subcommand (v6.0.0a6, --json v7.0.0a4).
 
 Currently exposes one operation, `status`, which prints the runtime
 state of the agent.request → MCP dispatcher pool:
@@ -10,17 +10,33 @@ state of the agent.request → MCP dispatcher pool:
 
 Wire:
 
-    harbormaster-mcp dispatcher status [--config PATH]
+    harbormaster-mcp dispatcher status [--config PATH] [--json]
 
 Mirrors the v2.0.1 `plugins list` pattern. Always exits 0 on a
 successful introspection; 1 only on a config / setup error.
+
+v7.0.0a5: ``--json`` emits a single JSON object instead of the
+text format. The text format is preserved byte-for-byte (zero
+breaking change). The JSON object documents the introspective
+shape of the dispatcher — the canonical schema is documented in
+the source of ``_status_payload``.
+
+Note: the dispatcher is in-process and stateless from this CLI's
+perspective — there is no live worker pool to query. The
+``--json`` shape therefore omits ``running``, ``active_workers``,
+``queue_depth``, and ``last_dispatched_at`` (those would require
+a sidecar metrics endpoint that doesn't exist yet). The JSON
+payload describes what an operator can configure and what the
+dispatcher considers safe to parallelise.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 from harbormaster.config import load_config
 from harbormaster.fleetq.dispatcher import SAFE_FOR_PARALLEL
@@ -48,7 +64,78 @@ def _build_parser() -> argparse.ArgumentParser:
             "(./.harbormaster.toml then $XDG_CONFIG_HOME/harbormaster/config.toml)."
         ),
     )
+    p_status.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help=(
+            "Emit a single JSON object instead of the text format. "
+            "Schema: {dispatcher_max_workers, single_worker, "
+            "safe_for_parallel: [...], unsafe_tools: [...], "
+            "effective_parallel_set: [...]}. The text format is "
+            "preserved byte-for-byte without this flag."
+        ),
+    )
     return parser
+
+
+def _status_payload(config: Any) -> dict[str, object]:
+    """Build the canonical status object — used by both text and JSON paths.
+
+    Schema (v7.0.0a5):
+      dispatcher_max_workers : int
+      single_worker          : bool   # True when max_workers <= 1
+      safe_for_parallel      : list[str]   # sorted
+      unsafe_tools           : list[{name, in_allowlist}]   # sorted by name
+      effective_parallel_set : list[str]   # sorted
+    """
+    deny = frozenset(config.fleetq.dispatcher_unsafe_tools or [])
+    allow = frozenset(SAFE_FOR_PARALLEL)
+    effective = allow - deny
+    return {
+        "dispatcher_max_workers": int(config.fleetq.dispatcher_max_workers),
+        "single_worker": bool(config.fleetq.dispatcher_max_workers <= 1),
+        "safe_for_parallel": sorted(allow),
+        "unsafe_tools": [
+            {"name": name, "in_allowlist": name in allow}
+            for name in sorted(deny)
+        ],
+        "effective_parallel_set": sorted(effective),
+    }
+
+
+def _print_status_text(payload: dict[str, object]) -> None:
+    print(f"dispatcher_max_workers: {payload['dispatcher_max_workers']}")
+    if payload["single_worker"]:
+        print(
+            "  → pool is single-worker; per-tool safety map is informational only."
+        )
+
+    safe = payload["safe_for_parallel"]
+    assert isinstance(safe, list)
+    print()
+    print(f"SAFE_FOR_PARALLEL ({len(safe)} tools):")
+    for name in safe:
+        print(f"  ✓ {name}")
+
+    unsafe = payload["unsafe_tools"]
+    assert isinstance(unsafe, list)
+    print()
+    if unsafe:
+        print(f"dispatcher_unsafe_tools deny list ({len(unsafe)} tools):")
+        for entry in unsafe:
+            assert isinstance(entry, dict)
+            mark = "(in allowlist)" if entry["in_allowlist"] else "(unknown tool)"
+            print(f"  ✗ {entry['name']}  {mark}")
+    else:
+        print("dispatcher_unsafe_tools deny list: (empty)")
+
+    eff = payload["effective_parallel_set"]
+    assert isinstance(eff, list)
+    print()
+    print(f"Effective parallel set ({len(eff)} tools):")
+    for name in eff:
+        print(f"  ✓ {name}")
 
 
 def _print_status(args: argparse.Namespace) -> int:
@@ -59,34 +146,13 @@ def _print_status(args: argparse.Namespace) -> int:
         print(f"Error loading config: {e}", file=sys.stderr)
         return 1
 
-    deny = frozenset(config.fleetq.dispatcher_unsafe_tools or [])
-    allow = frozenset(SAFE_FOR_PARALLEL)
-    effective = allow - deny
-
-    print(f"dispatcher_max_workers: {config.fleetq.dispatcher_max_workers}")
-    if config.fleetq.dispatcher_max_workers <= 1:
-        print(
-            "  → pool is single-worker; per-tool safety map is informational only."
-        )
-
-    print()
-    print(f"SAFE_FOR_PARALLEL ({len(allow)} tools):")
-    for name in sorted(allow):
-        print(f"  ✓ {name}")
-
-    print()
-    if deny:
-        print(f"dispatcher_unsafe_tools deny list ({len(deny)} tools):")
-        for name in sorted(deny):
-            mark = "(in allowlist)" if name in allow else "(unknown tool)"
-            print(f"  ✗ {name}  {mark}")
+    payload = _status_payload(config)
+    if getattr(args, "json_output", False):
+        # Single-line JSON keeps it grep/jq-friendly. Indent=None
+        # avoids needless whitespace in scripted pipelines.
+        print(json.dumps(payload, sort_keys=True))
     else:
-        print("dispatcher_unsafe_tools deny list: (empty)")
-
-    print()
-    print(f"Effective parallel set ({len(effective)} tools):")
-    for name in sorted(effective):
-        print(f"  ✓ {name}")
+        _print_status_text(payload)
     return 0
 
 
