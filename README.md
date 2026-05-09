@@ -152,12 +152,12 @@ JSON mode (no `Accept: text/event-stream`, no `stream` flag) is unchanged — fu
 
 ## Status
 
-**v1.0.0a15** — A2A Agent Card per project + v1.0 surface complete shipped 2026-05-09. Each `~/htdocs/<project>` exposes itself as an A2A v0.3 agent on `/agent-card/<project-name>` with three skills (ask, delegate, status), capabilities, and a vendor-namespaced `metadata.harbormaster` block. Plus three docs deliverables: a fan_out_ask streaming design doc with a tentative recommendation, an architecture-doc operator guide for nginx `proxy_buffering off`, and a roadmap rebaseline that replaces the stale "weeks 1-2 / 3-4 / 5-6" projection with current state. **v1.0's announced surface is now feature-complete** — what's left for `v1.0.0` GA is the v1.2 compounding phase (Q&A history + federated KG + auto project graph) and an operator guide.
+**v1.0.0a16** — v1.1 phase complete shipped 2026-05-09. The last v1.1 deliverable (Memory writeback to FleetQ Memory domain) and an 8-section operator guide both landed. Memory writeback is opt-in via `[fleetq] write_trajectories = true`; failures are best-effort logged, never fail the originating tool call. `docs/operator-guide.md` covers deployment, TOML reference, auth, reverse-proxy config, logging, upgrades, troubleshooting, and systemd/launchd templates. After this release v1.0 + v1.1 are both feature-complete; what remains for `v1.0.0` GA is the v1.2 compounding phase.
 
 | Phase | Status | Focus |
 |-------|--------|-------|
 | v1.0 | **Complete** (a8–a14) | Local + SSH + Live UI + PyPI alpha publish pipeline + SSE chunk streaming on both sides + FleetQ Bridge HTTP-tunnel mode |
-| v1.1 | **In progress** (a13–) | Platform Tool seeder ✅ a13 · A2A Agent Card per project ✅ a15 · live FleetQ smoke ✅ a11 · `update_endpoints` watch ✅ a10 · Memory writeback (pending) |
+| v1.1 | **Complete** (a13–a16) | Platform Tool seeder ✅ a13 · A2A Agent Card per project ✅ a15 · live FleetQ smoke ✅ a11 · `update_endpoints` watch ✅ a10 · Memory writeback ✅ a16 · operator guide ✅ a16 |
 | v1.2 | Pending | Q&A history (sqlite-vec), federated KG via FleetQ Memory, auto project graph (parse `composer.json` / `package.json` / `pyproject.toml`), cross-session memory recall |
 
 The original 6-week roadmap is largely complete on the v1.0 axis. v1.1 has shipped its biggest deliverables (Bridge integration, streaming end-to-end, Platform Tool seed, A2A cards). v1.2 (compounding) is the remaining phase before dropping the alpha tag and tagging `v1.0.0` GA.
