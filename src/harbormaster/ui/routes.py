@@ -74,6 +74,86 @@ def register_routes(
     async def api_health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
+    @app.get("/api/bridge/status")
+    async def api_bridge_status() -> dict[str, object]:
+        """Config-derived FleetQ bridge status (v2.1.0a1).
+
+        Reports whether the bridge is *configured* — `[fleetq] enabled`,
+        `register_as_bridge`, `base_url`, and whether the API token env
+        var is non-empty. Does NOT report live session state — that
+        lives inside the harbormaster-mcp process and isn't shared with
+        the UI process. Surface it here so the dashboard can show "are
+        we wired for FleetQ at all?" at a glance.
+        """
+        import os as _os
+
+        api_token_present = bool(
+            _os.environ.get(config.fleetq.api_token_env, "").strip()
+        )
+        return {
+            "fleetq_enabled": config.fleetq.enabled,
+            "register_as_bridge": config.fleetq.register_as_bridge,
+            "base_url": config.fleetq.base_url,
+            "api_token_env": config.fleetq.api_token_env,
+            "api_token_present": api_token_present,
+            "write_trajectories": config.fleetq.write_trajectories,
+            "write_kg": config.fleetq.write_kg,
+            "kg_extractor": config.fleetq.kg_extractor,
+            "heartbeat_interval": config.fleetq.heartbeat_interval,
+        }
+
+    @app.get("/api/plugins")
+    async def api_plugins() -> dict[str, object]:
+        """Plugin discovery + status (v2.1.0a1).
+
+        Mirrors `harbormaster-mcp plugins list` for browser consumption.
+        Each entry point is categorized:
+
+          - "loaded"          : enabled + dist in allowlist + ep discovered
+          - "not-allowlisted" : enabled + ep discovered but dist not in allowlist
+          - "disabled"        : ep discovered but [plugins].enabled = false
+          - "no-dist-name"    : ep present but legacy metadata
+          - "missing"         : dist in allowlist but NO ep discovered
+        """
+        from harbormaster.plugins import (
+            _entry_point_distribution_name,
+            discover_entry_points,
+        )
+
+        enabled = config.plugins.enabled
+        allowlist = set(config.plugins.allow)
+        eps = discover_entry_points()
+
+        rows: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for ep in eps:
+            dist = _entry_point_distribution_name(ep)
+            if dist is not None:
+                seen.add(dist)
+            if dist is None:
+                status = "no-dist-name"
+            elif not enabled:
+                status = "disabled"
+            elif dist in allowlist:
+                status = "loaded"
+            else:
+                status = "not-allowlisted"
+            rows.append(
+                {"status": status, "dist_name": dist, "entry_point": ep.name}
+            )
+
+        for dist in sorted(allowlist - seen):
+            rows.append(
+                {"status": "missing", "dist_name": dist, "entry_point": None}
+            )
+
+        return {
+            "enabled": enabled,
+            "allow": sorted(allowlist),
+            "discovered_count": len(eps),
+            "plugins": rows,
+        }
+
     @app.get("/api/projects")
     async def list_projects() -> list[dict[str, object]]:
         return [p.as_dict() for p in discover_projects(config.projects)]
@@ -83,7 +163,16 @@ def register_routes(
     graph_cache = ManifestCache()
 
     @app.get("/api/graph")
-    async def api_graph(include_dev_deps: bool = False) -> dict[str, object]:
+    async def api_graph(
+        include_dev_deps: bool = False,
+        transitive: bool = False,
+    ) -> dict[str, object]:
+        """Cross-project graph + ready-to-render mermaid markup.
+
+        v2.1.0a1: surfaces the v2.0.0a1 `transitive` toggle so the
+        dashboard can let the user flip between manifest-only and
+        lockfile-resolved deps.
+        """
         from pathlib import Path
 
         manifests = []
@@ -91,9 +180,16 @@ def register_routes(
             m = graph_cache.get(Path(p.path))
             if m is not None:
                 manifests.append(m)
-        graph = build_graph(manifests, include_dev_deps=include_dev_deps)
+        graph = build_graph(
+            manifests,
+            include_dev_deps=include_dev_deps,
+            transitive=transitive,
+        )
         return {
             "projects_discovered": len(manifests),
+            "projects_with_lockfile": sum(
+                1 for m in manifests if m.lockfile is not None
+            ),
             "manifests": [m.as_dict() for m in manifests],
             "graph": graph.as_dict(),
             "mermaid": graph_to_mermaid(graph),

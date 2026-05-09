@@ -105,6 +105,125 @@ def test_root_links_to_api_endpoints(populated_config):
     assert "/api/health" in body
 
 
+# ----- v2.1.0a1 — Mermaid graph render + status panels ---------------------
+
+
+def test_dashboard_includes_mermaid_cdn(populated_config):
+    """Mermaid ESM build must be loaded so the graph section can render."""
+    client = TestClient(create_app(populated_config))
+    body = client.get("/").text
+    assert "mermaid" in body.lower()
+    assert "mermaid@10" in body  # pinned version
+
+
+def test_dashboard_renders_graph_section(populated_config):
+    """Graph panel container present with mermaid markup target."""
+    client = TestClient(create_app(populated_config))
+    body = client.get("/").text
+    assert "Project graph" in body
+    assert 'class="mermaid' in body or "class='mermaid" in body
+
+
+def test_dashboard_renders_bridge_status_panel(populated_config):
+    client = TestClient(create_app(populated_config))
+    body = client.get("/").text
+    assert "FleetQ Bridge" in body
+    assert "/api/bridge/status" in body
+
+
+def test_dashboard_renders_plugins_panel(populated_config):
+    client = TestClient(create_app(populated_config))
+    body = client.get("/").text
+    assert "Plugins" in body
+    assert "/api/plugins" in body
+
+
+# ----- /api/bridge/status (v2.1.0a1) ---------------------------------------
+
+
+def test_api_bridge_status_default_config(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/api/bridge/status")
+    assert r.status_code == 200
+    body = r.json()
+    expected_keys = {
+        "fleetq_enabled",
+        "register_as_bridge",
+        "base_url",
+        "api_token_env",
+        "api_token_present",
+        "write_trajectories",
+        "write_kg",
+        "kg_extractor",
+        "heartbeat_interval",
+    }
+    assert expected_keys <= set(body.keys())
+    assert body["fleetq_enabled"] is False
+    assert body["api_token_env"] == "FLEETQ_API_TOKEN"
+    assert body["base_url"] == "https://app.fleetq.net"
+    assert body["kg_extractor"] == "heuristic"
+
+
+def test_api_bridge_status_reports_token_presence(populated_config, monkeypatch):
+    monkeypatch.setenv("FLEETQ_API_TOKEN", "stub-token-123")
+    client = TestClient(create_app(populated_config))
+    body = client.get("/api/bridge/status").json()
+    assert body["api_token_present"] is True
+
+
+def test_api_bridge_status_reports_token_missing_when_empty(
+    populated_config, monkeypatch
+):
+    monkeypatch.delenv("FLEETQ_API_TOKEN", raising=False)
+    client = TestClient(create_app(populated_config))
+    body = client.get("/api/bridge/status").json()
+    assert body["api_token_present"] is False
+
+
+# ----- /api/plugins (v2.1.0a1) ---------------------------------------------
+
+
+def test_api_plugins_default_disabled_returns_status_table(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/api/plugins")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enabled"] is False
+    assert body["allow"] == []
+    assert isinstance(body["plugins"], list)
+    # Discovered count is whatever the test environment has installed.
+    assert isinstance(body["discovered_count"], int)
+
+
+def test_api_plugins_marks_allowlist_only_dist_as_missing(
+    populated_config, monkeypatch
+):
+    """When [plugins].allow lists a dist that has no matching entry
+    point, /api/plugins must include a 'missing' row for it."""
+    populated_config.plugins.enabled = True
+    populated_config.plugins.allow = ["never-installed-pkg"]
+    # Pin entry_points to empty so we know nothing was discovered.
+    monkeypatch.setattr(
+        "harbormaster.plugins.entry_points", lambda *a, **kw: []
+    )
+    client = TestClient(create_app(populated_config))
+    body = client.get("/api/plugins").json()
+    statuses = [(row["status"], row["dist_name"]) for row in body["plugins"]]
+    assert ("missing", "never-installed-pkg") in statuses
+
+
+# ----- /api/graph transitive flag (v2.1.0a1) -------------------------------
+
+
+def test_api_graph_accepts_transitive_query_param(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/api/graph?transitive=true")
+    assert r.status_code == 200
+    body = r.json()
+    assert "projects_with_lockfile" in body
+    assert "mermaid" in body
+
+
 # ----- create_app contract --------------------------------------------------
 
 
