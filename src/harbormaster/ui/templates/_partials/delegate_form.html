@@ -80,6 +80,23 @@
           if (!r.ok) throw new Error('HTTP ' + r.status);
           await this._consumeSseStream(r);
           this.hasResult = true;
+          // v4.0.0a4: optimistic trajectory insert.
+          window.dispatchEvent(new CustomEvent('hm:trajectory:append', {
+            detail: {
+              project: this.project,
+              host: this.host || 'local',
+              entry: {
+                id: 'optimistic-' + Date.now(),
+                project: this.project,
+                host: this.host || 'local',
+                tool: 'delegate_task',
+                question: this.task,
+                answer: this.streamText,
+                timestamp_s: Date.now() / 1000,
+                _optimistic: true,
+              },
+            },
+          }));
           // v3.0.0a8: cross-section refresh signal for trajectoryList.
           window.dispatchEvent(new CustomEvent('hm:trajectory:dirty', {
             detail: { project: this.project, host: this.host || 'local' },

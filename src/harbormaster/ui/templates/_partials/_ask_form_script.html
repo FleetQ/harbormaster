@@ -38,11 +38,29 @@
           if (!r.ok) throw new Error('HTTP ' + r.status);
           await this._consumeSseStream(r);
           this.hasResult = true;
-          // v3.0.0a8: notify any other Alpine scope on this page that
-          // the trajectory store for this project is dirty. The
-          // project_detail page's trajectoryList listens on the window
-          // and re-loads when project matches; pages without a listener
-          // simply ignore the event.
+          // v4.0.0a4: optimistic trajectory insert — dispatch a synthetic
+          // Q&A entry so the trajectory section can prepend it
+          // instantly, no /api/trajectories round-trip required.
+          window.dispatchEvent(new CustomEvent('hm:trajectory:append', {
+            detail: {
+              project: this.project,
+              host: this.host || 'local',
+              entry: {
+                // Synthetic id — server-assigned id appears on next reload
+                // and the dirty event triggers reconciliation then.
+                id: 'optimistic-' + Date.now(),
+                project: this.project,
+                host: this.host || 'local',
+                tool: 'ask_project',
+                question: this.question,
+                answer: this.streamText,
+                timestamp_s: Date.now() / 1000,
+                _optimistic: true,
+              },
+            },
+          }));
+          // v3.0.0a8: dirty event still fires for background reconciliation —
+          // server is source of truth on the next /api/trajectories load.
           window.dispatchEvent(new CustomEvent('hm:trajectory:dirty', {
             detail: { project: this.project, host: this.host || 'local' },
           }));
