@@ -13,6 +13,8 @@ CI parity: see `.github/workflows/ci.yml` smoke-ui-browser job.
 """
 from __future__ import annotations
 
+from pathlib import Path  # noqa: F401  (used by signature-typed fixtures below)
+
 import pytest
 
 pytestmark = pytest.mark.browser
@@ -81,3 +83,88 @@ def test_meta_tag_absent_when_no_auth_token(page: Page, ui_url: str) -> None:
     # The conftest starts UI with no token → meta tag must not be in DOM.
     locator = page.locator('meta[name="hm-auth-token"]')
     expect(locator).to_have_count(0)
+
+
+# --- v4.0.0a1: expanded Playwright coverage -----------------------------
+
+
+def test_dashboard_recall_panel_renders(page: Page, ui_url: str) -> None:
+    """Recall search panel must render with input + button."""
+    page.goto(f"{ui_url}/")
+    page.wait_for_selector("text=Recall", timeout=5000)
+    expect(page.locator("text=Recall").first).to_be_visible()
+
+
+def test_fan_out_select_all_then_none(page: Page, ui_url: str) -> None:
+    """selectAll() then selectNone() round-trip the checkbox state."""
+    page.goto(f"{ui_url}/tools/fan-out")
+    # Click "all" — at least one checkbox should be checked after.
+    page.locator("button", has_text="all").first.click()
+    # At least one should now be checked
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('input[type=\"checkbox\"]')).some(c => c.checked)",
+        timeout=2000,
+    )
+    # Click "none" — no checkboxes should be checked.
+    page.locator("button", has_text="none").first.click()
+    page.wait_for_function(
+        "() => !Array.from(document.querySelectorAll('input[type=\"checkbox\"]')).some(c => c.checked)",
+        timeout=2000,
+    )
+
+
+def test_fan_out_question_persists_to_url(page: Page, ui_url: str) -> None:
+    """v3.0.0a9 URL state — typing in the question textarea then
+    clicking selectAll must write q + targets to the URL."""
+    page.goto(f"{ui_url}/tools/fan-out")
+    page.locator("textarea").first.fill("test question for url state")
+    page.locator("button", has_text="all").first.click()
+    # selectAll triggers persistToUrl; URL must include q.
+    page.wait_for_function(
+        "() => window.location.search.includes('q=test')",
+        timeout=2000,
+    )
+    url = page.url
+    assert "q=test" in url
+    # Targets parameter only appears when selection is partial; selectAll
+    # leaves it omitted by design (default-omit serialization).
+
+
+def test_project_detail_navigation_from_dashboard(page: Page, ui_url: str) -> None:
+    """Clicking the project name on the dashboard navigates to the detail page."""
+    page.goto(f"{ui_url}/")
+    page.wait_for_selector("text=demo-browser", timeout=5000)
+    # The h3 contains an <a> with the project name; click it.
+    page.locator("h3 a", has_text="demo-browser").first.click()
+    # Wait for nav.
+    page.wait_for_url("**/projects/demo-browser", timeout=5000)
+    # Detail page renders Recent Q&A section (trajectory list).
+    page.wait_for_selector("text=Recent Q&A", timeout=5000)
+
+
+def test_dashboard_does_not_navigate_when_clicking_card_chrome(page: Page, ui_url: str) -> None:
+    """v3.0.0a7 changed the card from a wrapping <a> to an article;
+    clicking the card body (not the project name link) must NOT
+    navigate."""
+    page.goto(f"{ui_url}/")
+    page.wait_for_selector("text=demo-browser", timeout=5000)
+    initial_url = page.url
+    # Click somewhere in the card that isn't the project-name link.
+    # The footer span (path text) is a safe target.
+    footer = page.locator("article").filter(has_text="demo-browser").first
+    footer.locator("footer").click()
+    # URL must not have changed.
+    assert page.url == initial_url
+
+
+def test_meta_tag_present_when_token_set_via_subprocess_env(
+    page: Page, tmp_path: Path
+) -> None:
+    """Sanity: bearer-protected install renders the meta tag.
+
+    Skipped — this would require a second UI subprocess fixture with
+    HARBORMASTER_UI_TOKEN set, plus injecting Authorization header on
+    every request. Covered by unit test
+    test_dashboard_renders_meta_tag_when_auth_token_set instead.
+    """
+    pytest.skip("covered by unit test; running second UI subprocess is heavy")
