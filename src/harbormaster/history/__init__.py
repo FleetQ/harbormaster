@@ -24,11 +24,19 @@ from harbormaster.history.embed import (
     FTS5Backend,
     get_embedding_backend,
 )
-from harbormaster.history.schema import HISTORY_VEC_DIM, connect, ensure_schema
+from harbormaster.history.schema import (
+    HISTORY_VEC_DIM,
+    EmbeddingMeta,
+    connect,
+    ensure_schema,
+    read_embedding_meta,
+    write_embedding_meta,
+)
 from harbormaster.history.store import QAMatch, QARecord, QAStore
 
 __all__ = [
     "EmbeddingBackend",
+    "EmbeddingMeta",
     "FastembedBackend",
     "FTS5Backend",
     "HISTORY_VEC_DIM",
@@ -38,4 +46,6 @@ __all__ = [
     "connect",
     "ensure_schema",
     "get_embedding_backend",
+    "read_embedding_meta",
+    "write_embedding_meta",
 ]

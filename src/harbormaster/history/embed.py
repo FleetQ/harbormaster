@@ -30,6 +30,14 @@ class EmbeddingBackend(Protocol):
     name: str
     dim: int
 
+    @property
+    def signature(self) -> str:
+        """Canonical identifier for the embedding model that produced
+        a given vector. Used by the QAStore embedding-drift detector
+        (v2.0.0a2) to detect when the configured model changed and a
+        re-embed is needed."""
+        ...
+
     def encode(self, text: str) -> list[float] | None: ...
 
 
@@ -39,6 +47,10 @@ class FTS5Backend:
 
     name = "fts5"
     dim = 0
+
+    @property
+    def signature(self) -> str:
+        return "fts5"
 
     def encode(self, text: str) -> list[float] | None:
         return None
@@ -58,6 +70,10 @@ class FastembedBackend:
         self.model = model
         self.dim = dim
         self._impl: Any | None = None
+
+    @property
+    def signature(self) -> str:
+        return f"fastembed/{self.model}"
 
     def _ensure_impl(self) -> Any:
         if self._impl is not None:
