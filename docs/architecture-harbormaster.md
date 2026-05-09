@@ -677,10 +677,62 @@ scores.
 
 - **Cross-host federation**: aggregating recall across all `qa_*.db`
   files. Phase 4 territory after v1.2 phase 2 (FleetQ KG) lands.
-- **Auto-grounding**: prepending top-3 recall matches to the
-  `claude -p` prompt for free context loading. Phase 4.
 - **Embedding upgrade-in-place**: switching `embedding_dim` requires
   starting a fresh db file today; no migration tool ships.
+
+### 17.1 Cross-session memory recall via auto-grounding (v1.2 phase 4)
+
+`harbormaster.tools._grounding.build_grounded_prompt(question, project,
+host, config)` prepends a "Prior context" section to `ask_project` /
+`delegate_task` prompts with the top-K matches from the per-host
+sqlite store — auto-grounds the subagent in past answers without
+manual context loading.
+
+Three opt-in gates:
+1. `[history] enabled = true`
+2. `[history] auto_ground = true` (default `false` — opt-in even when
+   history is enabled, since prompt bloat has cost implications)
+3. `harbormaster.history` package importable
+
+Failures are silent: missing store, recall errors, or embedding
+failures all return the original question unchanged. Same fire-and-
+forget semantics as the writeback hooks — better to ask without
+context than to fail the tool call.
+
+A character cap (`[history] auto_ground_max_chars`, default 8000 ≈
+2k tokens) bounds the prepended context. Matches are sorted by score
+descending; lowest-score matches drop first when the cap is hit.
+Individual answers > 1500 chars are truncated mid-block.
+
+Wire shape (rendered into the prompt):
+
+```
+<<<PRIOR CONTEXT (auto-loaded by harbormaster from past answers)>>>
+
+### Past Q (project=alpha, tool=ask_project, score=0.91)
+**Question:** How does authentication work?
+
+**Answer:** JWT-based — see auth.md  …[truncated]
+
+### Past Q (project=alpha, tool=delegate_task, score=0.74)
+**Question:** ...
+**Answer:** ...
+
+<<<END PRIOR CONTEXT>>>
+
+Tell me about authentication
+```
+
+The subagent sees this as plain text inside its single-prompt
+`claude -p` invocation. No new MCP tool, no new endpoint — pure
+prompt augmentation in `tools.ask` and `tools.delegate` before
+`run_backend` runs.
+
+`fan_out_ask` is intentionally not auto-grounded today — its prompt
+runs against many projects in parallel and recall against each one
+would multiply per-target latency. Future: per-target grounding via
+the same helper, gated by an additional `[history] auto_ground_fan_out`
+flag.
 
 ## 18. Auto project graph (v1.2 phase 3)
 

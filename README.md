@@ -166,7 +166,7 @@ FTS5 / bm25 when the optional `[history]` extra is missing. Opt-in via
 |-------|--------|-------|
 | v1.0 | **Complete** (a8–a14) | Local + SSH + Live UI + PyPI alpha publish pipeline + SSE chunk streaming on both sides + FleetQ Bridge HTTP-tunnel mode |
 | v1.1 | **Complete** (a13–a16) | Platform Tool seeder ✅ a13 · A2A Agent Card per project ✅ a15 · live FleetQ smoke ✅ a11 · `update_endpoints` watch ✅ a10 · Memory writeback ✅ a16 · operator guide ✅ a16 |
-| v1.2 | **In progress** (a17→) | Q&A history with sqlite-vec + fastembed ✅ a17 · auto project graph from manifest parsing ✅ a18 · federated KG via FleetQ KnowledgeGraph ✅ a19 · cross-session memory recall (a20) |
+| v1.2 | **Complete** (a17–a20) | Q&A history with sqlite-vec + fastembed ✅ a17 · auto project graph from manifest parsing ✅ a18 · federated KG via FleetQ KnowledgeGraph ✅ a19 · cross-session memory recall via auto-grounding ✅ a20 |
 
 The original 6-week roadmap is largely complete on the v1.0 axis. v1.1 has shipped its biggest deliverables (Bridge integration, streaming end-to-end, Platform Tool seed, A2A cards). v1.2 (compounding) is the remaining phase before dropping the alpha tag and tagging `v1.0.0` GA.
 
