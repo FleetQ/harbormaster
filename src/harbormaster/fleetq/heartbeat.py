@@ -1,7 +1,9 @@
 """Background heartbeat thread for the FleetQ Bridge integration.
 
 Owns the lifecycle: register on start, heartbeat at interval, re-register
-on session loss (404 from heartbeat), disconnect + close on stop.
+on session loss (404 from heartbeat), optionally re-publish the endpoints
+manifest when an `endpoints_factory` reports drift, disconnect + close on
+stop.
 
 Threading instead of asyncio because FastMCP's stdio transport runs as a
 blocking sync mcp.run() call. The HTTP-transport path is async, but for
@@ -11,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from harbormaster.fleetq.bridge import BridgeClient, BridgeError, RegisterResponse
@@ -26,6 +29,13 @@ class HeartbeatLoop:
         hb.start()
         ...
         hb.stop()
+
+    Optional config-watch behaviour: pass an `endpoints_factory` callable.
+    On every heartbeat tick the factory is invoked; if its output differs
+    from what FleetQ was last told, `update_endpoints` is issued so the
+    Bridge manifest stays in sync with the running process. The factory
+    should be cheap and side-effect-free — it is called every `interval`
+    seconds.
     """
 
     def __init__(
@@ -34,14 +44,20 @@ class HeartbeatLoop:
         endpoints: dict[str, Any],
         *,
         interval: int = 30,
+        endpoints_factory: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self.client = client
         self.endpoints = endpoints
         self.interval = max(1, interval)
+        self.endpoints_factory = endpoints_factory
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._registered = False
         self._last_response: RegisterResponse | None = None
+        # Tracks the manifest FleetQ currently knows about so the drift
+        # check has something to compare against. Updated on successful
+        # register and successful update_endpoints.
+        self._last_pushed_endpoints: dict[str, Any] = endpoints
 
     @property
     def registered(self) -> bool:
@@ -61,6 +77,10 @@ class HeartbeatLoop:
             response = self.client.register(self.endpoints)
             self._registered = True
             self._last_response = response
+            # The manifest we just sent is now the authoritative known state
+            # on FleetQ — sync the drift baseline so the next factory tick
+            # doesn't immediately re-issue update_endpoints.
+            self._last_pushed_endpoints = self.endpoints
             logger.info(
                 "FleetQ bridge registered: session=%s team=%s",
                 response.session_id, response.team_id,
@@ -111,3 +131,38 @@ class HeartbeatLoop:
                 # to call register again with our same session_id.
                 logger.info("FleetQ bridge session lost — re-registering")
                 self._register_now()
+                continue
+            # Session is alive — check whether the manifest has drifted and
+            # re-publish if so. Only runs when an endpoints_factory was set;
+            # otherwise the static `self.endpoints` from construction stands.
+            self._maybe_update_endpoints()
+
+    def _maybe_update_endpoints(self) -> None:
+        """If an endpoints_factory was configured, rebuild the manifest and
+        push it to FleetQ when it differs from the last known-good state.
+
+        Errors from the factory (e.g. a transient I/O hiccup while reading
+        config) are logged and swallowed — the heartbeat must keep going.
+        Errors from update_endpoints itself are also swallowed; the next
+        tick will retry. The drift baseline is only advanced on success
+        so we don't silently drop an update.
+        """
+        if self.endpoints_factory is None:
+            return
+        try:
+            current = self.endpoints_factory()
+        except Exception:
+            logger.exception(
+                "FleetQ endpoints_factory raised — skipping update_endpoints"
+            )
+            return
+        if current == self._last_pushed_endpoints:
+            return
+        try:
+            self.client.update_endpoints(current)
+        except BridgeError as e:
+            logger.warning("FleetQ bridge update_endpoints failed: %s", e)
+            return
+        self._last_pushed_endpoints = current
+        self.endpoints = current
+        logger.info("FleetQ bridge endpoints updated (drift detected)")
