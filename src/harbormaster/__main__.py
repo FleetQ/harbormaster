@@ -251,6 +251,11 @@ def main(argv: list[str] | None = None) -> int:
 
         return reembed_main(raw_args[1:])
 
+    if raw_args and raw_args[0] == "plugins":
+        from harbormaster.plugins_cli import main as plugins_main
+
+        return plugins_main(raw_args[1:])
+
     parser = _build_parser()
     args = parser.parse_args(raw_args)
 
