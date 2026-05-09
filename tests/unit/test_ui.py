@@ -1613,3 +1613,51 @@ def test_fan_out_form_initialises_via_x_init(populated_config):
     client = TestClient(create_app(populated_config))
     r = client.get("/tools/fan-out")
     assert 'x-init="restoreFromUrl()"' in r.text
+
+
+# --- v4.0.0a2: URL state on recall + copy-link --------------------------
+
+
+def test_recall_panel_emits_url_state_helpers(populated_config):
+    """Recall panel must read recall_q / recall_project / recall_host
+    from URL on mount and write them on search."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "x-init=\"restoreFromUrl()\"" in r.text
+    assert "p.get('recall_q')" in r.text
+    assert "p.set('recall_q'" in r.text
+    assert "p.get('recall_project')" in r.text
+    assert "p.get('recall_host')" in r.text
+
+
+def test_recall_panel_persists_on_search(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # search() must call persistToUrl() before fetching.
+    assert "this.persistToUrl();" in r.text
+
+
+def test_fan_out_form_has_copy_link_button(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/tools/fan-out")
+    assert r.status_code == 200
+    assert ">copy link<" in r.text
+    assert "copyShareLink()" in r.text
+
+
+def test_fan_out_form_copy_link_uses_clipboard_api(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/tools/fan-out")
+    assert "navigator.clipboard" in r.text
+    assert "navigator.clipboard.writeText(url)" in r.text
+    # Feedback affordance — "copied ✓" pseudo-button visible after copy.
+    assert "shareLinkCopied" in r.text
+
+
+def test_fan_out_copy_link_disabled_for_short_question(populated_config):
+    """Button must be disabled when question is < 3 chars (matches submit)."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/tools/fan-out")
+    # Same gate as submit button.
+    assert ":disabled=\"question.trim().length < 3\"" in r.text

@@ -75,7 +75,7 @@
 
 <!-- v2.1.0a3: recall search. Hits /api/recall (which wraps the
      recall_qa MCP tool) and renders match cards inline. -->
-<section x-data="recallPanel()"
+<section x-data="recallPanel()" x-init="restoreFromUrl()"
          class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40">
   <header class="mb-3 flex items-center justify-between gap-2 flex-wrap">
     <h2 class="text-lg font-bold">Recall Q&amp;A history</h2>
@@ -369,9 +369,37 @@
       loading: false, searched: false,
       get hasResults() { return this.searched && this.matches.length > 0; },
 
+      // v4.0.0a2: URL state — recall search is shareable.
+      // Recognised params: recall_q, recall_project, recall_host.
+      // Prefixed so they don't collide with /tools/fan-out's `q` etc.
+      restoreFromUrl() {
+        const p = new URLSearchParams(window.location.search);
+        const q = p.get('recall_q'); if (q) this.question = q;
+        const proj = p.get('recall_project'); if (proj) this.project = proj;
+        const h = p.get('recall_host');
+        if (h && (h === 'local' || h === 'all')) this.host = h;
+        // Auto-search if a question was carried in via URL.
+        if (q) this.search();
+      },
+
+      persistToUrl() {
+        const p = new URLSearchParams(window.location.search);
+        // Preserve foreign params (graph filters etc.) — only touch our keys.
+        if (this.question.trim()) p.set('recall_q', this.question.trim());
+        else p.delete('recall_q');
+        if (this.project.trim()) p.set('recall_project', this.project.trim());
+        else p.delete('recall_project');
+        if (this.host && this.host !== 'local') p.set('recall_host', this.host);
+        else p.delete('recall_host');
+        const qs = p.toString();
+        const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+        window.history.replaceState(null, '', url);
+      },
+
       async search() {
         if (this.question.trim().length < 2) return;
         this.loading = true; this.error = ''; this.message = '';
+        this.persistToUrl();
         try {
           const params = new URLSearchParams({ question: this.question.trim() });
           if (this.project.trim()) params.set('project', this.project.trim());
