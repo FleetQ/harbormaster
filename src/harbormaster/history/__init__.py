@@ -21,6 +21,7 @@ from __future__ import annotations
 from harbormaster.history.auto_reembed import (
     ReembedState,
     maybe_start_auto_reembed_thread,
+    trigger_manual_reembed,
 )
 from harbormaster.history.auto_reembed import (
     read_state as read_reembed_state,
@@ -57,5 +58,6 @@ __all__ = [
     "maybe_start_auto_reembed_thread",
     "read_embedding_meta",
     "read_reembed_state",
+    "trigger_manual_reembed",
     "write_embedding_meta",
 ]

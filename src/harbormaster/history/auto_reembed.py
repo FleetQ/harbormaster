@@ -246,3 +246,41 @@ def maybe_start_auto_reembed_thread(config: Any) -> threading.Thread | None:
     thread.start()
     logger.info("auto_reembed: background thread started")
     return thread
+
+
+def trigger_manual_reembed(
+    config: Any, *, state_path: Path | None = None
+) -> tuple[bool, str | None]:
+    """v6.0.0a1: kick off an auto-reembed run on demand.
+
+    Used by the UI's POST /api/history/reembed endpoint. Returns
+    (started, error_message). Refuses to start a second run when one
+    is already in progress (idempotent under double-click + cross-tab
+    triggers).
+
+    Unlike maybe_start_auto_reembed_thread, this does NOT honour the
+    [history] auto_reembed_on_drift gate — operator action is the gate.
+    The [history] enabled gate still applies (no point reembedding
+    when the store is disabled).
+    """
+    if not config.history.enabled:
+        return False, "[history] is disabled — nothing to reembed"
+    try:
+        from harbormaster.history import QAStore  # noqa: F401
+    except ImportError:
+        return False, "[history] extra not installed"
+
+    current = read_state(state_path)
+    if current.phase == "running":
+        return False, "auto-reembed already in progress"
+
+    thread = threading.Thread(
+        target=run_auto_reembed,
+        args=(config,),
+        kwargs={"state_path": state_path} if state_path else {},
+        daemon=True,
+        name="auto-reembed-manual",
+    )
+    thread.start()
+    logger.info("auto_reembed: manual trigger — background thread started")
+    return True, None
