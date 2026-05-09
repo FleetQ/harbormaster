@@ -54,6 +54,11 @@ history = [
     # store falls back to FTS5 / bm25 when the [history] extra is absent
     # or [history].embedding_backend is set to "fts5".
     "fastembed>=0.3",
+    # Pin onnxruntime below 1.26.0 — that release shipped without the
+    # cp312 macOS arm64 wheel (1.25.x and 1.26.x cp311/cp313 are fine).
+    # This pin can be removed once onnxruntime 1.26.1+ restores the
+    # missing wheel. Tracked upstream: https://github.com/microsoft/onnxruntime/issues
+    "onnxruntime<1.26",
 ]
 dev = [
     "pytest>=8.0",
@@ -72,6 +77,7 @@ dev = [
     "pysher>=1.0",
     "sqlite-vec>=0.1.6",
     "fastembed>=0.3",
+    "onnxruntime<1.26",
 ]
 
 [project.scripts]
