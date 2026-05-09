@@ -49,11 +49,12 @@
   <pre class="text-sm whitespace-pre-wrap break-words border border-gray-800 rounded-lg p-4 bg-gray-900/40 text-gray-300 leading-relaxed">{{ status_markdown }}</pre>
 </section>
 
-<!-- v2.1.0a4 placeholder: "Ask this project" inline form lands here. -->
+{% include "_partials/ask_form.html" %}
+
+<!-- v2.1.0a5 / a6 placeholder. -->
 <section class="border border-dashed border-gray-800 rounded-lg p-4 bg-gray-900/20 text-gray-500 text-sm">
-  <p class="font-bold text-gray-400 mb-1">Coming in v2.1.0a4 / a5 / a6:</p>
+  <p class="font-bold text-gray-400 mb-1">Coming in v2.1.0a5 / a6:</p>
   <ul class="list-disc list-inside space-y-1">
-    <li>Inline <code class="text-cyan-400">ask_project</code> form with live SSE streaming</li>
     <li><code class="text-cyan-400">delegate_task</code> form with deliverable field</li>
     <li>Trajectory history (recent Q&amp;A from the per-host store)</li>
   </ul>
