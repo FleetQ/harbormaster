@@ -232,6 +232,7 @@ def _maybe_start_fleetq_bridge(config: HarbormasterConfig, mcp: Any = None):  # 
                 relay_url=response.reverb_relay_url,
                 chunk_handler=chunk_handler,
                 state_writer=state_writer,
+                dispatcher_max_workers=config.fleetq.dispatcher_max_workers,
             )
             relay.start()
         except Exception as e:  # noqa: BLE001 - relay is best-effort in v1.0.0a8

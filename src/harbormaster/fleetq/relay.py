@@ -104,6 +104,7 @@ class BridgeRelay:
         state_writer: Any = None,
         worker_thread: bool = True,
         worker_queue_max: int = 64,
+        dispatcher_max_workers: int = 1,
     ) -> None:
         if not team_id:
             raise ValueError("team_id is required (from RegisterResponse)")
@@ -131,12 +132,18 @@ class BridgeRelay:
         # thread never blocks on a slow chunk_handler. Set False to keep
         # the v2.0.0a7 inline-dispatch behaviour (useful for synchronous
         # tests against a stub channel).
+        # v4.0.0a6: when dispatcher_max_workers > 1, the worker thread
+        # dispatches via a bounded ThreadPoolExecutor instead of running
+        # serially. Operators must verify their MCP tool surface is
+        # thread-safe before opting in.
         self.worker_thread_enabled = worker_thread
         self._worker_queue_max = worker_queue_max
+        self._dispatcher_max_workers = max(1, int(dispatcher_max_workers))
         self._worker_queue: queue.Queue[
             tuple[str, dict[str, Any]] | None
         ] | None = None
         self._worker_thread_handle: threading.Thread | None = None
+        self._dispatcher_pool: Any = None  # ThreadPoolExecutor when >1
 
         self._pusher_factory: PusherFactory = pusher_factory or _default_pusher_factory
         self._pusher: Any = None
@@ -372,17 +379,29 @@ class BridgeRelay:
     # --- v3.0.0a5 worker thread -----------------------------------------
 
     def _start_worker_thread(self) -> None:
-        """Spin up a single dispatcher thread fed by the inbound queue.
+        """Spin up the dispatcher worker thread fed by the inbound queue.
 
-        Single-worker on purpose: chunk_handler dispatch invokes MCP
-        tools synchronously, and tools may share state (sqlite stores,
-        embedding backends) that's not provably thread-safe. Serial
-        dispatch from a queue gives us ordered processing without the
-        thread-safety surface a multi-worker pool would require.
+        Single-worker by default (v3.0.0a5): chunk_handler dispatch
+        invokes MCP tools synchronously, and tools may share state
+        (sqlite stores, embedding backends) that isn't provably
+        thread-safe. Serial dispatch from a queue gives ordered
+        processing without that surface area.
+
+        When ``dispatcher_max_workers > 1`` (v4.0.0a6 opt-in), the
+        worker thread submits each item to a bounded
+        ``ThreadPoolExecutor`` instead of dispatching inline. Use only
+        after verifying your MCP tool surface is thread-safe.
         """
         if self._worker_thread_handle and self._worker_thread_handle.is_alive():
             return
         self._worker_queue = queue.Queue(maxsize=self._worker_queue_max)
+        if self._dispatcher_max_workers > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            self._dispatcher_pool = ThreadPoolExecutor(
+                max_workers=self._dispatcher_max_workers,
+                thread_name_prefix="bridge-relay-pool",
+            )
         thread = threading.Thread(
             target=self._worker_loop,
             daemon=True,
@@ -391,32 +410,49 @@ class BridgeRelay:
         thread.start()
         self._worker_thread_handle = thread
         logger.info(
-            "BridgeRelay: worker thread started (queue_max=%d)",
+            "BridgeRelay: worker thread started "
+            "(queue_max=%d, dispatcher_workers=%d)",
             self._worker_queue_max,
+            self._dispatcher_max_workers,
         )
 
     def _stop_worker_thread(self) -> None:
-        """Send the sentinel, join briefly, drop the queue handle."""
-        if self._worker_queue is None:
+        """Send the sentinel, join briefly, drop the queue handle.
+
+        v4.0.0a6: also shuts down the dispatcher ThreadPoolExecutor
+        when one was created (multi-worker path).
+        """
+        if self._worker_queue is None and self._dispatcher_pool is None:
             return
-        # Sentinel = None — the loop exits cleanly.
-        try:
-            self._worker_queue.put(None, timeout=1.0)
-        except queue.Full:
-            logger.warning(
-                "BridgeRelay: worker queue full at shutdown — worker may not exit cleanly"
-            )
+        if self._worker_queue is not None:
+            # Sentinel = None — the loop exits cleanly.
+            try:
+                self._worker_queue.put(None, timeout=1.0)
+            except queue.Full:
+                logger.warning(
+                    "BridgeRelay: worker queue full at shutdown — worker may not exit cleanly"
+                )
         if self._worker_thread_handle is not None:
             self._worker_thread_handle.join(timeout=2.0)
             if self._worker_thread_handle.is_alive():
                 logger.warning(
                     "BridgeRelay: worker thread did not exit within 2s; leaking daemon"
                 )
+        if self._dispatcher_pool is not None:
+            self._dispatcher_pool.shutdown(wait=False, cancel_futures=True)
+            self._dispatcher_pool = None
         self._worker_queue = None
         self._worker_thread_handle = None
 
     def _worker_loop(self) -> None:
         """Drain the inbound queue, calling _dispatch_chunk_handler per item.
+
+        Single-worker mode: dispatch runs inline on this thread —
+        ordered, no thread-safety surface.
+
+        Multi-worker mode (v4.0.0a6, dispatcher_max_workers > 1): each
+        item is submitted to the ThreadPoolExecutor; the worker thread
+        only reads the queue and submits.
 
         Exceptions from the handler are caught one layer deeper inside
         _dispatch_chunk_handler so they never escape this loop. A None
@@ -434,6 +470,15 @@ class BridgeRelay:
                 logger.info("BridgeRelay: worker thread exiting (sentinel received)")
                 return
             request_id, payload = item
+            if self._dispatcher_pool is not None:
+                # Submit to pool; failures inside the worker are caught
+                # by _dispatch_chunk_handler one layer down.
+                self._dispatcher_pool.submit(
+                    self._dispatch_chunk_handler,
+                    request_id=request_id,
+                    payload=payload,
+                )
+                continue
             try:
                 self._dispatch_chunk_handler(
                     request_id=request_id, payload=payload
