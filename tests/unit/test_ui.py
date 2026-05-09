@@ -1584,13 +1584,16 @@ def test_dashboard_ask_form_also_dispatches_event(populated_config):
 
 
 def test_dashboard_graph_viewport_has_touch_friendly_classes(populated_config):
-    """Mobile-friendly graph viewport: touch-pan + scrollable container."""
+    """Mobile-friendly graph viewport: max-h cap.
+
+    v4.0.0a3 replaced native touch-pan-x/-y CSS with explicit JS
+    pinch + drag handlers (graphZoom Alpine component). The viewport
+    is now overflow-hidden because the inner transform handles
+    movement; only the max-h-[60vh] sizing constraint carries over.
+    """
     client = TestClient(create_app(populated_config))
     r = client.get("/")
     assert r.status_code == 200
-    # touch-pan-x / touch-pan-y let mobile browsers handle native pan.
-    assert "touch-pan-x" in r.text and "touch-pan-y" in r.text
-    # max-h-[60vh] keeps the panel from blowing out on small screens.
     assert "max-h-[60vh]" in r.text
 
 
@@ -1661,3 +1664,53 @@ def test_fan_out_copy_link_disabled_for_short_question(populated_config):
     r = client.get("/tools/fan-out")
     # Same gate as submit button.
     assert ":disabled=\"question.trim().length < 3\"" in r.text
+
+
+# --- v4.0.0a3: graph pinch-zoom -----------------------------------------
+
+
+def test_dashboard_graph_zoom_component_present(populated_config):
+    """graphZoom() Alpine factory must be rendered for the graph panel."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "function graphZoom()" in r.text
+    # x-data="graphZoom()" wraps the panel.
+    assert 'x-data="graphZoom()"' in r.text
+
+
+def test_dashboard_graph_zoom_handles_wheel_and_touch(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # Event handlers wired on the inner container.
+    assert "@wheel.prevent=\"onWheel($event)\"" in r.text
+    assert "@touchstart=\"onTouchStart($event)\"" in r.text
+    assert "@touchmove.prevent=\"onTouchMove($event)\"" in r.text
+    assert "@touchend=\"onTouchEnd($event)\"" in r.text
+
+
+def test_dashboard_graph_zoom_reset_button_present(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # Reset button calls reset() on the Alpine scope.
+    assert "@click=\"reset()\"" in r.text
+    # And the body of reset() clamps + animates.
+    assert "this.scale = 1; this.tx = 0; this.ty = 0;" in r.text
+
+
+def test_dashboard_graph_zoom_clamps_scale(populated_config):
+    """_clampScale must bound between 0.25× and 4× to prevent invisible
+    or runaway-large graphs."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "Math.max(0.25, Math.min(4, s))" in r.text
+
+
+def test_dashboard_graph_zoom_supports_two_finger_pinch(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # Pinch-distance computed via Math.hypot on the two touchpoints.
+    assert "Math.hypot(dx, dy)" in r.text
+    # Pinch state machine fields.
+    assert "_pinchInitialDist" in r.text
+    assert "_pinchInitialScale" in r.text
