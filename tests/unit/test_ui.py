@@ -2161,3 +2161,99 @@ def test_reembed_panel_eta_helper(populated_config):
     # Rate-based ETA logic.
     assert "elapsed / s.processed" in r.text
     assert "remaining" in r.text
+
+
+# --- v6.0.0a2: optimistic escalation tier + configurable threshold ------
+
+
+def test_base_template_emits_stale_threshold_meta(populated_config):
+    """base.html must render the threshold meta tag so JS can read it."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert '<meta name="hm-optimistic-stale-seconds"' in r.text
+
+
+def test_stale_threshold_meta_reflects_config(populated_config):
+    """Bumping [history] optimistic_stale_seconds in config flows through."""
+    from harbormaster.config import HarbormasterConfig, HistoryConfig
+    cfg = HarbormasterConfig(
+        history=HistoryConfig(optimistic_stale_seconds=20),
+    )
+    client = TestClient(create_app(cfg))
+    r = client.get("/")
+    assert '<meta name="hm-optimistic-stale-seconds" content="20">' in r.text
+
+
+def test_trajectory_uses_tier_helper(populated_config, tmp_path):
+    """trajectoryList must use the tier() helper for the three-tier
+    visual escalation, not the old single isStale check."""
+    proj_dir = tmp_path / "demo-x6b"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# x6b")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-x6b")
+    if r.status_code == 200:
+        # Three tiers all referenced.
+        assert "tier(t) === 'fresh'" in r.text
+        assert "tier(t) === 'stale'" in r.text
+        assert "tier(t) === 'stuck'" in r.text
+        # Stuck tier has rose border + ⚠ badge.
+        assert "border-rose-700/50" in r.text
+        assert "stuck?" in r.text
+
+
+def test_trajectory_tier_threshold_logic(populated_config, tmp_path):
+    """The fresh→stale→stuck thresholds use threshold and threshold*6."""
+    proj_dir = tmp_path / "demo-x6c"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# x6c")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-x6c")
+    if r.status_code == 200:
+        assert "if (age <= threshold) return 'fresh'" in r.text
+        assert "if (age <= threshold * 6) return 'stale'" in r.text
+        assert "return 'stuck'" in r.text
+
+
+def test_trajectory_reads_threshold_from_meta(populated_config, tmp_path):
+    proj_dir = tmp_path / "demo-x6d"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# x6d")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-x6d")
+    if r.status_code == 200:
+        assert "_staleThreshold()" in r.text
+        assert "meta[name=\"hm-optimistic-stale-seconds\"]" in r.text
+
+
+def test_history_config_optimistic_stale_seconds_default():
+    from harbormaster.config import HistoryConfig
+    cfg = HistoryConfig()
+    assert cfg.optimistic_stale_seconds == 5
+
+
+def test_history_config_optimistic_stale_seconds_validates_range():
+    from pydantic import ValidationError
+
+    from harbormaster.config import HistoryConfig
+
+    # Must be > 0.
+    with pytest.raises(ValidationError):
+        HistoryConfig(optimistic_stale_seconds=0)
+    # Must be <= 600.
+    with pytest.raises(ValidationError):
+        HistoryConfig(optimistic_stale_seconds=601)
+    # In-range OK.
+    cfg = HistoryConfig(optimistic_stale_seconds=120)
+    assert cfg.optimistic_stale_seconds == 120

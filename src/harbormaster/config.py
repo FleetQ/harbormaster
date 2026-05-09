@@ -133,6 +133,14 @@ class HistoryConfig(BaseModel):
     # thread instead of just logging a warning. Defaults to False to
     # preserve the v3 "operator decides" behaviour.
     auto_reembed_on_drift: bool = False
+    # v6.0.0a2: how long an optimistic trajectory entry can sit before
+    # the UI flips its visual tier. Three tiers driven by this number:
+    #   age 0..N           → cyan "● new" badge (fresh)
+    #   age N..(N×6)       → amber spinner (stale — writeback in flight)
+    #   age >(N×6)         → red "writeback stuck?" badge (escalation)
+    # Default 5 (so 5s/30s thresholds). Operators on slow networks can
+    # bump this without recompiling.
+    optimistic_stale_seconds: int = Field(default=5, gt=0, le=600)
 
 
 class PluginsConfig(BaseModel):

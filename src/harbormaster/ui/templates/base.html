@@ -6,6 +6,7 @@
 <title>{% block title %}Harbormaster{% endblock %}</title>
 <meta name="description" content="Harbormaster — MCP server dashboard.">
 {% if auth_token %}<meta name="hm-auth-token" content="{{ auth_token }}">{% endif %}
+<meta name="hm-optimistic-stale-seconds" content="{{ optimistic_stale_seconds | default(5) }}">
 <script>
   // v3.0.0a6: bearer-token plumbing for SSE / API fetches.
   // When the page is rendered with auth_token (bearer-protected install),
