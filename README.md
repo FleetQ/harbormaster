@@ -152,7 +152,7 @@ JSON mode (no `Accept: text/event-stream`, no `stream` flag) is unchanged — fu
 
 ## Status
 
-**v1.0.0a12** — Real per-token streaming for `ask_project` (local) shipped 2026-05-09. `Accept: text/event-stream` on `/mcp/harbormaster` now emits one `chunk` SSE event per assistant text delta from `claude --output-format stream-json`, then a final `result` event with the assembled answer. Pre-flight failures + mid-stream backend errors land as in-band `error` events so callers never deal with mid-flight transport switching. Plus a CI wire-shape smoke (\`smoke-mcp-streaming\`) that fires on every push. The 6-week roadmap to general availability:
+**v1.0.0a13** — SSH streaming + v1.1 first deliverable shipped 2026-05-09. `ask_project` over SSH now emits `chunk` events for every assistant text delta (matches local; `ssh -T -q` keeps banners off stdout, non-JSON noise filtered silently). Validation tightened so unknown-project errors are deterministic 400 instead of "maybe-400-maybe-502 depending on iteration timing." On the FleetQ side, Harbormaster is now seeded as a popular MCP stdio tool — fresh installs surface it under `/tools` (disabled by default like all seeded tools). The 6-week roadmap to general availability:
 
 | Phase | Weeks | Focus |
 |-------|-------|-------|
