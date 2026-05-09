@@ -152,7 +152,7 @@ JSON mode (no `Accept: text/event-stream`, no `stream` flag) is unchanged — fu
 
 ## Status
 
-**v1.0.0a11** — End-to-end streaming sprint shipped 2026-05-09. The FleetQ Bridge now consumes SSE from harbormaster (\`stream=true\` flag forwards \`text/event-stream\` bytes verbatim through Laravel \`response()->stream\` with \`X-Accel-Buffering: no\`), and \`ClaudeBackend.ask_local_stream\` parses claude-code's \`--output-format stream-json\` so per-token deltas are now extractable inside the daemon (wiring into the SSE dispatch is the a12 follow-up). v1.0.0a10 added the daemon-side SSE wire shape; a11 closes the FleetQ side and lays the backend rails. The 6-week roadmap to general availability:
+**v1.0.0a12** — Real per-token streaming for `ask_project` (local) shipped 2026-05-09. `Accept: text/event-stream` on `/mcp/harbormaster` now emits one `chunk` SSE event per assistant text delta from `claude --output-format stream-json`, then a final `result` event with the assembled answer. Pre-flight failures + mid-stream backend errors land as in-band `error` events so callers never deal with mid-flight transport switching. Plus a CI wire-shape smoke (\`smoke-mcp-streaming\`) that fires on every push. The 6-week roadmap to general availability:
 
 | Phase | Weeks | Focus |
 |-------|-------|-------|
