@@ -2407,3 +2407,34 @@ def test_help_popover_dismiss_on_outside_click(populated_config):
     client = TestClient(create_app(populated_config))
     r = client.get("/")
     assert '@click.away="open = false"' in r.text
+
+
+# --- v6.0.1 regression: graph mermaid render after v4.0.0a3 nested x-data ---
+
+
+def test_dashboard_graph_loads_via_queryselector_not_xrefs(populated_config):
+    """Regression guard: v4.0.0a3 wrapped <pre x-ref='diagram'> inside
+    graphZoom()'s x-data scope, breaking this.$refs.diagram lookup from
+    the parent graphPanel() scope. Mermaid.run() never fired and the
+    raw 'graph LR\\n ...' markup leaked as visible text.
+
+    Fix uses document.querySelector('pre.mermaid') which bypasses scope
+    nesting. This test asserts the fix is in place."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    # The fix uses document.querySelector to find the mermaid pre.
+    assert "document.querySelector('pre.mermaid')" in r.text
+    # The broken pattern must be gone from loadGraph.
+    # (Counts: x-ref attribute may remain; what matters is that
+    # loadGraph doesn't dereference $refs.diagram any more.)
+    # We check that no occurrence of "this.$refs.diagram" exists in
+    # the page (could appear in debug code; harmless if absent).
+    assert "this.$refs.diagram" not in r.text
+
+
+def test_dashboard_graph_pre_has_mermaid_class(populated_config):
+    """The mermaid <pre> must carry the class so querySelector finds it."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "<pre class=\"mermaid" in r.text
