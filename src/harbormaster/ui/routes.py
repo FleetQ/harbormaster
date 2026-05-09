@@ -263,6 +263,10 @@ def register_routes(
                 "finished_at": state.finished_at,
                 "error": state.error,
                 "writer_pid": state.writer_pid,
+                # v7.0.0a3: surface the cancel flag so the UI can
+                # render a 'cancelling…' badge between user click
+                # and worker acknowledgment.
+                "cancel_requested": state.cancel_requested,
                 "auto_reembed_enabled": config.history.auto_reembed_on_drift,
             }
         except ImportError:
@@ -271,6 +275,33 @@ def register_routes(
                 "phase": "idle",
                 "auto_reembed_enabled": False,
             }
+
+    @app.post("/api/history/reembed/cancel")
+    async def api_history_reembed_cancel() -> dict[str, object]:
+        """v7.0.0a3: request cooperative cancel of a running reembed.
+
+        Idempotent: cancelling a non-running reembed is a no-op that
+        returns 200 with ``{"running": false, "cancel_requested": false}``.
+        When a run IS in progress, the cancel flag is set in the state
+        file; the worker observes it between hosts and exits with
+        ``phase = "cancelled"``. The flag does NOT abort an in-flight
+        host's reembed (a single host is the smallest atomic unit).
+        """
+        try:
+            from harbormaster.history import request_reembed_cancel
+        except ImportError:
+            raise HTTPException(
+                503,
+                "[history] extra not installed; install with "
+                "`pip install harbormaster-mcp[history]`",
+            ) from None
+
+        was_running, state = request_reembed_cancel()
+        return {
+            "running": was_running,
+            "cancel_requested": state.cancel_requested,
+            "phase": state.phase,
+        }
 
     @app.get("/api/recall")
     async def api_recall(

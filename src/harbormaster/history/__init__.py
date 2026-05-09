@@ -26,6 +26,9 @@ from harbormaster.history.auto_reembed import (
 from harbormaster.history.auto_reembed import (
     read_state as read_reembed_state,
 )
+from harbormaster.history.auto_reembed import (
+    request_cancel as request_reembed_cancel,
+)
 from harbormaster.history.embed import (
     EmbeddingBackend,
     FastembedBackend,
@@ -58,6 +61,7 @@ __all__ = [
     "maybe_start_auto_reembed_thread",
     "read_embedding_meta",
     "read_reembed_state",
+    "request_reembed_cancel",
     "trigger_manual_reembed",
     "write_embedding_meta",
 ]

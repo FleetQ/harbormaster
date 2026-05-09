@@ -42,7 +42,7 @@ DEFAULT_STATE_PATH = Path.home() / ".harbormaster" / "reembed-state.json"
 class ReembedState(BaseModel):
     """Snapshot of the auto-reembed runner."""
 
-    phase: str = "idle"  # idle | running | done | failed
+    phase: str = "idle"  # idle | running | done | failed | cancelled
     processed: int = 0
     total: int = 0
     current_host: str | None = None
@@ -50,6 +50,10 @@ class ReembedState(BaseModel):
     finished_at: float | None = None
     error: str | None = None
     writer_pid: int | None = None
+    # v7.0.0a3: cooperative cancel flag. Set by request_cancel() / the
+    # POST /api/history/reembed/cancel endpoint; checked by the worker
+    # between hosts. Idempotent — setting it twice is fine.
+    cancel_requested: bool = False
 
 
 def _resolve_state_path() -> Path:
@@ -183,9 +187,18 @@ def run_auto_reembed(config: Any, *, state_path: Path | None = None) -> None:
 
     Designed to run on a background thread. Updates the state file
     on entry, after each host, and on exit. Always finishes with
-    phase ∈ {done, failed} so the UI can stop polling.
+    phase ∈ {done, failed, cancelled} so the UI can stop polling.
     """
-    state = ReembedState(phase="running", started_at=time.time())
+    # v7.0.0a3: preserve a pre-existing cancel flag through the
+    # initial state writes. Without this, a cancel set in the tiny
+    # window between trigger_manual_reembed() and the worker thread's
+    # first instruction would be silently overwritten.
+    pre = read_state(state_path)
+    state = ReembedState(
+        phase="running",
+        started_at=time.time(),
+        cancel_requested=pre.cancel_requested,
+    )
     _write_state(state, state_path)
 
     targets: list[str | None] = [None, *sorted(config.hosts.keys())]
@@ -193,7 +206,16 @@ def run_auto_reembed(config: Any, *, state_path: Path | None = None) -> None:
     _write_state(state, state_path)
 
     errors: list[str] = []
+    cancelled = False
     for target in targets:
+        # v7.0.0a3: cooperative cancel check between hosts.
+        # Re-read the state file because the cancel flag is set by a
+        # different process / request handler, not by this thread.
+        on_disk = read_state(state_path)
+        if on_disk.cancel_requested:
+            cancelled = True
+            logger.info("auto_reembed: cancel requested — stopping after current host")
+            break
         processed, err = _reembed_one_host(
             config=config, host=target, state=state
         )
@@ -211,12 +233,19 @@ def run_auto_reembed(config: Any, *, state_path: Path | None = None) -> None:
 
     state.current_host = None
     state.finished_at = time.time()
-    if errors:
+    if cancelled:
+        state.phase = "cancelled"
+        state.error = None
+    elif errors:
         state.phase = "failed"
         state.error = "; ".join(errors)
     else:
         state.phase = "done"
         state.error = None
+    # Clear the cancel flag on the in-memory state we're about to
+    # persist. This makes subsequent runs start clean — the next
+    # trigger_manual_reembed() begins with cancel_requested=False.
+    state.cancel_requested = False
     _write_state(state, state_path)
 
 
@@ -284,3 +313,28 @@ def trigger_manual_reembed(
     thread.start()
     logger.info("auto_reembed: manual trigger — background thread started")
     return True, None
+
+
+def request_cancel(
+    state_path: Path | None = None,
+) -> tuple[bool, ReembedState]:
+    """v7.0.0a3: cooperative cancel for an in-flight reembed run.
+
+    Returns ``(was_running, current_state_after_request)``. The flag
+    is honoured by ``run_auto_reembed`` between hosts (cancel never
+    interrupts the in-progress host's reembed; a single host is
+    treated as the smallest atomic unit so we don't leave half-
+    processed sqlite-vec rows behind).
+
+    Idempotent: cancelling a non-running reembed is a no-op that
+    returns ``(False, current_state)``. The flag is also cleared
+    automatically by the runner on completion, so the next triggered
+    run starts clean.
+    """
+    current = read_state(state_path)
+    if current.phase != "running":
+        return False, current
+    cancelled_state = current.model_copy(update={"cancel_requested": True})
+    _write_state(cancelled_state, state_path)
+    logger.info("auto_reembed: cancel flag set on running reembed")
+    return True, cancelled_state
