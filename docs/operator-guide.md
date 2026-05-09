@@ -76,6 +76,8 @@ FleetQ Bridge integration:
 enabled = true
 register_as_bridge = true
 write_trajectories = true       # opt-in Memory writeback
+write_kg = false                # opt-in KG triple writeback (v1.2 phase 2; noisier than trajectories)
+kg_max_triples_per_call = 50    # cap per ask_project / delegate_task on dense answers
 base_url = "https://app.fleetq.net"
 api_token_env = "FLEETQ_API_TOKEN"
 heartbeat_interval = 30

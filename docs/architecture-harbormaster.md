@@ -756,7 +756,89 @@ omits it.
 - **Cross-host graph** — local-only. SSH host fan-out is v1.2 phase 4
   territory after the FleetQ KG lands.
 
-## 19. Out-of-architecture (decisions deferred)
+## 19. Federated KnowledgeGraph via FleetQ (v1.2 phase 2)
+
+Builds on the a16 Memory writeback hook. After every successful
+`ask_project` / `delegate_task`, harbormaster runs three heuristic
+extractors over the answer text and POSTs the resulting triples to
+FleetQ at `/api/v1/memory` with a `type: "kg_triple"` discriminator.
+No new endpoint, no FleetQ-side schema change required for the first
+cut — the discriminator gives FleetQ a clear classifier when it
+later separates trajectories from triples into distinct domains.
+
+### Three heuristic extractors
+
+| Predicate | Source pattern | Confidence |
+|-----------|----------------|------------|
+| `mentions` | A known project name appears as a token in the answer (composer-style `vendor/pkg` aliased to bare `pkg` too) | 0.6 |
+| `uses` | "uses the X library" / "depends on X" / "requires X" / "built on X" | 0.55 |
+| `exposes` | HTTP-method-prefixed paths: "GET /api/foo" / "POST /v1/bar" | 0.7 |
+
+Why heuristic, not LLM-based: the cost-per-call must be near-zero so
+this can run on every `ask_project`. An LLM call would double our
+`claude -p` spend per tool invocation. Triples carry a confidence
+score so downstream consumers (FleetQ, future cross-session recall)
+can filter the noise.
+
+### Wire shape
+
+```json
+POST /api/v1/memory
+{
+  "type": "kg_triple",
+  "tool": "ask_project",
+  "project": "alpha",
+  "host": "local",
+  "content": {
+    "subject": "alpha",
+    "predicate": "uses",
+    "object": "pydantic",
+    "confidence": 0.55
+  }
+}
+```
+
+(Same endpoint as a16 trajectory writeback; FleetQ dispatches on
+`type` to route triples to the KG domain when KG-aware processing
+ships, or stores them as opaque records until then.)
+
+### Three-gate opt-in
+
+Mirrors the FleetQ trajectory writeback pattern (`_maybe_writeback_to_fleetq`):
+
+1. `[fleetq] enabled = true`
+2. `[fleetq] write_kg = true` (default `false` — separate from
+   `write_trajectories` so operators can ship trajectories without
+   the noisier triple stream)
+3. The `FLEETQ_API_TOKEN` env var must be non-empty.
+
+The hook (`_maybe_extract_and_writeback_kg` in `tools/_helpers.py`)
+sits next to the trajectory writeback in `run_backend`. Same
+fire-and-forget semantics: failures inside extraction or POST are
+logged at WARNING and never propagate to the user-facing tool call.
+
+### Cap on triples per call
+
+`[fleetq] kg_max_triples_per_call` (default 50) bounds the writeback
+cost on dense answers. Extraction order is mentions first (cheapest
++ broadest), then uses, then exposes — so the cap drops the
+higher-noise triples first when the answer is dense.
+
+### Out of scope for phase 2 (filed for later)
+
+- **LLM-based triple extraction** — heuristics ship now; an
+  LLM-extraction sweep over historical trajectories is v2 territory.
+- **Triple deduplication across calls** — a triple posted twice from
+  two trajectories lands twice in FleetQ. Deduplication is a
+  FleetQ-side concern (or a future client-side "have I seen this
+  triple recently" cache).
+- **`calls` predicate** (project-A invokes project-B over RPC) —
+  needs richer signal than a free-text mention. Likely needs
+  `harbormaster.calls` instrumentation in the SSH/HTTP backends.
+- **Cross-host triple aggregation** — local-only writes today; the
+  FleetQ side aggregates across all harbormasters reporting to it.
+
+## 20. Out-of-architecture (decisions deferred)
 
 - Tauri / Electron native wrapper.
 - Multi-user UI (post-v1).
