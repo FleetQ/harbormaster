@@ -18,6 +18,13 @@ Public surface:
 """
 from __future__ import annotations
 
+from harbormaster.history.auto_reembed import (
+    ReembedState,
+    maybe_start_auto_reembed_thread,
+)
+from harbormaster.history.auto_reembed import (
+    read_state as read_reembed_state,
+)
 from harbormaster.history.embed import (
     EmbeddingBackend,
     FastembedBackend,
@@ -43,9 +50,12 @@ __all__ = [
     "QAMatch",
     "QARecord",
     "QAStore",
+    "ReembedState",
     "connect",
     "ensure_schema",
     "get_embedding_backend",
+    "maybe_start_auto_reembed_thread",
     "read_embedding_meta",
+    "read_reembed_state",
     "write_embedding_meta",
 ]

@@ -115,6 +115,11 @@ class HistoryConfig(BaseModel):
     # latency adds up.
     parallel_recall: bool = False
     parallel_recall_max_workers: int = Field(default=4, gt=0, le=32)
+    # v4.0.0a5: when True, an embedding-model drift detected at
+    # QAStore.open() triggers an in-process reembed in a background
+    # thread instead of just logging a warning. Defaults to False to
+    # preserve the v3 "operator decides" behaviour.
+    auto_reembed_on_drift: bool = False
 
 
 class PluginsConfig(BaseModel):

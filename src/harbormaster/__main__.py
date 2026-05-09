@@ -281,6 +281,17 @@ def main(argv: list[str] | None = None) -> int:
 
     fleetq = _maybe_start_fleetq_bridge(config, mcp)
 
+    # v4.0.0a5: when [history] auto_reembed_on_drift is enabled, kick
+    # off a background thread that walks every per-host store and
+    # reembeds any with detected model drift. No-op when disabled or
+    # when [history] extra is absent.
+    try:
+        from harbormaster.history import maybe_start_auto_reembed_thread
+
+        maybe_start_auto_reembed_thread(config)
+    except ImportError:
+        pass
+
     try:
         if args.transport == "stdio":
             mcp.run()
