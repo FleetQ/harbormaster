@@ -2015,3 +2015,58 @@ def test_graph_zoom_reset_button_mentions_keyboard_hint(populated_config):
     client = TestClient(create_app(populated_config))
     r = client.get("/")
     assert "press Esc or double-tap" in r.text
+
+
+# --- v5.0.0a6: dashboard project filter + URL state ---------------------
+
+
+def test_dashboard_renders_project_filter_input(populated_config):
+    """Filter input above the project grid + Alpine projectGrid() factory."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "function projectGrid()" in r.text
+    assert 'x-data="projectGrid()"' in r.text
+    # Filter input element with debounce-150ms.
+    assert "@input.debounce.150ms=\"persistToUrl()\"" in r.text
+    assert "filter by name / path / brief" in r.text
+
+
+def test_dashboard_filter_match_helper_filters_three_fields(populated_config):
+    """visibleProjects() filters by name / path / brief substring."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "name.includes(needle)" in r.text
+    assert "path.includes(needle)" in r.text
+    assert "brief.includes(needle)" in r.text
+
+
+def test_dashboard_filter_persists_to_url(populated_config):
+    """v3.0.0a9 default-omit pattern; preserves foreign params."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "p.set('filter'" in r.text
+    assert "p.delete('filter')" in r.text
+    assert "window.history.replaceState" in r.text
+
+
+def test_dashboard_filter_restores_from_url_on_mount(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "p.get('filter')" in r.text
+    assert "if (f) this.filter = f" in r.text
+
+
+def test_dashboard_shows_no_match_state_with_clear_button(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "No projects match" in r.text
+    # The clear button.
+    assert "filter = '';" in r.text
+
+
+def test_dashboard_filter_match_count_shows_when_active(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # Counter switches between "X discovered" and "X of Y match"
+    assert "of ${projects.length} match" in r.text

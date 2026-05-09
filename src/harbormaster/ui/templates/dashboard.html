@@ -230,24 +230,20 @@
   </div>
 </section>
 
-<!-- Project grid (carried forward from v2.0). -->
-<section x-data="{ projects: [], loading: true, error: null }"
-         x-init="(async () => {
-           try {
-             const r = await hmFetch('/api/projects');
-             if (!r.ok) throw new Error('HTTP ' + r.status);
-             projects = await r.json();
-           } catch (e) {
-             error = e.message;
-           } finally {
-             loading = false;
-           }
-         })()">
-  <header class="mb-4 flex items-baseline justify-between">
+<!-- Project grid (carried forward from v2.0).
+     v5.0.0a6: text-based filter input + URL state encoding. -->
+<section x-data="projectGrid()" x-init="init()">
+  <header class="mb-4 flex items-baseline justify-between gap-3 flex-wrap">
     <h2 class="text-lg font-bold">Projects</h2>
-    <span class="text-sm text-gray-400"
-          x-show="!loading"
-          x-text="`${projects.length} discovered`"></span>
+    <div class="flex items-baseline gap-3 ml-auto">
+      <input type="text" x-model="filter" @input.debounce.150ms="persistToUrl()"
+             placeholder="filter by name / path / brief…"
+             class="bg-gray-950 border border-gray-800 rounded px-3 py-1.5 text-sm focus:border-cyan-700 focus:outline-none w-56">
+      <span class="text-sm text-gray-400" x-show="!loading"
+            x-text="filter
+              ? `${visibleProjects().length} of ${projects.length} match`
+              : `${projects.length} discovered`"></span>
+    </div>
   </header>
 
   <div x-show="loading" class="text-gray-400">Loading projects…</div>
@@ -266,9 +262,16 @@
     </p>
   </div>
 
-  <div x-show="!loading && !error && projects.length > 0"
+  <div x-show="!loading && !error && filter && visibleProjects().length === 0"
+       class="border border-gray-800 bg-gray-900/40 text-gray-400 px-4 py-6 rounded">
+    No projects match <code class="text-cyan-400" x-text="filter"></code>.
+    <button type="button" @click="filter = ''; persistToUrl()"
+            class="ml-2 text-cyan-400 hover:text-cyan-300 underline">clear</button>
+  </div>
+
+  <div x-show="!loading && !error && visibleProjects().length > 0"
        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-    <template x-for="p in projects" :key="p.path">
+    <template x-for="p in visibleProjects()" :key="p.path">
       <article x-data="{ askExpanded: false }"
                class="border border-gray-800 rounded-lg p-4 hover:border-cyan-700 transition bg-gray-900/40">
         <header class="flex items-baseline justify-between mb-2 gap-2">
@@ -476,6 +479,55 @@
         } finally {
           this.loading = false;
         }
+      },
+    };
+  }
+
+  // v5.0.0a6: project grid + text filter + URL state.
+  function projectGrid() {
+    return {
+      projects: [], loading: true, error: null, filter: '',
+
+      async init() {
+        // Pull filter from URL on mount so a shared `?filter=...` link
+        // pre-fills the input.
+        const p = new URLSearchParams(window.location.search);
+        const f = p.get('filter');
+        if (f) this.filter = f;
+        try {
+          const r = await hmFetch('/api/projects');
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          this.projects = await r.json();
+        } catch (e) {
+          this.error = e.message;
+        } finally {
+          this.loading = false;
+        }
+      },
+
+      visibleProjects() {
+        if (!this.filter || !this.filter.trim()) return this.projects;
+        const needle = this.filter.trim().toLowerCase();
+        return this.projects.filter((p) => {
+          const name = (p.name || '').toLowerCase();
+          const path = (p.path || '').toLowerCase();
+          const brief = (p.brief || '').toLowerCase();
+          return name.includes(needle) || path.includes(needle) || brief.includes(needle);
+        });
+      },
+
+      persistToUrl() {
+        // Same default-omit pattern as v3.0.0a9 fan-out + v4.0.0a2 recall.
+        // Preserves any other URL params present (e.g. recall_q).
+        const p = new URLSearchParams(window.location.search);
+        if (this.filter && this.filter.trim()) {
+          p.set('filter', this.filter.trim());
+        } else {
+          p.delete('filter');
+        }
+        const qs = p.toString();
+        const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+        window.history.replaceState(null, '', url);
       },
     };
   }
