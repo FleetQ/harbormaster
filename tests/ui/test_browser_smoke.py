@@ -168,3 +168,50 @@ def test_meta_tag_present_when_token_set_via_subprocess_env(
     test_dashboard_renders_meta_tag_when_auth_token_set instead.
     """
     pytest.skip("covered by unit test; running second UI subprocess is heavy")
+
+
+# --- v7.0.0a1: SVG-render assertion -----------------------------------
+#
+# Closes the v4.0.0a3 → v6.0.2 regression-detection gap. Previously the
+# Playwright suite only asserted the <pre class="mermaid"> element was
+# present, not that Mermaid had actually rendered into a sized SVG.
+# That allowed the v6.0.0/v6.0.1/v6.0.2 graph-render bugs (placeholder
+# 16×16 viewBox + x-show race) to live for 17 versions undetected.
+#
+# This test reads the actual rendered <svg>'s bounding box. A
+# placeholder/unrendered SVG has bbox ~ 16×16 (Mermaid's transparent
+# stub); a real rendered diagram is well over 50px in each dimension
+# even for the seeded single-node graph.
+
+
+def test_dashboard_graph_renders_with_real_viewbox(
+    page: Page, ui_url: str
+) -> None:
+    """Mermaid must render a sized <svg>, not a 16×16 placeholder.
+
+    Regression guard for v6.0.0 / v6.0.1 / v6.0.2 graph bugs.
+    A renderer that fails silently (e.g. measures the still-hidden
+    <pre> at 0×0, or the x-show + measure race) leaves the bbox
+    stuck at the transparent placeholder dimensions; a real render
+    produces a diagram > 50px wide for any non-empty graph.
+    """
+    page.goto(f"{ui_url}/")
+    # Wait for Mermaid to inject the <svg> child of <pre.mermaid>.
+    page.wait_for_selector("pre.mermaid svg", timeout=10000)
+    width, height = page.evaluate(
+        """() => {
+            const svg = document.querySelector('pre.mermaid svg');
+            const b = svg.getBBox();
+            return [b.width, b.height];
+        }"""
+    )
+    assert width > 50, (
+        f"viewBox stuck at placeholder; bbox = {width}x{height}. "
+        "Mermaid did not render — likely an x-show/measure race "
+        "(see v6.0.1/v6.0.2 retros) or graphLoading flag never flipped."
+    )
+    assert height > 10, (
+        f"SVG height collapsed; bbox = {width}x{height}. "
+        "Diagram rendered as a horizontal line — usually means "
+        "Mermaid measured the hidden container at 0px and gave up."
+    )
