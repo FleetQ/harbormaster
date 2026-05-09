@@ -23,7 +23,7 @@ users never hit this import path.
 import asyncio
 import json
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -140,8 +140,9 @@ async def _stream_dispatch(
 
     Two paths:
 
-    1. `ask_project` against a local project: bypass FastMCP's sync tool
-       dispatch and call `ClaudeBackend.ask_local_stream` directly,
+    1. `ask_project` / `delegate_task` against a local OR SSH project:
+       bypass FastMCP's sync tool dispatch and call
+       `ClaudeBackend.ask_local_stream` / `ask_remote_stream` directly,
        emitting each yielded text delta as a `chunk` event. The final
        `result` event carries the assembled string for callers that
        want a single terminal payload.
@@ -157,24 +158,30 @@ async def _stream_dispatch(
       result    → <MCP envelope, identical to JSON-mode response body>
       error     → {"status": <int>, "detail": <str>}
 
-    SSH-targeted ask_project (`host` set) falls through to path 2 today
-    because remote stdout demux through ssh is a separate refactor.
+    `fan_out_ask` falls through to path 2 today — it's a parallel
+    multi-project call and needs chunk multiplexing semantics that
+    don't exist yet.
     """
     if (
         config is not None
         and body.method == "tools/call"
         and isinstance(body.params, dict)
-        and body.params.get("name") == "ask_project"
     ):
+        tool_name = body.params.get("name")
         args = body.params.get("arguments")
-        if isinstance(args, dict):
+        if tool_name in _STREAMING_TOOLS and isinstance(args, dict):
+            prompt_builder = _STREAMING_TOOLS[tool_name]
             host = args.get("host")
             if host in (None, "local"):
-                async for evt in _stream_ask_project_local(config, args):
+                async for evt in _stream_local_tool(
+                    config, args, prompt_builder, max_turns_default=5,
+                ):
                     yield evt
                 return
             if isinstance(host, str) and host:
-                async for evt in _stream_ask_project_remote(config, args, host):
+                async for evt in _stream_remote_tool(
+                    config, args, host, prompt_builder, max_turns_default=5,
+                ):
                     yield evt
                 return
 
@@ -220,23 +227,88 @@ async def _stream_dispatch(
     yield {"event": "result", "data": json.dumps(result)}
 
 
-async def _stream_ask_project_local(
-    config: HarbormasterConfig, arguments: dict[str, Any]
-) -> AsyncIterator[dict[str, str]]:
-    """Drive `ClaudeBackend.ask_local_stream` from inside the SSE dispatch.
+PromptBuilder = Callable[[dict[str, Any]], str]
+"""A prompt builder takes the tool's `arguments` dict and returns the
+full prompt to send to the backend, OR raises ValueError with a
+caller-readable message if a required argument is missing/invalid.
+Tool-specific framing (e.g. delegate_task's read-only injunction)
+lives in the builder, not in the streaming dispatch."""
 
-    Yields one `chunk` event per text delta the backend produces, then a
-    final `result` event with the assembled string in MCP envelope shape
-    so callers that don't speak `chunk` events still get the full answer.
 
-    Argument validation errors land as a `400` error event; backend
-    failures (timeout / exit_nonzero / parse_failure) land as `502`.
-    """
-    name = arguments.get("name")
+def _ask_project_prompt(arguments: dict[str, Any]) -> str:
     question = arguments.get("question")
-    max_turns = arguments.get("max_turns", 5)
+    if not isinstance(question, str) or not question:
+        raise ValueError("params.arguments.question (string) is required")
+    return (
+        f"{question}\n\n"
+        "Return a concise markdown summary under 500 words. "
+        "Focus on the answer; skip unnecessary preamble."
+    )
 
-    if not isinstance(name, str) or not name:
+
+def _delegate_task_prompt(arguments: dict[str, Any]) -> str:
+    task = arguments.get("task")
+    deliverable = arguments.get("deliverable")
+    if not isinstance(task, str) or not task:
+        raise ValueError("params.arguments.task (string) is required")
+    if not isinstance(deliverable, str) or not deliverable:
+        raise ValueError("params.arguments.deliverable (string) is required")
+    if arguments.get("allow_writes"):
+        raise ValueError(
+            "delegate_task with allow_writes=true is disabled in v1; "
+            "use ask_project for read-only questions"
+        )
+    return (
+        f"Task: {task}\n\n"
+        f"Deliverable: {deliverable}\n\n"
+        "Read-only mode. Do NOT edit files. "
+        "Report what you would do and which files you would touch. "
+        "Return markdown under 500 words."
+    )
+
+
+_STREAMING_TOOLS: dict[str, PromptBuilder] = {
+    "ask_project": _ask_project_prompt,
+    "delegate_task": _delegate_task_prompt,
+}
+"""Map of MCP tool name → prompt builder for tools that emit chunk
+events. Anything not in this map falls through to the heartbeat path
+(unchanged from a13)."""
+
+
+def _validate_max_turns(arguments: dict[str, Any], default: int) -> int:
+    """Resolve and validate max_turns. Raises ValueError on bad values."""
+    max_turns = arguments.get("max_turns", default)
+    if not isinstance(max_turns, int) or max_turns <= 0:
+        raise ValueError("params.arguments.max_turns must be a positive int")
+    return max_turns
+
+
+async def _stream_local_tool(
+    config: HarbormasterConfig,
+    arguments: dict[str, Any],
+    prompt_builder: PromptBuilder,
+    *,
+    max_turns_default: int,
+) -> AsyncIterator[dict[str, str]]:
+    """Generic local-streaming SSE dispatcher.
+
+    Steps:
+      1. Validate `name` (project) — raise 400 on missing/empty.
+      2. Build the prompt via `prompt_builder` — tool-specific. Raises
+         ValueError on missing tool args; surfaced as 400.
+      3. Validate `max_turns`.
+      4. Eagerly construct the backend iterator via
+         `make_local_backend_stream`. ValueError (project lookup) → 400;
+         BackendError(config) → 400; BackendError(other) → 502 lazily.
+      5. Iterate, emitting one `chunk` event per text delta, then a
+         final `result` event with the assembled string.
+
+    Failure modes are all in-band SSE error events — no HTTP-level
+    error after the response has started.
+    """
+    project_name = arguments.get("name")
+    if not isinstance(project_name, str) or not project_name:
         yield {
             "event": "error",
             "data": json.dumps(
@@ -244,40 +316,23 @@ async def _stream_ask_project_local(
             ),
         }
         return
-    if not isinstance(question, str) or not question:
-        yield {
-            "event": "error",
-            "data": json.dumps(
-                {"status": 400, "detail": "params.arguments.question (string) is required"}
-            ),
-        }
-        return
-    if not isinstance(max_turns, int) or max_turns <= 0:
-        yield {
-            "event": "error",
-            "data": json.dumps(
-                {"status": 400, "detail": "params.arguments.max_turns must be a positive int"}
-            ),
-        }
-        return
-
-    full_prompt = (
-        f"{question}\n\n"
-        "Return a concise markdown summary under 500 words. "
-        "Focus on the answer; skip unnecessary preamble."
-    )
-
-    # Build the iterator on the main thread — argument-validation /
-    # project-resolve errors surface here, BEFORE we lock a worker
-    # thread iterating the subprocess. `make_ask_local_stream` does
-    # the eager validation; ValueError → 400 (caller-input error),
-    # BackendError → 400 (config error) or 502 (runtime error,
-    # signalled by code != 'config_error').
-    from harbormaster.tools._helpers import make_ask_local_stream
 
     try:
-        sync_iter = make_ask_local_stream(
-            name=name, prompt=full_prompt, max_turns=max_turns, config=config,
+        full_prompt = prompt_builder(arguments)
+        max_turns = _validate_max_turns(arguments, max_turns_default)
+    except ValueError as e:
+        yield {
+            "event": "error",
+            "data": json.dumps({"status": 400, "detail": str(e)}),
+        }
+        return
+
+    from harbormaster.tools._helpers import make_local_backend_stream
+
+    try:
+        sync_iter = make_local_backend_stream(
+            project_name=project_name, prompt=full_prompt,
+            max_turns=max_turns, config=config,
         )
     except ValueError as e:
         yield {
@@ -297,16 +352,86 @@ async def _stream_ask_project_local(
         }
         return
 
+    async for evt in _emit_chunks_then_result(sync_iter):
+        yield evt
+
+
+async def _stream_remote_tool(
+    config: HarbormasterConfig,
+    arguments: dict[str, Any],
+    host: str,
+    prompt_builder: PromptBuilder,
+    *,
+    max_turns_default: int,
+) -> AsyncIterator[dict[str, str]]:
+    """SSH counterpart to `_stream_local_tool`. Identical structure
+    modulo the make_remote_backend_stream call + host parameter."""
+    project_name = arguments.get("name")
+    if not isinstance(project_name, str) or not project_name:
+        yield {
+            "event": "error",
+            "data": json.dumps(
+                {"status": 400, "detail": "params.arguments.name (string) is required"}
+            ),
+        }
+        return
+
+    try:
+        full_prompt = prompt_builder(arguments)
+        max_turns = _validate_max_turns(arguments, max_turns_default)
+    except ValueError as e:
+        yield {
+            "event": "error",
+            "data": json.dumps({"status": 400, "detail": str(e)}),
+        }
+        return
+
+    from harbormaster.tools._helpers import make_remote_backend_stream
+
+    try:
+        sync_iter = make_remote_backend_stream(
+            project_name=project_name, prompt=full_prompt,
+            max_turns=max_turns, host=host, config=config,
+        )
+    except ValueError as e:
+        yield {
+            "event": "error",
+            "data": json.dumps(
+                {"status": 400, "detail": f"ValueError: {e}"}
+            ),
+        }
+        return
+    except BackendError as e:
+        status = 400 if e.code == "config_error" else 502
+        yield {
+            "event": "error",
+            "data": json.dumps(
+                {"status": status, "detail": f"BackendError({e.code}): {e}"}
+            ),
+        }
+        return
+
+    async for evt in _emit_chunks_then_result(sync_iter):
+        yield evt
+
+
+async def _emit_chunks_then_result(
+    sync_iter: Any,
+) -> AsyncIterator[dict[str, str]]:
+    """Drive a sync iterator from an async generator, emitting one
+    `chunk` event per yielded text delta and a final `result` event
+    with the assembled string. Mid-iteration `BackendError` becomes
+    a 502 error event.
+
+    PEP 479 / asyncio gotcha: StopIteration cannot be marshalled
+    across the asyncio.to_thread Future boundary. Convert to a
+    sentinel value so the asyncio side detects end-of-iter without
+    ever propagating StopIteration through a Future.
+    """
     chunks: list[str] = []
     sentinel = object()
 
     def _next_or_sentinel() -> Any:
-        # PEP 479 / asyncio gotcha: StopIteration cannot be marshalled
-        # across the asyncio.to_thread Future boundary — the threadpool
-        # raises `TypeError: StopIteration interacts badly with
-        # generators and cannot be raised into a Future`. Convert to a
-        # sentinel value so the asyncio side can detect end-of-iter
-        # without ever propagating StopIteration through a Future.
         try:
             return next(sync_iter)
         except StopIteration:
@@ -324,119 +449,10 @@ async def _stream_ask_project_local(
             }
             return
         except (ValueError, FileNotFoundError) as e:
-            # Validation / project-resolve errors are raised inside the
-            # generator on first next() call — surface as 400.
             yield {
                 "event": "error",
                 "data": json.dumps(
                     {"status": 400, "detail": f"{type(e).__name__}: {e}"}
-                ),
-            }
-            return
-        if chunk is sentinel:
-            break
-        chunks.append(chunk)
-        yield {"event": "chunk", "data": json.dumps({"text": chunk})}
-
-    envelope = {
-        "result": {
-            "content": [{"type": "text", "text": "".join(chunks)}],
-        },
-    }
-    yield {"event": "result", "data": json.dumps(envelope)}
-
-
-async def _stream_ask_project_remote(
-    config: HarbormasterConfig, arguments: dict[str, Any], host: str,
-) -> AsyncIterator[dict[str, str]]:
-    """SSH counterpart to _stream_ask_project_local. Same wire shape:
-    chunk events per text delta, final result event with the assembled
-    string. Differences from the local path live entirely inside the
-    backend (`ask_remote_stream`) — this generator is structurally
-    identical to the local one.
-
-    Kept as a separate function (instead of parameterising the local
-    one) because the eager-validation step has different inputs (host
-    config lookup, host string, etc.) and the failure-mode mapping is
-    slightly different (ssh_error → 502, not 400).
-    """
-    name = arguments.get("name")
-    question = arguments.get("question")
-    max_turns = arguments.get("max_turns", 5)
-
-    if not isinstance(name, str) or not name:
-        yield {
-            "event": "error",
-            "data": json.dumps(
-                {"status": 400, "detail": "params.arguments.name (string) is required"}
-            ),
-        }
-        return
-    if not isinstance(question, str) or not question:
-        yield {
-            "event": "error",
-            "data": json.dumps(
-                {"status": 400, "detail": "params.arguments.question (string) is required"}
-            ),
-        }
-        return
-    if not isinstance(max_turns, int) or max_turns <= 0:
-        yield {
-            "event": "error",
-            "data": json.dumps(
-                {"status": 400, "detail": "params.arguments.max_turns must be a positive int"}
-            ),
-        }
-        return
-
-    full_prompt = (
-        f"{question}\n\n"
-        "Return a concise markdown summary under 500 words. "
-        "Focus on the answer; skip unnecessary preamble."
-    )
-
-    from harbormaster.tools._helpers import make_ask_remote_stream
-
-    try:
-        sync_iter = make_ask_remote_stream(
-            name=name, prompt=full_prompt, max_turns=max_turns,
-            host=host, config=config,
-        )
-    except ValueError as e:
-        yield {
-            "event": "error",
-            "data": json.dumps(
-                {"status": 400, "detail": f"ValueError: {e}"}
-            ),
-        }
-        return
-    except BackendError as e:
-        status = 400 if e.code == "config_error" else 502
-        yield {
-            "event": "error",
-            "data": json.dumps(
-                {"status": status, "detail": f"BackendError({e.code}): {e}"}
-            ),
-        }
-        return
-
-    chunks: list[str] = []
-    sentinel = object()
-
-    def _next_or_sentinel() -> Any:
-        try:
-            return next(sync_iter)
-        except StopIteration:
-            return sentinel
-
-    while True:
-        try:
-            chunk = await asyncio.to_thread(_next_or_sentinel)
-        except BackendError as e:
-            yield {
-                "event": "error",
-                "data": json.dumps(
-                    {"status": 502, "detail": f"BackendError({e.code}): {e}"}
                 ),
             }
             return

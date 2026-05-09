@@ -596,7 +596,7 @@ async def test_stream_ask_project_local_yields_chunk_events_and_final_result(
     import json as _json
 
     from harbormaster.backends.claude import ClaudeBackend
-    from harbormaster.ui.routes import _stream_ask_project_local
+    from harbormaster.ui.routes import _ask_project_prompt, _stream_local_tool
 
     def fake_stream(self, *, cwd, prompt, max_turns):  # noqa: ARG001
         yield "Hello, "
@@ -605,8 +605,9 @@ async def test_stream_ask_project_local_yields_chunk_events_and_final_result(
     monkeypatch.setattr(ClaudeBackend, "ask_local_stream", fake_stream)
 
     events = []
-    async for evt in _stream_ask_project_local(
+    async for evt in _stream_local_tool(
         populated_config, {"name": "alpha", "question": "summarize"},
+        _ask_project_prompt, max_turns_default=5,
     ):
         events.append(evt)
 
@@ -625,11 +626,12 @@ async def test_stream_ask_project_local_emits_400_on_missing_question(populated_
     status=400, not a Python exception out of the generator."""
     import json as _json
 
-    from harbormaster.ui.routes import _stream_ask_project_local
+    from harbormaster.ui.routes import _ask_project_prompt, _stream_local_tool
 
     events = []
-    async for evt in _stream_ask_project_local(
+    async for evt in _stream_local_tool(
         populated_config, {"name": "alpha"},  # no question
+        _ask_project_prompt, max_turns_default=5,
     ):
         events.append(evt)
 
@@ -644,11 +646,12 @@ async def test_stream_ask_project_local_emits_400_on_missing_question(populated_
 async def test_stream_ask_project_local_emits_400_on_missing_name(populated_config):
     import json as _json
 
-    from harbormaster.ui.routes import _stream_ask_project_local
+    from harbormaster.ui.routes import _ask_project_prompt, _stream_local_tool
 
     events = []
-    async for evt in _stream_ask_project_local(
+    async for evt in _stream_local_tool(
         populated_config, {"question": "summarize"},  # no name
+        _ask_project_prompt, max_turns_default=5,
     ):
         events.append(evt)
 
@@ -669,7 +672,7 @@ async def test_stream_ask_project_local_502_on_backend_error_mid_stream(
 
     from harbormaster.backends.base import BackendError
     from harbormaster.backends.claude import ClaudeBackend
-    from harbormaster.ui.routes import _stream_ask_project_local
+    from harbormaster.ui.routes import _ask_project_prompt, _stream_local_tool
 
     def fake_stream(self, *, cwd, prompt, max_turns):  # noqa: ARG001
         yield "partial output"
@@ -678,8 +681,9 @@ async def test_stream_ask_project_local_502_on_backend_error_mid_stream(
     monkeypatch.setattr(ClaudeBackend, "ask_local_stream", fake_stream)
 
     events = []
-    async for evt in _stream_ask_project_local(
+    async for evt in _stream_local_tool(
         populated_config, {"name": "alpha", "question": "summarize"},
+        _ask_project_prompt, max_turns_default=5,
     ):
         events.append(evt)
 
@@ -700,11 +704,12 @@ async def test_stream_ask_project_local_400_on_unknown_project(populated_config)
     of "maybe-400-maybe-502 depending on iteration timing."""
     import json as _json
 
-    from harbormaster.ui.routes import _stream_ask_project_local
+    from harbormaster.ui.routes import _ask_project_prompt, _stream_local_tool
 
     events = []
-    async for evt in _stream_ask_project_local(
+    async for evt in _stream_local_tool(
         populated_config, {"name": "nonexistent", "question": "summarize"},
+        _ask_project_prompt, max_turns_default=5,
     ):
         events.append(evt)
 
@@ -712,3 +717,122 @@ async def test_stream_ask_project_local_400_on_unknown_project(populated_config)
     err = _json.loads(events[-1]["data"])
     assert err["status"] == 400
     assert "nonexistent" in err["detail"]
+
+
+# ----- delegate_task chunk streaming (a14) ----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stream_local_tool_delegate_task_yields_chunks(
+    populated_config, monkeypatch
+):
+    """delegate_task uses the same streaming path as ask_project, just
+    with a different prompt builder."""
+    import json as _json
+
+    from harbormaster.backends.claude import ClaudeBackend
+    from harbormaster.ui.routes import _delegate_task_prompt, _stream_local_tool
+
+    captured: dict[str, object] = {}
+
+    def fake_stream(self, *, cwd, prompt, max_turns):  # noqa: ARG001
+        captured["prompt"] = prompt
+        yield "Plan: "
+        yield "1) read files"
+
+    monkeypatch.setattr(ClaudeBackend, "ask_local_stream", fake_stream)
+
+    events = []
+    async for evt in _stream_local_tool(
+        populated_config,
+        {
+            "name": "alpha",
+            "task": "audit the auth module",
+            "deliverable": "list of issues",
+        },
+        _delegate_task_prompt, max_turns_default=10,
+    ):
+        events.append(evt)
+
+    types = [e["event"] for e in events]
+    assert types == ["chunk", "chunk", "result"]
+
+    final = _json.loads(events[-1]["data"])
+    assert final["result"]["content"][0]["text"] == "Plan: 1) read files"
+
+    # The prompt builder injected the read-only injunction.
+    prompt = captured["prompt"]
+    assert isinstance(prompt, str)
+    assert "Task: audit the auth module" in prompt
+    assert "Deliverable: list of issues" in prompt
+    assert "Read-only mode" in prompt
+
+
+@pytest.mark.asyncio
+async def test_stream_local_tool_delegate_task_400_on_allow_writes(populated_config):
+    """delegate_task with allow_writes=true is disabled in v1; must
+    surface as a 400 error event before any subprocess is spawned."""
+    import json as _json
+
+    from harbormaster.ui.routes import _delegate_task_prompt, _stream_local_tool
+
+    events = []
+    async for evt in _stream_local_tool(
+        populated_config,
+        {
+            "name": "alpha",
+            "task": "edit auth.py",
+            "deliverable": "patch",
+            "allow_writes": True,
+        },
+        _delegate_task_prompt, max_turns_default=10,
+    ):
+        events.append(evt)
+
+    assert len(events) == 1
+    assert events[0]["event"] == "error"
+    err = _json.loads(events[0]["data"])
+    assert err["status"] == 400
+    assert "allow_writes" in err["detail"]
+
+
+@pytest.mark.asyncio
+async def test_stream_local_tool_delegate_task_400_on_missing_task(populated_config):
+    import json as _json
+
+    from harbormaster.ui.routes import _delegate_task_prompt, _stream_local_tool
+
+    events = []
+    async for evt in _stream_local_tool(
+        populated_config,
+        {"name": "alpha", "deliverable": "x"},  # no task
+        _delegate_task_prompt, max_turns_default=10,
+    ):
+        events.append(evt)
+
+    assert events[-1]["event"] == "error"
+    err = _json.loads(events[-1]["data"])
+    assert err["status"] == 400
+    assert "task" in err["detail"]
+
+
+@pytest.mark.asyncio
+async def test_stream_local_tool_delegate_task_400_on_missing_deliverable(
+    populated_config,
+):
+    import json as _json
+
+    from harbormaster.ui.routes import _delegate_task_prompt, _stream_local_tool
+
+    events = []
+    async for evt in _stream_local_tool(
+        populated_config,
+        {"name": "alpha", "task": "x"},  # no deliverable
+        _delegate_task_prompt, max_turns_default=10,
+    ):
+        events.append(evt)
+
+    assert events[-1]["event"] == "error"
+    err = _json.loads(events[-1]["data"])
+    assert err["status"] == 400
+    assert "deliverable" in err["detail"]
