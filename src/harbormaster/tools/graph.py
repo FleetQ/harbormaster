@@ -28,6 +28,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
     def project_graph(
         format: Literal["json", "mermaid"] = "json",
         include_dev_deps: bool = False,
+        transitive: bool = False,
     ) -> dict[str, object]:
         """Return the cross-project dependency graph for all locally
         discovered projects.
@@ -39,12 +40,21 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         long tail of pure-library deps is filtered out so the graph
         stays readable.
 
+        When `transitive=True` (v2.0.0a1), the project's lockfile is
+        also consulted (uv.lock, poetry.lock, requirements.txt,
+        package-lock.json, composer.lock, Cargo.lock, go.sum) and any
+        transitive dep that matches another known project becomes an
+        additional edge with `kind="transitive"`. Falls back to manifest
+        deps when no lockfile is present.
+
         Args:
           format: "json" (default — returns nodes + edges + manifests)
             or "mermaid" (also includes a `mermaid` field with a
             `graph LR` markup string for direct rendering).
           include_dev_deps: include dev/test/peer deps as edges
             (rendered with dotted arrows in Mermaid). Default false.
+          transitive: include lockfile-resolved transitive deps as
+            edges. Default false.
         """
         manifests = []
         for p in discover_projects(config.projects):
@@ -52,9 +62,16 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
             if m is not None:
                 manifests.append(m)
 
-        graph = build_graph(manifests, include_dev_deps=include_dev_deps)
+        graph = build_graph(
+            manifests,
+            include_dev_deps=include_dev_deps,
+            transitive=transitive,
+        )
         result: dict[str, object] = {
             "projects_discovered": len(manifests),
+            "projects_with_lockfile": sum(
+                1 for m in manifests if m.lockfile is not None
+            ),
             "manifests": [m.as_dict() for m in manifests],
             "graph": graph.as_dict(),
         }

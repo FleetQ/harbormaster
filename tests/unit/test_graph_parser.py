@@ -227,3 +227,77 @@ def test_manifest_as_dict_lists_deps(tmp_path: Path):
     d = m.as_dict()
     assert isinstance(d["deps"], list)
     assert d["deps"] == ["a", "b"]
+
+
+# --- parse_project + lockfile integration (v2.0.0a1) --------------------
+
+
+def test_parse_project_attaches_uv_lock_transitive_deps(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "myapp"\ndependencies = ["requests"]\n'
+    )
+    (tmp_path / "uv.lock").write_text(
+        '[[package]]\nname = "requests"\nversion = "2.31.0"\n'
+        '[[package]]\nname = "urllib3"\nversion = "2.0.0"\n'
+        '[[package]]\nname = "myapp"\nversion = "0.1.0"\n'
+    )
+    m = parse_project(tmp_path)
+    assert m is not None
+    assert m.lockfile is not None
+    assert m.lockfile.endswith("uv.lock")
+    # Project's own name is dropped from the transitive set
+    assert "myapp" not in m.transitive_deps
+    assert set(m.transitive_deps) == {"requests", "urllib3"}
+
+
+def test_parse_project_attaches_package_lock(tmp_path: Path):
+    (tmp_path / "package.json").write_text(
+        '{"name": "frontend", "dependencies": {"react": "^18"}}'
+    )
+    (tmp_path / "package-lock.json").write_text(
+        '{"name": "frontend", "lockfileVersion": 3, '
+        '"packages": {"node_modules/react": {"version": "18.2.0"}, '
+        '"node_modules/react-dom": {"version": "18.2.0"}}}'
+    )
+    m = parse_project(tmp_path)
+    assert m is not None
+    assert m.lockfile is not None
+    assert set(m.transitive_deps) == {"react", "react-dom"}
+
+
+def test_parse_project_no_lockfile_leaves_transitive_empty(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "myapp"\ndependencies = ["requests"]\n'
+    )
+    m = parse_project(tmp_path)
+    assert m is not None
+    assert m.lockfile is None
+    assert m.transitive_deps == ()
+
+
+def test_parse_project_unparseable_lockfile_leaves_manifest_intact(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "myapp"\ndependencies = ["requests"]\n'
+    )
+    (tmp_path / "uv.lock").write_text("garbage [unparseable")
+    m = parse_project(tmp_path)
+    assert m is not None
+    # Manifest still parsed; lockfile silently skipped
+    assert m.name == "myapp"
+    assert m.lockfile is None
+    assert m.transitive_deps == ()
+
+
+def test_parse_project_as_dict_includes_transitive_deps(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\ndependencies = ["a"]\n'
+    )
+    (tmp_path / "uv.lock").write_text(
+        '[[package]]\nname = "a"\nversion = "1"\n'
+    )
+    m = parse_project(tmp_path)
+    assert m is not None
+    d = m.as_dict()
+    assert isinstance(d["transitive_deps"], list)
+    assert d["transitive_deps"] == ["a"]
+    assert d["lockfile"] == m.lockfile

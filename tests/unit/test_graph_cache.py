@@ -92,3 +92,50 @@ def test_cache_invalidate_one(tmp_path: Path):
     assert len(cache) == 2
     cache.invalidate(tmp_path / "a")
     assert len(cache) == 1
+
+
+# --- lockfile-aware caching (v2.0.0a1) ----------------------------------
+
+
+def test_cache_invalidates_on_lockfile_mtime_change(tmp_path: Path):
+    """Editing the lockfile (without touching the manifest) must
+    invalidate the cache so the new transitive deps are picked up."""
+    _write_manifest(tmp_path, "alpha", deps=("a",))
+    (tmp_path / "uv.lock").write_text(
+        '[[package]]\nname = "a"\nversion = "1"\n'
+    )
+    cache = ManifestCache()
+    m1 = cache.get(tmp_path)
+    assert m1 is not None
+    assert m1.transitive_deps == ("a",)
+
+    time.sleep(0.01)
+    (tmp_path / "uv.lock").write_text(
+        '[[package]]\nname = "a"\nversion = "1"\n'
+        '[[package]]\nname = "b"\nversion = "1"\n'
+    )
+    os.utime(tmp_path / "uv.lock", (time.time() + 1, time.time() + 1))
+
+    m2 = cache.get(tmp_path)
+    assert m2 is not None
+    assert set(m2.transitive_deps) == {"a", "b"}
+
+
+def test_cache_no_lockfile_does_not_re_parse(tmp_path: Path, monkeypatch):
+    """When no lockfile exists, the cache must still hit on second
+    get() without re-parsing — the lockfile-mtime probe must skip."""
+    _write_manifest(tmp_path, "alpha")
+    cache = ManifestCache()
+    cache.get(tmp_path)
+
+    from harbormaster.graph import parser
+    real = parser.parse_project
+    called = {"n": 0}
+
+    def spy(p):
+        called["n"] += 1
+        return real(p)
+
+    monkeypatch.setattr("harbormaster.graph.cache.parse_project", spy)
+    cache.get(tmp_path)
+    assert called["n"] == 0

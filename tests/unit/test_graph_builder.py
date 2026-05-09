@@ -11,7 +11,14 @@ from harbormaster.graph.builder import (
 from harbormaster.graph.parser import ProjectManifest
 
 
-def _m(name: str, language: str = "python", deps=(), dev_deps=()) -> ProjectManifest:
+def _m(
+    name: str,
+    language: str = "python",
+    deps=(),
+    dev_deps=(),
+    transitive_deps=(),
+    lockfile: str | None = None,
+) -> ProjectManifest:
     return ProjectManifest(
         name=name,
         language=language,
@@ -19,6 +26,8 @@ def _m(name: str, language: str = "python", deps=(), dev_deps=()) -> ProjectMani
         manifest_file=f"/p/{name}/pyproject.toml",
         deps=tuple(deps),
         dev_deps=tuple(dev_deps),
+        transitive_deps=tuple(transitive_deps),
+        lockfile=lockfile,
     )
 
 
@@ -158,3 +167,78 @@ def test_mermaid_sanitises_unsafe_chars_in_id():
     assert "vendor_app" in out
     # Original name preserved as the label:
     assert '"vendor/app"' in out
+
+
+# --- transitive deps (v2.0.0a1) -----------------------------------------
+
+
+def test_build_graph_skips_transitive_by_default():
+    """transitive_deps must be ignored unless transitive=True."""
+    g = build_graph([
+        _m("alpha", transitive_deps=("beta",)),
+        _m("beta"),
+    ])
+    assert g.edges == ()
+
+
+def test_build_graph_includes_transitive_when_requested():
+    g = build_graph(
+        [
+            _m("alpha", transitive_deps=("beta",)),
+            _m("beta"),
+        ],
+        transitive=True,
+    )
+    assert len(g.edges) == 1
+    edge = g.edges[0]
+    assert edge.src == "alpha"
+    assert edge.dst == "beta"
+    assert edge.dep_kind == "transitive"
+
+
+def test_build_graph_dep_supersedes_transitive_for_same_pair():
+    """If a manifest lists `beta` directly AND beta is also in the
+    lockfile, the edge should be `dep` (the stronger kind), not
+    `transitive`. Otherwise the dotted-vs-solid Mermaid output flickers
+    confusingly between the two graphs."""
+    g = build_graph(
+        [
+            _m("alpha", deps=("beta",), transitive_deps=("beta",)),
+            _m("beta"),
+        ],
+        transitive=True,
+    )
+    assert len(g.edges) == 1
+    assert g.edges[0].dep_kind == "dep"
+
+
+def test_build_graph_dev_dep_supersedes_transitive_for_same_pair():
+    g = build_graph(
+        [
+            _m("alpha", dev_deps=("beta",), transitive_deps=("beta",)),
+            _m("beta"),
+        ],
+        include_dev_deps=True,
+        transitive=True,
+    )
+    assert len(g.edges) == 1
+    assert g.edges[0].dep_kind == "dev_dep"
+
+
+def test_mermaid_emits_double_arrow_for_transitive():
+    g = build_graph(
+        [_m("alpha", transitive_deps=("beta",)), _m("beta")],
+        transitive=True,
+    )
+    out = graph_to_mermaid(g)
+    assert "alpha ==> beta" in out
+
+
+def test_build_graph_transitive_drops_external_packages():
+    """A transitive dep that doesn't match any known project must NOT
+    create a node — the long-tail filter still applies."""
+    g = build_graph(
+        [_m("alpha", transitive_deps=("requests", "click"))],
+        transitive=True,
+    )
+    assert g.edges == ()
