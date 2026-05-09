@@ -134,7 +134,7 @@ Every project-targeting tool accepts an optional `host` parameter. With `host` s
 
 ## Status
 
-**v1.0.0a10** — Polish + foundations sprint shipped 2026-05-09. SSE streaming on `/mcp/{server}` (heartbeats keep long ask_project / delegate_task / fan_out_ask calls alive through reverse-proxy timeouts), `update_endpoints` config-watch loop (manifest drift gets pushed automatically without a process restart), gated live FleetQ Bridge CI smoke, and 4xx pass-through on the agent-fleet side so daemon errors no longer get masked as generic 502s. v1.0.0a9 was the first published release on PyPI; v1.0.0a10 builds on it. The 6-week roadmap to general availability:
+**v1.0.0a11** — End-to-end streaming sprint shipped 2026-05-09. The FleetQ Bridge now consumes SSE from harbormaster (\`stream=true\` flag forwards \`text/event-stream\` bytes verbatim through Laravel \`response()->stream\` with \`X-Accel-Buffering: no\`), and \`ClaudeBackend.ask_local_stream\` parses claude-code's \`--output-format stream-json\` so per-token deltas are now extractable inside the daemon (wiring into the SSE dispatch is the a12 follow-up). v1.0.0a10 added the daemon-side SSE wire shape; a11 closes the FleetQ side and lays the backend rails. The 6-week roadmap to general availability:
 
 | Phase | Weeks | Focus |
 |-------|-------|-------|
