@@ -21,7 +21,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from harbormaster.fleetq.heartbeat import HeartbeatLoop
@@ -154,11 +154,15 @@ class _FleetQOrchestration:
         self.loop.stop()
 
 
-def _maybe_start_fleetq_bridge(config: HarbormasterConfig):  # type: ignore[no-untyped-def]
+def _maybe_start_fleetq_bridge(config: HarbormasterConfig, mcp: Any = None):  # type: ignore[no-untyped-def]
     """Start the FleetQ Bridge heartbeat + (optional) relay subscriber.
 
     Returns a _FleetQOrchestration with .stop() that cleans up both, or None
     when integration is disabled / not installed / missing token.
+
+    When ``mcp`` is provided, an :class:`MCPDispatcher` is wired into the
+    relay's ``chunk_handler`` so inbound ``agent.request`` events route
+    through the local FastMCP tool registry (v3.0.0a1).
     """
     if not (config.fleetq.enabled and config.fleetq.register_as_bridge):
         return None
@@ -178,6 +182,7 @@ def _maybe_start_fleetq_bridge(config: HarbormasterConfig):  # type: ignore[no-u
             BridgeClient,
             BridgeRelay,
             HeartbeatLoop,
+            MCPDispatcher,
             build_manifest,
         )
     except ImportError as e:
@@ -213,12 +218,16 @@ def _maybe_start_fleetq_bridge(config: HarbormasterConfig):  # type: ignore[no-u
     response = loop.last_response
     if loop.registered and response and response.reverb_app_key and response.reverb_relay_url:
         try:
+            chunk_handler = (
+                MCPDispatcher(mcp).dispatch if mcp is not None else None
+            )
             relay = BridgeRelay(
                 base_url=config.fleetq.base_url,
                 api_token=api_token,
                 team_id=response.team_id,
                 app_key=response.reverb_app_key,
                 relay_url=response.reverb_relay_url,
+                chunk_handler=chunk_handler,
             )
             relay.start()
         except Exception as e:  # noqa: BLE001 - relay is best-effort in v1.0.0a8
@@ -266,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
 
     mcp = build_server(config)
 
-    fleetq = _maybe_start_fleetq_bridge(config)
+    fleetq = _maybe_start_fleetq_bridge(config, mcp)
 
     try:
         if args.transport == "stdio":
