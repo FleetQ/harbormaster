@@ -1797,3 +1797,66 @@ def test_dashboard_card_ask_dispatches_append_too(populated_config):
     client = TestClient(create_app(populated_config))
     r = client.get("/")
     assert "hm:trajectory:append" in r.text
+
+
+# --- v4.0.0a5: /api/history/state ---------------------------------------
+
+
+def test_api_history_state_returns_idle_when_no_run(populated_config, tmp_path, monkeypatch):
+    """When no auto-reembed has run, /api/history/state must return phase=idle."""
+    monkeypatch.setenv(
+        "HARBORMASTER_REEMBED_STATE_FILE", str(tmp_path / "missing.json")
+    )
+    client = TestClient(create_app(populated_config))
+    r = client.get("/api/history/state")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["phase"] == "idle"
+    assert body["available"] is True
+
+
+def test_api_history_state_reflects_running_state(populated_config, tmp_path, monkeypatch):
+    """When a running state file exists, the route reflects it."""
+    sf = tmp_path / "state.json"
+    monkeypatch.setenv("HARBORMASTER_REEMBED_STATE_FILE", str(sf))
+
+    from harbormaster.history.auto_reembed import ReembedState, _write_state
+    _write_state(
+        ReembedState(
+            phase="running", processed=2, total=4, current_host="friday",
+            started_at=12345.0,
+        ),
+        sf,
+    )
+    client = TestClient(create_app(populated_config))
+    r = client.get("/api/history/state")
+    body = r.json()
+    assert body["phase"] == "running"
+    assert body["processed"] == 2
+    assert body["total"] == 4
+    assert body["current_host"] == "friday"
+
+
+def test_api_history_state_reflects_done_state(populated_config, tmp_path, monkeypatch):
+    sf = tmp_path / "state.json"
+    monkeypatch.setenv("HARBORMASTER_REEMBED_STATE_FILE", str(sf))
+    from harbormaster.history.auto_reembed import ReembedState, _write_state
+    _write_state(
+        ReembedState(
+            phase="done", processed=3, total=3,
+            started_at=12345.0, finished_at=12399.0,
+        ),
+        sf,
+    )
+    client = TestClient(create_app(populated_config))
+    body = client.get("/api/history/state").json()
+    assert body["phase"] == "done"
+    assert body["finished_at"] == 12399.0
+
+
+def test_api_history_state_includes_config_flag(populated_config):
+    """The endpoint surfaces auto_reembed_enabled so the UI can render
+    the right CTA (enable in config / wait for run / show progress)."""
+    client = TestClient(create_app(populated_config))
+    body = client.get("/api/history/state").json()
+    assert "auto_reembed_enabled" in body

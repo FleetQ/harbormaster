@@ -209,6 +209,38 @@ def register_routes(
             "runtime": runtime,
         }
 
+    @app.get("/api/history/state")
+    async def api_history_state() -> dict[str, object]:
+        """v4.0.0a5: report the auto-reembed runner's current phase.
+
+        Reads the cross-process state file written by the background
+        thread (when ``[history] auto_reembed_on_drift = true``). Returns
+        an idle snapshot when the file is absent or the thread never
+        started.
+        """
+        try:
+            from harbormaster.history import read_reembed_state
+
+            state = read_reembed_state()
+            return {
+                "available": True,
+                "phase": state.phase,
+                "processed": state.processed,
+                "total": state.total,
+                "current_host": state.current_host,
+                "started_at": state.started_at,
+                "finished_at": state.finished_at,
+                "error": state.error,
+                "writer_pid": state.writer_pid,
+                "auto_reembed_enabled": config.history.auto_reembed_on_drift,
+            }
+        except ImportError:
+            return {
+                "available": False,
+                "phase": "idle",
+                "auto_reembed_enabled": False,
+            }
+
     @app.get("/api/recall")
     async def api_recall(
         question: str,
