@@ -28,10 +28,15 @@ from pathlib import Path
 from harbormaster.history.embed import EmbeddingBackend
 from harbormaster.history.schema import (
     HISTORY_VEC_DIM,
+    EmbeddingMeta,
     connect,
     db_path_for_host,
+    drop_and_recreate_vec_table,
     ensure_schema,
+    read_embedding_meta,
+    update_reembed_resume,
     vec_table_exists,
+    write_embedding_meta,
 )
 
 logger = logging.getLogger("harbormaster.history.store")
@@ -119,6 +124,30 @@ class QAStore:
         path = db_path_for_host(db_dir, host)
         conn, vec_loaded = connect(path)
         ensure_schema(conn, vec_loaded=vec_loaded, embedding_dim=embedding_dim)
+
+        # v2.0.0a2: seed embedding_meta on first open and detect drift on
+        # subsequent opens. Drift detection alone — no auto-reembed; the
+        # operator runs `harbormaster-mcp reembed` explicitly when ready.
+        meta = read_embedding_meta(conn)
+        signature = embedding_backend.signature
+        if meta is None:
+            write_embedding_meta(
+                conn,
+                signature=signature,
+                dim=embedding_dim,
+                created_at=_now(),
+            )
+        elif meta.signature != signature or meta.dim != embedding_dim:
+            logger.warning(
+                "embedding drift detected: stored=%s/dim=%d, configured=%s/dim=%d. "
+                "Existing vectors will be served by the old model until you run "
+                "`harbormaster-mcp reembed`.",
+                meta.signature,
+                meta.dim,
+                signature,
+                embedding_dim,
+            )
+
         return cls(
             conn=conn,
             embedding_backend=embedding_backend,
@@ -366,6 +395,126 @@ class QAStore:
     def vec_available(self) -> bool:
         """True iff this connection can use the vec0 ANN path."""
         return self._vec_available
+
+    # --- v2.0.0a2 embedding upgrade-in-place ----------------------------
+
+    def embedding_meta(self) -> EmbeddingMeta | None:
+        """Return the singleton row from `embedding_meta`."""
+        return read_embedding_meta(self._conn)
+
+    def has_embedding_drift(self) -> bool:
+        """True when the configured embedding backend signature/dim
+        differs from the metadata stored in this db."""
+        meta = read_embedding_meta(self._conn)
+        if meta is None:
+            return False
+        return meta.signature != self._embed.signature or meta.dim != self._dim
+
+    def reembed(
+        self,
+        *,
+        batch_size: int = 100,
+        resume: bool = True,
+    ) -> tuple[int, int]:
+        """Re-embed every row in qa_log with the currently configured
+        backend. Returns `(processed, total)`.
+
+        When `resume=True` (default), starts after
+        `embedding_meta.last_reembedded_rowid` so an interrupted run
+        can be picked up cleanly. Pass `resume=False` to start from
+        scratch (useful when bumping batch_size or after fixing a bad
+        run).
+
+        When the stored dim differs from the current dim, `qa_vec` is
+        dropped and recreated with the new dim before re-encoding —
+        the old vectors are unrecoverable, but they were already
+        unusable in the new vector space anyway.
+
+        Updates `embedding_meta.last_reembedded_rowid` after each
+        committed batch. Updates the singleton `(signature, dim,
+        created_at)` row only after the run completes successfully.
+        """
+        if not self._vec_available:
+            logger.info("reembed: qa_vec unavailable; nothing to do")
+            return 0, 0
+        if self._embed.dim == 0:
+            # Lexical-only backend (FTS5 fallback) — no vectors to write.
+            logger.info(
+                "reembed: configured backend %s has dim=0; nothing to do",
+                self._embed.signature,
+            )
+            return 0, 0
+
+        meta = read_embedding_meta(self._conn)
+        signature = self._embed.signature
+        dim_changed = meta is not None and meta.dim != self._dim
+        if dim_changed:
+            logger.info(
+                "reembed: dim change detected (%d → %d); recreating qa_vec",
+                meta.dim if meta else 0,
+                self._dim,
+            )
+            drop_and_recreate_vec_table(self._conn, dim=self._dim)
+            # Reset resume marker — old vectors are gone.
+            update_reembed_resume(self._conn, last_reembedded_rowid=0)
+
+        start_rowid = 0
+        if resume and not dim_changed:
+            current = read_embedding_meta(self._conn)
+            if current is not None:
+                start_rowid = current.last_reembedded_rowid
+
+        total_row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM qa_log WHERE id > ?",
+            (start_rowid,),
+        ).fetchone()
+        total = int(total_row["n"])
+        if total == 0:
+            # Nothing to do — record final meta and clear marker.
+            write_embedding_meta(
+                self._conn,
+                signature=signature,
+                dim=self._dim,
+                created_at=_now(),
+                last_reembedded_rowid=0,
+            )
+            return 0, 0
+
+        processed = 0
+        last_rowid = start_rowid
+        while True:
+            rows = self._conn.execute(
+                "SELECT id, question FROM qa_log WHERE id > ? "
+                "ORDER BY id ASC LIMIT ?",
+                (last_rowid, batch_size),
+            ).fetchall()
+            if not rows:
+                break
+            for row in rows:
+                rowid = int(row["id"])
+                vec = self._embed.encode(str(row["question"]))
+                if vec is not None and len(vec) == self._dim:
+                    self._conn.execute(
+                        "DELETE FROM qa_vec WHERE rowid = ?", (rowid,)
+                    )
+                    self._conn.execute(
+                        "INSERT INTO qa_vec(rowid, embedding) VALUES (?, ?)",
+                        (rowid, _vec_to_blob(vec)),
+                    )
+                processed += 1
+                last_rowid = rowid
+            update_reembed_resume(self._conn, last_reembedded_rowid=last_rowid)
+
+        # Mark the run complete: stamp current signature + dim and clear
+        # the resume marker so the next reembed starts fresh.
+        write_embedding_meta(
+            self._conn,
+            signature=signature,
+            dim=self._dim,
+            created_at=_now(),
+            last_reembedded_rowid=0,
+        )
+        return processed, total
 
 
 # --- internal helpers -----------------------------------------------------

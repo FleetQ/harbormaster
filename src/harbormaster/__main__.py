@@ -240,8 +240,19 @@ def _maybe_start_fleetq_bridge(config: HarbormasterConfig):  # type: ignore[no-u
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_args = sys.argv[1:] if argv is None else argv
+
+    # Dispatch the `reembed` subcommand to its own parser before the
+    # server's argparse runs (otherwise unknown args would explode).
+    # Keeps backward compat: bare `harbormaster-mcp` still launches the
+    # server unchanged.
+    if raw_args and raw_args[0] == "reembed":
+        from harbormaster.history.cli import main as reembed_main
+
+        return reembed_main(raw_args[1:])
+
     parser = _build_parser()
-    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw_args)
 
     config_path = Path(args.config) if args.config else None
     config = load_config(config_path)

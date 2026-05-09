@@ -33,6 +33,10 @@ class StubVecBackend:
     name = "stub"
     dim = 4
 
+    @property
+    def signature(self) -> str:
+        return "stub/v1"
+
     def encode(self, text: str) -> list[float] | None:
         s = text.lower()
         return [

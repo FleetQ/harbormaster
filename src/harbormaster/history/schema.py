@@ -17,6 +17,7 @@ import contextlib
 import logging
 import re
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger("harbormaster.history.schema")
@@ -134,6 +135,19 @@ CREATE TRIGGER IF NOT EXISTS qa_fts_ad AFTER DELETE ON qa_log BEGIN
 END;
 """
 
+# v2.0.0a2: track which embedding model + dim produced the vectors in
+# qa_vec, so a config flip can be detected and resolved via re-embed.
+# Singleton row enforced by CHECK (id = 1).
+_SCHEMA_EMBEDDING_META = """
+CREATE TABLE IF NOT EXISTS embedding_meta (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    signature TEXT NOT NULL,
+    dim INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_reembedded_rowid INTEGER NOT NULL DEFAULT 0
+);
+"""
+
 
 def _create_vec_table(conn: sqlite3.Connection, dim: int) -> None:
     conn.execute(
@@ -160,6 +174,7 @@ def ensure_schema(
     conn.executescript(_SCHEMA_BASE)
     conn.executescript(_SCHEMA_FTS)
     conn.executescript(_FTS_TRIGGERS)
+    conn.executescript(_SCHEMA_EMBEDDING_META)
 
     if vec_loaded:
         _create_vec_table(conn, embedding_dim)
@@ -173,3 +188,76 @@ def vec_table_exists(conn: sqlite3.Connection) -> bool:
         "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name = 'qa_vec'"
     ).fetchone()
     return row is not None
+
+
+# --- embedding meta helpers (v2.0.0a2) -----------------------------------
+
+
+@dataclass(frozen=True)
+class EmbeddingMeta:
+    """Snapshot of the singleton row in `embedding_meta`."""
+
+    signature: str
+    dim: int
+    created_at: int
+    last_reembedded_rowid: int
+
+
+def read_embedding_meta(conn: sqlite3.Connection) -> EmbeddingMeta | None:
+    """Return the current embedding metadata or None when no row has
+    been written yet (fresh schema)."""
+    row = conn.execute(
+        "SELECT signature, dim, created_at, last_reembedded_rowid "
+        "FROM embedding_meta WHERE id = 1"
+    ).fetchone()
+    if row is None:
+        return None
+    return EmbeddingMeta(
+        signature=str(row["signature"]),
+        dim=int(row["dim"]),
+        created_at=int(row["created_at"]),
+        last_reembedded_rowid=int(row["last_reembedded_rowid"]),
+    )
+
+
+def write_embedding_meta(
+    conn: sqlite3.Connection,
+    *,
+    signature: str,
+    dim: int,
+    created_at: int,
+    last_reembedded_rowid: int = 0,
+) -> None:
+    """Upsert the singleton embedding_meta row."""
+    conn.execute(
+        "INSERT INTO embedding_meta (id, signature, dim, created_at, "
+        "last_reembedded_rowid) VALUES (1, ?, ?, ?, ?) "
+        "ON CONFLICT(id) DO UPDATE SET signature = excluded.signature, "
+        "dim = excluded.dim, created_at = excluded.created_at, "
+        "last_reembedded_rowid = excluded.last_reembedded_rowid",
+        (signature, dim, created_at, last_reembedded_rowid),
+    )
+    conn.commit()
+
+
+def update_reembed_resume(
+    conn: sqlite3.Connection, *, last_reembedded_rowid: int
+) -> None:
+    """Persist progress through a re-embed batch run."""
+    conn.execute(
+        "UPDATE embedding_meta SET last_reembedded_rowid = ? WHERE id = 1",
+        (last_reembedded_rowid,),
+    )
+    conn.commit()
+
+
+def drop_and_recreate_vec_table(
+    conn: sqlite3.Connection, *, dim: int
+) -> None:
+    """Drop and recreate `qa_vec` when the embedding dimension changes.
+    Called by `QAStore.reembed()` when stored dim != configured dim.
+    The recreate uses the same vec0 virtual-table syntax as
+    `_create_vec_table` so the rest of the recall path is unchanged."""
+    conn.execute("DROP TABLE IF EXISTS qa_vec")
+    _create_vec_table(conn, dim)
+    conn.commit()
