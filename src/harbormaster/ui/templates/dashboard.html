@@ -126,11 +126,21 @@
     <div class="flex items-center gap-2">
       <!-- v6.0.0a1: manual trigger button. Disabled while running. -->
       <button type="button" @click="triggerManual()"
-              :disabled="state.phase === 'running' || triggering"
+              :disabled="state.phase === 'running' || triggering || cancelling"
               class="text-xs px-2 py-0.5 rounded border border-gray-700 bg-gray-900/60 hover:bg-gray-800 disabled:bg-gray-900 disabled:text-gray-600 transition"
               title="run reembed now (skips the auto_reembed_on_drift gate)">
         <span x-show="!triggering">run now</span>
         <span x-show="triggering">starting…</span>
+      </button>
+      <!-- v7.0.0a3: cancel button. Only visible while running and the
+           cancel flag has not yet been observed by the worker. -->
+      <button type="button" @click="cancelRunning()"
+              x-show="state.phase === 'running' && !state.cancel_requested"
+              :disabled="cancelling"
+              class="text-xs px-2 py-0.5 rounded border border-amber-700 bg-amber-900/30 hover:bg-amber-900/50 text-amber-200 disabled:opacity-50 transition"
+              title="signal the running reembed to stop after current host">
+        <span x-show="!cancelling">cancel</span>
+        <span x-show="cancelling">cancelling…</span>
       </button>
       <span class="text-xs px-2 py-0.5 rounded" :class="phaseBadgeClass()"
             x-text="phaseLabel()"></span>
@@ -154,6 +164,12 @@
   <div x-show="state.phase === 'failed'" class="text-xs">
     <p class="text-rose-400 mb-1">Auto-reembed failed.</p>
     <p class="text-gray-400 break-words" x-text="state.error"></p>
+  </div>
+  <!-- v7.0.0a3: cancelled phase. Worker stopped between hosts. -->
+  <div x-show="state.phase === 'cancelled'" class="text-xs text-amber-300">
+    <span x-text="`Cancelled after ${state.processed} of ${state.total} host${state.total === 1 ? '' : 's'}`"></span>
+    <span x-show="state.finished_at" class="text-gray-500"
+          x-text="` · ${formatDuration(state.started_at, state.finished_at)}`"></span>
   </div>
   <div x-show="state.phase === 'idle' && state.auto_reembed_enabled"
        class="text-xs text-gray-500">
@@ -717,6 +733,7 @@
       state: { available: false, phase: 'idle', auto_reembed_enabled: false },
       error: '',
       triggering: false,
+      cancelling: false,
       _pollHandle: null,
 
       async loadOnce() {
@@ -767,6 +784,25 @@
         }
       },
 
+      // v7.0.0a3: signal the running reembed to stop after the
+      // current host. The worker observes the flag between hosts;
+      // it does NOT abort an in-flight host's reembed.
+      async cancelRunning() {
+        this.cancelling = true;
+        this.error = '';
+        try {
+          const r = await hmFetch('/api/history/reembed/cancel', { method: 'POST' });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          // Body: { running: bool, cancel_requested: bool }. When
+          // running: false, the cancel was a no-op (already idle).
+          await this.fetchState();
+        } catch (e) {
+          this.error = e.message;
+        } finally {
+          this.cancelling = false;
+        }
+      },
+
       progressLabel() {
         // "{processed} / {total}" baseline; appended " · ~{eta}s remaining"
         // when we have enough rate signal (>=1 host done, total > 1).
@@ -797,7 +833,13 @@
       phaseLabel() {
         const labels = {
           idle: 'idle', running: 'running', done: 'completed', failed: 'failed',
+          cancelled: 'cancelled',
         };
+        // v7.0.0a3: while running with cancel pending, surface that
+        // the user has clicked cancel even though phase is still 'running'.
+        if (this.state.phase === 'running' && this.state.cancel_requested) {
+          return 'cancelling…';
+        }
         return labels[this.state.phase] || this.state.phase;
       },
 
@@ -807,7 +849,13 @@
           done: 'bg-emerald-900/50 text-emerald-300',
           failed: 'bg-rose-900/50 text-rose-300',
           idle: 'bg-gray-800 text-gray-400',
+          cancelled: 'bg-amber-900/50 text-amber-300',
         };
+        // Same override as phaseLabel — show the amber badge while
+        // the cancel is still in flight.
+        if (this.state.phase === 'running' && this.state.cancel_requested) {
+          return map.cancelled;
+        }
         return map[this.state.phase] || map.idle;
       },
 
