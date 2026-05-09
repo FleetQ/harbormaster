@@ -719,6 +719,92 @@ async def test_stream_ask_project_local_400_on_unknown_project(populated_config)
     assert "nonexistent" in err["detail"]
 
 
+# ----- A2A Agent Card per project (a15) -------------------------------------
+
+
+def test_agent_card_returns_404_for_unknown_project(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/agent-card/nonexistent")
+    assert r.status_code == 404
+    assert "nonexistent" in r.json()["detail"]
+
+
+def test_agent_card_returns_a2a_v03_shape_for_known_project(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/agent-card/alpha")
+    assert r.status_code == 200
+    body = r.json()
+
+    # Top-level shape
+    assert body["schemaVersion"] == "0.3.0"
+    assert body["name"] == "harbormaster.alpha"
+    assert isinstance(body["description"], str) and body["description"]
+    assert body["url"].endswith("/mcp/harbormaster")
+
+    # Capabilities — only claim what we actually serve
+    assert body["capabilities"]["streaming"] is True
+    assert body["capabilities"]["stateTransitionHistory"] is False
+    assert body["capabilities"]["pushNotifications"] is False
+
+    # Default I/O modes
+    assert "text/plain" in body["defaultInputModes"]
+    assert "text/event-stream" in body["defaultOutputModes"]
+    assert "application/json" in body["defaultOutputModes"]
+
+
+def test_agent_card_advertises_ask_delegate_status_skills(populated_config):
+    client = TestClient(create_app(populated_config))
+    body = client.get("/agent-card/alpha").json()
+
+    skill_ids = {s["id"] for s in body["skills"]}
+    assert skill_ids == {"ask-alpha", "delegate-alpha", "status-alpha"}
+
+    for skill in body["skills"]:
+        assert "name" in skill
+        assert "description" in skill
+        assert "tags" in skill
+        assert "inputModes" in skill
+        assert "outputModes" in skill
+
+
+def test_agent_card_metadata_includes_project_path(populated_config):
+    """The optional `metadata.harbormaster` block carries project paths
+    + Serena/CLAUDE.md flags so A2A consumers that *do* want to know
+    they're talking to harbormaster (e.g. for richer context loading)
+    can opt in without parsing the description text."""
+    client = TestClient(create_app(populated_config))
+    body = client.get("/agent-card/alpha").json()
+
+    meta = body["metadata"]["harbormaster"]
+    assert isinstance(meta["version"], str) and meta["version"]
+    assert meta["project_path"].endswith("alpha")
+    # alpha has CLAUDE.md (set up in the populated_config fixture)
+    assert meta["has_claude_md"] is True
+
+
+def test_agent_card_url_uses_request_host_when_present(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get(
+        "/agent-card/alpha",
+        headers={"Host": "harbormaster.example:7531"},
+    )
+    body = r.json()
+    assert body["url"].startswith("http://harbormaster.example:7531")
+
+
+def test_agent_card_protected_by_bearer_middleware(populated_config):
+    """Same auth surface as the rest of the UI — token controls access."""
+    from harbormaster.transport import build_bearer_middleware
+
+    app = create_app(populated_config)
+    app.add_middleware(build_bearer_middleware("ui-token-xyz"))
+    client = TestClient(app)
+
+    assert client.get("/agent-card/alpha").status_code == 401
+    h = {"Authorization": "Bearer ui-token-xyz"}
+    assert client.get("/agent-card/alpha", headers=h).status_code == 200
+
+
 # ----- delegate_task chunk streaming (a14) ----------------------------------
 
 

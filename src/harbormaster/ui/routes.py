@@ -92,6 +92,109 @@ def register_routes(
             return {"agents": [], "llm_endpoints": [], "mcp_servers": []}
         return build_manifest()
 
+    @app.get("/agent-card/{project_name}")
+    async def agent_card(
+        project_name: str, request: Request,
+    ) -> dict[str, Any]:
+        """A2A v0.3 Agent Card per project.
+
+        Each `~/htdocs/<project>` configured under [projects] gets its
+        own card describing the skills harbormaster offers against it
+        (ask + delegate, both read-only in v1). Cards are intentionally
+        per-project rather than per-tool: the MCP wire underneath has
+        one server with N tools; the A2A wire wants one card per
+        addressable agent. Mapping convention: the MCP "project" axis
+        is the A2A "agent" axis.
+
+        Schema reference: https://github.com/google/A2A
+        Implementation: a subset that's stable across A2A v0.3.x —
+        we don't claim capabilities we can't actually serve.
+        """
+        projects = {p.name: p for p in discover_projects(config.projects)}
+        project = projects.get(project_name)
+        if project is None:
+            raise HTTPException(404, f"unknown project: {project_name!r}")
+
+        # Best-effort base URL — useful when this card is served behind
+        # a reverse proxy and the relative `/mcp/harbormaster` path is
+        # not enough for A2A consumers that need an absolute invocation
+        # URL. Falls back to a relative path if the request didn't
+        # carry a Host header (programmatic test client).
+        host_header = request.headers.get("host")
+        base_url = (
+            f"http://{host_header}" if host_header else ""
+        )
+        invocation_url = f"{base_url}/mcp/harbormaster"
+
+        description = project.brief or (
+            f"Harbormaster project: {project_name}. "
+            "Spawn a Claude Code subagent inside the project's directory "
+            "and answer questions or delegate read-only tasks."
+        )
+
+        return {
+            "schemaVersion": "0.3.0",
+            "name": f"harbormaster.{project_name}",
+            "description": description,
+            "url": invocation_url,
+            "skills": [
+                {
+                    "id": f"ask-{project_name}",
+                    "name": "Ask",
+                    "description": (
+                        f"Ask the {project_name} project's subagent a "
+                        "question. Returns a markdown summary under "
+                        "500 words. Streams partial output via SSE "
+                        "when invoked with Accept: text/event-stream."
+                    ),
+                    "tags": ["read", "claude-code", "streaming"],
+                    "inputModes": ["text/plain"],
+                    "outputModes": ["text/event-stream", "application/json"],
+                },
+                {
+                    "id": f"delegate-{project_name}",
+                    "name": "Delegate",
+                    "description": (
+                        f"Delegate a read-only task to the {project_name} "
+                        "subagent. v1 fails closed when allow_writes=true; "
+                        "the subagent reports what it would do without "
+                        "actually editing files. Streams partial output "
+                        "via SSE when invoked with Accept: "
+                        "text/event-stream."
+                    ),
+                    "tags": ["read", "claude-code", "streaming"],
+                    "inputModes": ["text/plain"],
+                    "outputModes": ["text/event-stream", "application/json"],
+                },
+                {
+                    "id": f"status-{project_name}",
+                    "name": "Status",
+                    "description": (
+                        f"Recent git log, Serena memories, and log tails "
+                        f"for the {project_name} project."
+                    ),
+                    "tags": ["read", "diagnostic"],
+                    "inputModes": ["text/plain"],
+                    "outputModes": ["application/json"],
+                },
+            ],
+            "capabilities": {
+                "streaming": True,
+                "stateTransitionHistory": False,
+                "pushNotifications": False,
+            },
+            "defaultInputModes": ["text/plain"],
+            "defaultOutputModes": ["text/event-stream", "application/json"],
+            "metadata": {
+                "harbormaster": {
+                    "version": __version__,
+                    "project_path": project.path,
+                    "has_serena": project.has_serena,
+                    "has_claude_md": project.has_claude_md,
+                },
+            },
+        }
+
     @app.post("/mcp/{server}")
     async def mcp_proxy(
         server: str,
