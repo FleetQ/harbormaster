@@ -109,6 +109,15 @@ class HarbormasterConfig(BaseModel):
     backends: dict[str, BackendConfig] = Field(
         default_factory=lambda: {"claude": BackendConfig()}
     )
+    # v2.0.0a3: which backend should be used when no per-project
+    # override is specified. Falls through to "claude" so v1
+    # configs work unchanged.
+    default_backend: str = "claude"
+    # v2.0.0a3: optional per-project backend override map. Keys are
+    # project names (matching `manifest.name`); values are backend
+    # names that must exist in `backends`. Missing project names fall
+    # through to `default_backend`.
+    backends_for_project: dict[str, str] = Field(default_factory=dict)
     hosts: dict[str, HostConfig] = Field(default_factory=dict)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     fleetq: FleetQConfig = Field(default_factory=FleetQConfig)

@@ -4,6 +4,7 @@ Translates between the typed Backend interface (which raises BackendError on
 failure) and the MCP user-facing string contract (which returns 'Error: ...'
 prefixed strings so the envelope stays consistent across tools).
 """
+
 from __future__ import annotations
 
 import logging
@@ -12,7 +13,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
-from harbormaster.backends import BackendError, get_backend
+from harbormaster.backends import BackendError, get_backend_for_project
 from harbormaster.config import HarbormasterConfig
 from harbormaster.projects import resolve_project, validate_project_name
 from harbormaster.ssh import is_remote
@@ -60,9 +61,12 @@ def run_backend(
     except ValueError as e:
         return f"Error: {e}"
 
-    backend = get_backend(config)
+    backend = get_backend_for_project(config, name)
     if backend is None:
-        return "Error: backend 'claude' is not enabled in config"
+        return (
+            f"Error: no enabled backend for project {name!r} "
+            f"(default_backend={config.default_backend!r})"
+        )
     cap = backend.cfg.output_word_cap
 
     try:
@@ -85,9 +89,7 @@ def run_backend(
                 cwd = resolve_project(name, config.projects)
             except ValueError as e:
                 return f"Error: {e}"
-            result = backend.ask_local(
-                cwd=cwd, prompt=prompt, max_turns=max_turns
-            )
+            result = backend.ask_local(cwd=cwd, prompt=prompt, max_turns=max_turns)
             label = f"{label_prefix}-{name}"
     except BackendError as e:
         return f"Error: {e}"
@@ -179,7 +181,6 @@ def _maybe_writeback_to_fleetq(
         writer.close()
 
 
-
 def _maybe_extract_and_writeback_kg(
     *,
     config: HarbormasterConfig,
@@ -224,6 +225,7 @@ def _maybe_extract_and_writeback_kg(
     # the OS level (git log + serena stat) and runs fast on every call.
     try:
         from harbormaster.projects import discover_projects
+
         known_projects = [p.name for p in discover_projects(config.projects)]
     except Exception:
         logger.exception("kg: discover_projects failed; skipping mention extraction")
@@ -370,10 +372,11 @@ def make_local_backend_stream(
                            next() once iteration starts)
     """
     validate_project_name(project_name)
-    backend = get_backend(config)
+    backend = get_backend_for_project(config, project_name)
     if backend is None:
         raise BackendError(
-            "backend 'claude' is not enabled in config",
+            f"no enabled backend for project {project_name!r} "
+            f"(default_backend={config.default_backend!r})",
             code="config_error",
         )
     if not hasattr(backend, "ask_local_stream"):
@@ -382,9 +385,12 @@ def make_local_backend_stream(
             code="config_error",
         )
     cwd = resolve_project(project_name, config.projects)
-    return backend.ask_local_stream(
-        cwd=cwd, prompt=prompt, max_turns=max_turns,
+    stream: Iterator[str] = backend.ask_local_stream(
+        cwd=cwd,
+        prompt=prompt,
+        max_turns=max_turns,
     )
+    return stream
 
 
 def make_remote_backend_stream(
@@ -408,10 +414,11 @@ def make_remote_backend_stream(
                           first next() once iteration begins)
     """
     validate_project_name(project_name)
-    backend = get_backend(config)
+    backend = get_backend_for_project(config, project_name)
     if backend is None:
         raise BackendError(
-            "backend 'claude' is not enabled in config",
+            f"no enabled backend for project {project_name!r} "
+            f"(default_backend={config.default_backend!r})",
             code="config_error",
         )
     if not hasattr(backend, "ask_remote_stream"):
@@ -423,7 +430,7 @@ def make_remote_backend_stream(
     remote_htdocs = host_cfg.remote_htdocs if host_cfg else "~/htdocs"
     connect_timeout = host_cfg.connect_timeout if host_cfg else 10
     total_timeout = host_cfg.total_timeout if host_cfg else 120
-    return backend.ask_remote_stream(
+    stream: Iterator[str] = backend.ask_remote_stream(
         host=host,
         remote_cwd=f"{remote_htdocs}/{project_name}",
         prompt=prompt,
@@ -431,6 +438,7 @@ def make_remote_backend_stream(
         connect_timeout=connect_timeout,
         total_timeout=total_timeout,
     )
+    return stream
 
 
 def _truncate(text: str, word_cap: int, source_label: str) -> str:

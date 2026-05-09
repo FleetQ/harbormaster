@@ -53,6 +53,11 @@ class Backend(Protocol):
     """Pluggable contract for asking a project question."""
 
     name: str
+    # Every concrete backend keeps a reference to its config block —
+    # exposed through the Protocol so callers can read shared
+    # `BackendConfig` fields like `output_word_cap` without type-narrowing
+    # to a specific implementation.
+    cfg: BackendConfig
 
     def ask_local(
         self,
@@ -72,3 +77,9 @@ class Backend(Protocol):
         connect_timeout: int,
         total_timeout: int,
     ) -> BackendResult: ...
+
+
+# Forward import lives at the bottom so the Protocol body can reference
+# BackendConfig as a string. Avoids a top-level cycle: config imports
+# nothing from backends, and backends.base must remain import-cheap.
+from harbormaster.config import BackendConfig  # noqa: E402
