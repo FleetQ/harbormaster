@@ -23,8 +23,9 @@ Optional SSH fan-out lets the same tools target remote VPS hosts. Optional Fleet
 | `delegate_task(name, task, deliverable, allow_writes=False, host=None)` | Read-only delegation; v1 fails closed for writes. | ~60 s / ~90 s |
 | `fan_out_ask(question, project_filter=None, host_filter=None, max_concurrency=5, max_turns=3)` | Parallel multi-project Q&A. Returns one section per target. | ~`max_turns × claude_p_time` × ⌈targets/max_concurrency⌉ |
 | `recall_qa(question, top_k=5, host=None, project=None, min_similarity=0.6)` | Semantic recall over prior `ask_project` / `delegate_task` answers (v1.2 phase 1). Opt-in via `[history] enabled = true`. | ~50 ms (FTS5) / ~150 ms (vec, after model warm-up) |
+| `project_graph(format="json", include_dev_deps=False)` | Cross-project dependency graph from manifest parsing (v1.2 phase 3). Edges only when a dep name matches another known project. Returns nodes + edges + optional Mermaid markup. | ~100 ms / ~10 ms cached |
 
-See [`docs/architecture-harbormaster.md`](docs/architecture-harbormaster.md) for the full design (Q&A history is §17).
+See [`docs/architecture-harbormaster.md`](docs/architecture-harbormaster.md) for the full design (Q&A history is §17, project graph is §18).
 
 ## Install
 
@@ -165,7 +166,7 @@ FTS5 / bm25 when the optional `[history]` extra is missing. Opt-in via
 |-------|--------|-------|
 | v1.0 | **Complete** (a8–a14) | Local + SSH + Live UI + PyPI alpha publish pipeline + SSE chunk streaming on both sides + FleetQ Bridge HTTP-tunnel mode |
 | v1.1 | **Complete** (a13–a16) | Platform Tool seeder ✅ a13 · A2A Agent Card per project ✅ a15 · live FleetQ smoke ✅ a11 · `update_endpoints` watch ✅ a10 · Memory writeback ✅ a16 · operator guide ✅ a16 |
-| v1.2 | **In progress** (a17→) | Q&A history with sqlite-vec + fastembed ✅ a17 · federated KG via FleetQ KnowledgeGraph (a18) · auto project graph (a19) · cross-session memory recall (a20) |
+| v1.2 | **In progress** (a17→) | Q&A history with sqlite-vec + fastembed ✅ a17 · auto project graph from manifest parsing ✅ a18 · federated KG via FleetQ KnowledgeGraph (a19) · cross-session memory recall (a20) |
 
 The original 6-week roadmap is largely complete on the v1.0 axis. v1.1 has shipped its biggest deliverables (Bridge integration, streaming end-to-end, Platform Tool seed, A2A cards). v1.2 (compounding) is the remaining phase before dropping the alpha tag and tagging `v1.0.0` GA.
 

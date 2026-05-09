@@ -35,6 +35,7 @@ from sse_starlette.sse import EventSourceResponse
 from harbormaster import __version__
 from harbormaster.backends.base import BackendError
 from harbormaster.config import HarbormasterConfig
+from harbormaster.graph import ManifestCache, build_graph, graph_to_mermaid
 from harbormaster.projects import discover_projects
 
 # Heartbeat cadence for SSE streams. Module-level so tests can monkeypatch
@@ -76,6 +77,27 @@ def register_routes(
     @app.get("/api/projects")
     async def list_projects() -> list[dict[str, object]]:
         return [p.as_dict() for p in discover_projects(config.projects)]
+
+    # One ManifestCache per UI process — first hit warm-loads, subsequent
+    # /api/graph polls hit the cache and stat the manifest file only.
+    graph_cache = ManifestCache()
+
+    @app.get("/api/graph")
+    async def api_graph(include_dev_deps: bool = False) -> dict[str, object]:
+        from pathlib import Path
+
+        manifests = []
+        for p in discover_projects(config.projects):
+            m = graph_cache.get(Path(p.path))
+            if m is not None:
+                manifests.append(m)
+        graph = build_graph(manifests, include_dev_deps=include_dev_deps)
+        return {
+            "projects_discovered": len(manifests),
+            "manifests": [m.as_dict() for m in manifests],
+            "graph": graph.as_dict(),
+            "mermaid": graph_to_mermaid(graph),
+        }
 
     @app.get("/health")
     async def fleetq_health() -> dict[str, str]:
