@@ -240,11 +240,23 @@
 </section>
 
 <!-- Project grid (carried forward from v2.0).
-     v5.0.0a6: text-based filter input + URL state encoding. -->
+     v5.0.0a6: text-based filter input + URL state encoding.
+     v6.0.0a3: sort dropdown + group toggle. -->
 <section x-data="projectGrid()" x-init="init()">
   <header class="mb-4 flex items-baseline justify-between gap-3 flex-wrap">
     <h2 class="text-lg font-bold">Projects</h2>
-    <div class="flex items-baseline gap-3 ml-auto">
+    <div class="flex items-baseline gap-3 ml-auto flex-wrap">
+      <select x-model="sort" @change="persistToUrl()"
+              class="bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs focus:border-cyan-700 focus:outline-none">
+        <option value="last_commit">sort: recent</option>
+        <option value="alpha">sort: alphabetical</option>
+        <option value="language">sort: by language</option>
+      </select>
+      <select x-model="group" @change="persistToUrl()"
+              class="bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs focus:border-cyan-700 focus:outline-none">
+        <option value="flat">group: flat</option>
+        <option value="language">group: by language</option>
+      </select>
       <input type="text" x-model="filter" @input.debounce.150ms="persistToUrl()"
              placeholder="filter by name / path / brief…"
              class="bg-gray-950 border border-gray-800 rounded px-3 py-1.5 text-sm focus:border-cyan-700 focus:outline-none w-56">
@@ -278,9 +290,18 @@
             class="ml-2 text-cyan-400 hover:text-cyan-300 underline">clear</button>
   </div>
 
-  <div x-show="!loading && !error && visibleProjects().length > 0"
-       class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-    <template x-for="p in visibleProjects()" :key="p.path">
+  <!-- v6.0.0a3: groupedProjects() returns one entry for flat mode
+       (label empty) or one entry per language for grouped mode. The
+       inner grid is identical; the outer wrapper renders the heading
+       only when label is non-empty. -->
+  <div x-show="!loading && !error && visibleProjects().length > 0">
+    <template x-for="g in groupedProjects()" :key="g.label || '__flat__'">
+      <div class="mb-4">
+        <h3 x-show="g.label"
+            class="text-sm font-bold text-gray-400 uppercase tracking-wide mb-2 mt-2 border-b border-gray-800 pb-1"
+            x-text="g.label"></h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <template x-for="p in g.items" :key="p.path">
       <article x-data="{ askExpanded: false }"
                class="border border-gray-800 rounded-lg p-4 hover:border-cyan-700 transition bg-gray-900/40">
         <header class="flex items-baseline justify-between mb-2 gap-2">
@@ -342,6 +363,9 @@
                x-text="streamText"></pre>
         </section>
       </article>
+          </template>
+        </div>
+      </div>
     </template>
   </div>
 </section>
@@ -493,16 +517,21 @@
   }
 
   // v5.0.0a6: project grid + text filter + URL state.
+  // v6.0.0a3: sort dropdown + group toggle.
   function projectGrid() {
     return {
-      projects: [], loading: true, error: null, filter: '',
+      projects: [], loading: true, error: null,
+      filter: '', sort: 'last_commit', group: 'flat',
 
       async init() {
-        // Pull filter from URL on mount so a shared `?filter=...` link
-        // pre-fills the input.
+        // Pull state from URL on mount so a shared link pre-fills.
         const p = new URLSearchParams(window.location.search);
         const f = p.get('filter');
         if (f) this.filter = f;
+        const s = p.get('sort');
+        if (s && ['last_commit', 'alpha', 'language'].includes(s)) this.sort = s;
+        const g = p.get('group');
+        if (g && ['flat', 'language'].includes(g)) this.group = g;
         try {
           const r = await hmFetch('/api/projects');
           if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -515,14 +544,65 @@
       },
 
       visibleProjects() {
-        if (!this.filter || !this.filter.trim()) return this.projects;
-        const needle = this.filter.trim().toLowerCase();
-        return this.projects.filter((p) => {
-          const name = (p.name || '').toLowerCase();
-          const path = (p.path || '').toLowerCase();
-          const brief = (p.brief || '').toLowerCase();
-          return name.includes(needle) || path.includes(needle) || brief.includes(needle);
-        });
+        const projects = (!this.filter || !this.filter.trim())
+          ? this.projects
+          : (() => {
+              const needle = this.filter.trim().toLowerCase();
+              return this.projects.filter((p) => {
+                const name = (p.name || '').toLowerCase();
+                const path = (p.path || '').toLowerCase();
+                const brief = (p.brief || '').toLowerCase();
+                return name.includes(needle) || path.includes(needle) || brief.includes(needle);
+              });
+            })();
+        return this._sortProjects(projects);
+      },
+
+      _sortProjects(projects) {
+        // Don't mutate the original array.
+        const arr = [...projects];
+        switch (this.sort) {
+          case 'alpha':
+            arr.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+            break;
+          case 'language':
+            arr.sort((a, b) => {
+              const la = a.language || 'unknown';
+              const lb = b.language || 'unknown';
+              if (la !== lb) return la.localeCompare(lb);
+              return (a.name || '').localeCompare(b.name || '');
+            });
+            break;
+          case 'last_commit':
+          default:
+            arr.sort((a, b) => {
+              const da = a.last_commit ? a.last_commit.date : '';
+              const db = b.last_commit ? b.last_commit.date : '';
+              return db.localeCompare(da);  // desc
+            });
+        }
+        return arr;
+      },
+
+      // Returns [{label: '<heading>', items: [...]}] for either layout.
+      // Flat: one entry with empty label.
+      // By language: one entry per language (sorted), label = language name.
+      groupedProjects() {
+        const visible = this.visibleProjects();
+        if (this.group !== 'language') {
+          return [{ label: '', items: visible }];
+        }
+        // Group by language, preserving the visible order within each group.
+        const groups = {};
+        for (const p of visible) {
+          const lang = p.language || 'unknown';
+          if (!groups[lang]) groups[lang] = [];
+          groups[lang].push(p);
+        }
+        return Object.keys(groups).sort().map((label) => ({
+          label,
+          items: groups[label],
+        }));
       },
 
       persistToUrl() {
@@ -534,6 +614,10 @@
         } else {
           p.delete('filter');
         }
+        if (this.sort && this.sort !== 'last_commit') p.set('sort', this.sort);
+        else p.delete('sort');
+        if (this.group && this.group !== 'flat') p.set('group', this.group);
+        else p.delete('group');
         const qs = p.toString();
         const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
         window.history.replaceState(null, '', url);
