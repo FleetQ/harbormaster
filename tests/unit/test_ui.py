@@ -273,6 +273,95 @@ def test_dashboard_card_links_to_detail_page(populated_config):
     assert "encodeURIComponent" in body
 
 
+# ----- v2.1.0a3 — Recall search inline -----------------------------------
+
+
+def test_dashboard_has_recall_search_section(populated_config):
+    client = TestClient(create_app(populated_config))
+    body = client.get("/").text
+    assert "Recall Q&amp;A history" in body  # HTML-escaped ampersand
+    assert "/api/recall" in body
+    assert "recall_qa" in body  # tool name referenced in caption
+
+
+def test_api_recall_disabled_when_history_off(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/api/recall?question=anything")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enabled"] is False
+    assert body["matches"] == []
+    assert "disabled" in body["message"]
+
+
+def test_api_recall_returns_empty_matches_on_empty_store(populated_config, tmp_path):
+    populated_config.history.enabled = True
+    populated_config.history.embedding_backend = "fts5"
+    populated_config.history.db_dir = str(tmp_path / "hist")
+    client = TestClient(create_app(populated_config))
+    r = client.get("/api/recall?question=hello")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enabled"] is True
+    assert body["matches"] == []
+    assert body["host"] == "local"
+
+
+def test_api_recall_returns_matches_after_record(populated_config, tmp_path):
+    """End-to-end: open store, write a record, recall via /api/recall."""
+    populated_config.history.enabled = True
+    populated_config.history.embedding_backend = "fts5"
+    populated_config.history.db_dir = str(tmp_path / "hist")
+
+    from harbormaster.history import FTS5Backend, QARecord
+    from harbormaster.history import QAStore as _QAStore
+
+    store = _QAStore.open(
+        db_dir=populated_config.history.db_dir,
+        host=None,
+        embedding_backend=FTS5Backend(),
+    )
+    try:
+        store.record(
+            QARecord(
+                question="How does authentication work?",
+                answer="JWT tokens. See docs/auth.md.",
+                project="alpha",
+                host="local",
+                tool="ask_project",
+            )
+        )
+    finally:
+        store.close()
+
+    client = TestClient(create_app(populated_config))
+    body = client.get("/api/recall?question=authentication&project=alpha").json()
+    assert body["enabled"] is True
+    assert len(body["matches"]) == 1
+    m = body["matches"][0]
+    assert m["project"] == "alpha"
+    assert "JWT" in m["answer"]
+
+
+def test_api_recall_rejects_empty_question(populated_config):
+    populated_config.history.enabled = True
+    client = TestClient(create_app(populated_config))
+    body = client.get("/api/recall?question=%20%20").json()
+    assert body["matches"] == []
+    assert "question required" in body["message"]
+
+
+def test_api_recall_host_all_passes_through(populated_config, tmp_path):
+    """host=all reaches the cross-host fan-out path (v2.0.0a6)."""
+    populated_config.history.enabled = True
+    populated_config.history.embedding_backend = "fts5"
+    populated_config.history.db_dir = str(tmp_path / "hist")
+    client = TestClient(create_app(populated_config))
+    body = client.get("/api/recall?question=any&host=all").json()
+    assert body["host"] == "all"
+    assert "hosts_searched" in body
+
+
 def test_project_detail_remote_host_reaches_remote_status(populated_config):
     """When ?host= is passed (and != 'local'), the route delegates to
     `_remote_status` which returns either remote markdown OR an

@@ -65,6 +65,64 @@
   </article>
 </section>
 
+<!-- v2.1.0a3: recall search. Hits /api/recall (which wraps the
+     recall_qa MCP tool) and renders match cards inline. -->
+<section x-data="recallPanel()"
+         class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+  <header class="mb-3 flex items-center justify-between gap-2 flex-wrap">
+    <h2 class="text-lg font-bold">Recall Q&amp;A history</h2>
+    <span class="text-xs text-gray-500">
+      semantic search over <code class="text-cyan-400">recall_qa</code> store
+    </span>
+  </header>
+  <form @submit.prevent="search()" class="flex flex-col md:flex-row gap-2 mb-3">
+    <input type="text" x-model="question" required minlength="2"
+           placeholder="e.g. how does authentication work?"
+           class="flex-1 bg-gray-950 border border-gray-800 rounded px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none">
+    <input type="text" x-model="project"
+           placeholder="project filter (optional)"
+           class="md:w-48 bg-gray-950 border border-gray-800 rounded px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none">
+    <select x-model="host"
+            class="md:w-32 bg-gray-950 border border-gray-800 rounded px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none">
+      <option value="local">local</option>
+      <option value="all">all hosts</option>
+    </select>
+    <button type="submit"
+            :disabled="loading || question.trim().length < 2"
+            class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold px-4 py-2 rounded text-sm transition">
+      <span x-show="!loading">Search</span>
+      <span x-show="loading">…</span>
+    </button>
+  </form>
+  <div x-show="message" class="text-xs text-amber-400 mb-2" x-text="message"></div>
+  <div x-show="error" class="text-xs text-red-400 mb-2" x-text="error"></div>
+  <div x-show="hasResults">
+    <p class="text-xs text-gray-500 mb-2"
+       x-text="`${matches.length} match${matches.length === 1 ? '' : 'es'} (backend: ${backend})`"></p>
+    <ul class="space-y-2">
+      <template x-for="m in matches" :key="m.id + ':' + m.host">
+        <li class="border border-gray-800 rounded p-3 bg-gray-950/50">
+          <div class="flex items-baseline justify-between gap-2 flex-wrap text-xs">
+            <a :href="`/projects/${encodeURIComponent(m.project)}${m.host && m.host !== 'local' ? '?host=' + encodeURIComponent(m.host) : ''}`"
+               class="font-bold text-cyan-400 hover:underline" x-text="m.project"></a>
+            <div class="flex items-center gap-2 text-gray-500">
+              <span x-text="`host: ${m.host}`"></span>
+              <span x-text="`tool: ${m.tool}`"></span>
+              <span x-text="`score: ${m.score.toFixed(3)}`"></span>
+            </div>
+          </div>
+          <p class="text-sm text-gray-200 mt-1" x-text="m.question"></p>
+          <p class="text-xs text-gray-400 mt-1 line-clamp-3" x-text="m.answer"></p>
+        </li>
+      </template>
+    </ul>
+  </div>
+  <div x-show="searched && matches.length === 0 && !error && !message"
+       class="text-xs text-gray-500">
+    No matches for that question yet.
+  </div>
+</section>
+
 <!-- v2.1.0a1: project graph render. Mermaid markup comes from
      /api/graph; we re-render with mermaid.run() after the DOM has the
      fresh markup so the layout adapts to includeDevDeps / transitive. -->
@@ -194,6 +252,36 @@
           loaded: rows.filter(r => r.status === 'loaded').length,
           missing: rows.filter(r => r.status === 'missing').length,
         };
+      },
+    };
+  }
+
+  function recallPanel() {
+    return {
+      question: '', project: '', host: 'local',
+      matches: [], backend: '', message: '', error: '',
+      loading: false, searched: false,
+      get hasResults() { return this.searched && this.matches.length > 0; },
+
+      async search() {
+        if (this.question.trim().length < 2) return;
+        this.loading = true; this.error = ''; this.message = '';
+        try {
+          const params = new URLSearchParams({ question: this.question.trim() });
+          if (this.project.trim()) params.set('project', this.project.trim());
+          if (this.host) params.set('host', this.host);
+          const r = await fetch('/api/recall?' + params.toString());
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const data = await r.json();
+          this.backend = data.backend || '';
+          this.matches = data.matches || [];
+          this.message = data.message || '';
+          this.searched = true;
+        } catch (e) {
+          this.error = e.message;
+        } finally {
+          this.loading = false;
+        }
       },
     };
   }

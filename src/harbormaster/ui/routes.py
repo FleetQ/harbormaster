@@ -157,6 +157,107 @@ def register_routes(
             "heartbeat_interval": config.fleetq.heartbeat_interval,
         }
 
+    @app.get("/api/recall")
+    async def api_recall(
+        question: str,
+        project: str | None = None,
+        top_k: int | None = None,
+        min_similarity: float | None = None,
+        host: str | None = None,
+    ) -> dict[str, object]:
+        """Browser-friendly wrapper around the `recall_qa` MCP tool
+        (v2.1.0a3). Equivalent to POST /mcp/harbormaster with
+        method='tools/call' name='recall_qa' but returns the raw
+        result dict so the dashboard can `await fetch().json()` and
+        skip the MCP content-envelope unwrap dance.
+        """
+        if not question.strip():
+            return {
+                "enabled": False,
+                "matches": [],
+                "host": host or "local",
+                "message": "question required",
+            }
+        if not config.history.enabled:
+            return {
+                "enabled": False,
+                "matches": [],
+                "host": host or "local",
+                "message": "[history] is disabled in config",
+            }
+        try:
+            from harbormaster.history import get_embedding_backend
+        except ImportError:
+            return {
+                "enabled": False,
+                "matches": [],
+                "host": host or "local",
+                "message": "the [history] extra is not installed",
+            }
+        from harbormaster.tools.recall import _recall_one_host
+
+        backend = get_embedding_backend(config)
+        effective_top_k = top_k if top_k is not None else config.history.default_top_k
+        effective_min_sim = (
+            min_similarity
+            if min_similarity is not None
+            else config.history.default_min_similarity
+        )
+        if host == "all":
+            targets: list[str | None] = [None, *sorted(config.hosts.keys())]
+            all_matches: list[Any] = []
+            errors: dict[str, str] = {}
+            for target in targets:
+                matches, err = _recall_one_host(
+                    config=config,
+                    host=target,
+                    question=question,
+                    top_k=effective_top_k,
+                    project=project,
+                    min_similarity=effective_min_sim,
+                    backend=backend,
+                )
+                if err is not None:
+                    errors[target if target is not None else "local"] = err
+                    continue
+                all_matches.extend(matches)
+            all_matches.sort(key=lambda m: m.score, reverse=True)
+            merged = all_matches[:effective_top_k]
+            result: dict[str, object] = {
+                "enabled": True,
+                "backend": backend.name,
+                "host": "all",
+                "hosts_searched": [t if t is not None else "local" for t in targets],
+                "matches": [m.to_dict() for m in merged],
+            }
+            if errors:
+                result["errors"] = errors
+            return result
+
+        matches, err = _recall_one_host(
+            config=config,
+            host=host,
+            question=question,
+            top_k=effective_top_k,
+            project=project,
+            min_similarity=effective_min_sim,
+            backend=backend,
+        )
+        if err is not None:
+            return {
+                "enabled": True,
+                "backend": backend.name,
+                "host": host or "local",
+                "matches": [],
+                "message": err,
+            }
+        return {
+            "enabled": True,
+            "backend": backend.name,
+            "host": host or "local",
+            "matches": [m.to_dict() for m in matches],
+        }
+
     @app.get("/api/plugins")
     async def api_plugins() -> dict[str, object]:
         """Plugin discovery + status (v2.1.0a1).
