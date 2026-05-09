@@ -61,14 +61,23 @@ def register_routes(
     config: HarbormasterConfig,
     *,
     mcp: Any | None = None,
+    auth_token: str | None = None,
 ) -> None:
+    # v3.0.0a6: auth_token is rendered into base.html as a <meta> when
+    # non-empty so client-side hmFetch() can carry the bearer header
+    # back to the same origin. Empty / None → meta tag is omitted and
+    # plain fetch() works (loopback + no env token).
+    auth_ctx: dict[str, str] = {"auth_token": auth_token} if auth_token else {}
+
+    def _render(
+        request: Request, template: str, extra: dict[str, Any]
+    ) -> HTMLResponse:
+        ctx = {"version": __version__, **auth_ctx, **extra}
+        return templates.TemplateResponse(request, template, ctx)
+
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request) -> HTMLResponse:
-        return templates.TemplateResponse(
-            request,
-            "dashboard.html",
-            {"version": __version__},
-        )
+        return _render(request, "dashboard.html", {})
 
     @app.get("/tools/fan-out", response_class=HTMLResponse)
     async def fan_out_page(request: Request) -> HTMLResponse:
@@ -81,11 +90,10 @@ def register_routes(
         """
         project_names = sorted(p.name for p in discover_projects(config.projects))
         host_labels = ["local", *sorted(config.hosts.keys())]
-        return templates.TemplateResponse(
+        return _render(
             request,
             "fan_out.html",
             {
-                "version": __version__,
                 "project_names": project_names,
                 "host_labels": host_labels,
             },
@@ -134,11 +142,10 @@ def register_routes(
         if isinstance(md, str) and md.startswith("Error:"):
             raise HTTPException(404, md)
 
-        return templates.TemplateResponse(
+        return _render(
             request,
             "project_detail.html",
             {
-                "version": __version__,
                 "project_name": name,
                 "host": host or "local",
                 "project": project_dict,

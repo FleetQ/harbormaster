@@ -18,7 +18,12 @@ UI_DIR = Path(__file__).parent
 TEMPLATES_DIR = UI_DIR / "templates"
 
 
-def create_app(config: HarbormasterConfig, *, mcp: Any | None = None) -> FastAPI:
+def create_app(
+    config: HarbormasterConfig,
+    *,
+    mcp: Any | None = None,
+    auth_token: str | None = None,
+) -> FastAPI:
     """Build the FastAPI app wired against the given Harbormaster config.
 
     When `mcp` (a FastMCP instance from harbormaster.server.build_server) is
@@ -27,6 +32,13 @@ def create_app(config: HarbormasterConfig, *, mcp: Any | None = None) -> FastAPI
     proxy tool calls into harbormaster's tool registry without needing the
     WebSocket relay path. `mcp=None` keeps the UI usable on its own as a
     project dashboard without exposing the proxy endpoint.
+
+    When `auth_token` is non-empty, the value is propagated into every
+    rendered template's context (v3.0.0a6) so client-side `hmFetch()`
+    can inject `Authorization: Bearer <token>` on every SSE / API call
+    that the dashboard's forms make. Pass `None` (default) when the UI
+    runs unauthenticated (loopback + no env token); the meta tag is
+    omitted in that case.
     """
     app = FastAPI(
         title="Harbormaster",
@@ -35,5 +47,5 @@ def create_app(config: HarbormasterConfig, *, mcp: Any | None = None) -> FastAPI
     )
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-    register_routes(app, templates, config, mcp=mcp)
+    register_routes(app, templates, config, mcp=mcp, auth_token=auth_token)
     return app

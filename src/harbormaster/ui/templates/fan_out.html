@@ -112,7 +112,7 @@
             max_turns: this.maxTurns,
           };
           if (this.host && this.host !== 'local') args.host_filter = this.host;
-          const r = await fetch('/mcp/harbormaster', {
+          const r = await hmFetch('/mcp/harbormaster', {
             method: 'POST', signal: controller.signal,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

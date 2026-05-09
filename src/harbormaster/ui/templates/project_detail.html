@@ -120,7 +120,7 @@
             limit: String(this.limit),
           });
           if (this.host && this.host !== 'local') params.set('host', this.host);
-          const r = await fetch('/api/trajectories?' + params.toString());
+          const r = await hmFetch('/api/trajectories?' + params.toString());
           if (!r.ok) throw new Error('HTTP ' + r.status);
           const data = await r.json();
           this.trajectories = data.trajectories || [];

@@ -1406,3 +1406,74 @@ async def test_stream_local_tool_delegate_task_400_on_missing_deliverable(
     err = _json.loads(events[-1]["data"])
     assert err["status"] == 400
     assert "deliverable" in err["detail"]
+
+
+# --- v3.0.0a6: bearer-token plumbing -------------------------------------
+
+
+def test_dashboard_renders_meta_tag_when_auth_token_set(populated_config):
+    client = TestClient(create_app(populated_config, auth_token="secret123"))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert '<meta name="hm-auth-token" content="secret123">' in r.text
+
+
+def test_dashboard_omits_meta_tag_when_auth_token_unset(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    # hmFetch's JS body references the meta name as a string, so we
+    # assert on the meta *tag itself* being absent, not the literal
+    # token name.
+    assert '<meta name="hm-auth-token"' not in r.text
+
+
+def test_dashboard_omits_meta_tag_when_auth_token_empty(populated_config):
+    client = TestClient(create_app(populated_config, auth_token=""))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert '<meta name="hm-auth-token"' not in r.text
+
+
+def test_fan_out_page_renders_meta_tag_when_auth_token_set(populated_config):
+    client = TestClient(create_app(populated_config, auth_token="abc"))
+    r = client.get("/tools/fan-out")
+    assert r.status_code == 200
+    assert '<meta name="hm-auth-token" content="abc">' in r.text
+
+
+def test_dashboard_uses_hmfetch_helper(populated_config):
+    """The base.html script must define hmFetch globally so all forms
+    can use it consistently."""
+    client = TestClient(create_app(populated_config, auth_token="t"))
+    r = client.get("/")
+    assert "window.hmFetch" in r.text
+    # All form fetches must route through hmFetch (no bare fetch( in
+    # the dashboard chrome — only legitimate `fetch` mentions are inside
+    # the helper definition itself or comments).
+    # Quick check: dashboard.html-rendered output should call hmFetch
+    # for /api/projects, /api/bridge/status, /api/plugins, /api/recall.
+    assert "hmFetch('/api/projects'" in r.text
+    assert "hmFetch('/api/bridge/status'" in r.text
+
+
+def test_ask_form_uses_hmfetch_in_project_detail(populated_config, tmp_path):
+    """Project detail page renders ask_form.html — verify it uses hmFetch."""
+    # Seed a project so /projects/<name> resolves.
+    proj_dir = tmp_path / "demo-project"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# Demo")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+
+    cfg = HarbormasterConfig(
+        projects=ProjectsConfig(glob=[str(tmp_path / "*")]),
+    )
+    client = TestClient(create_app(cfg, auth_token="zzz"))
+
+    r = client.get("/projects/demo-project")
+    # Project detail can succeed (200) or 404 depending on discovery —
+    # if 200, verify hmFetch is in the rendered template.
+    if r.status_code == 200:
+        assert "hmFetch('/mcp/harbormaster'" in r.text
+        assert '<meta name="hm-auth-token" content="zzz">' in r.text

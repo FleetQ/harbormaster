@@ -132,7 +132,11 @@ def main(argv: list[str] | None = None) -> int:
     from harbormaster.server import build_server
 
     mcp = build_server(config)
-    app = create_app(config, mcp=mcp)
+    # v3.0.0a6: pass the resolved bearer token into create_app so
+    # rendered templates carry it as <meta name="hm-auth-token"> for
+    # client-side hmFetch() to pick up. Empty token (loopback + no
+    # env) → meta omitted, hmFetch behaves like plain fetch.
+    app = create_app(config, mcp=mcp, auth_token=token if token else None)
 
     if token:
         app.add_middleware(build_bearer_middleware(token))
