@@ -370,3 +370,89 @@ def test_runner_retries_transient_reembed_failure(
     final = read_state(state_path)
     assert final.phase == "done"
     assert flaky._reembed_attempts == 3
+
+
+# --- v6.0.0a1: trigger_manual_reembed -----------------------------------
+
+
+def test_manual_trigger_starts_thread_and_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Manual trigger spawns the same runner; result reaches done state."""
+    from harbormaster.config import HarbormasterConfig, HistoryConfig
+    from harbormaster.history import QAStore
+    from harbormaster.history.auto_reembed import trigger_manual_reembed
+
+    monkeypatch.setenv(
+        "HARBORMASTER_REEMBED_STATE_FILE", str(tmp_path / "state.json")
+    )
+
+    config = HarbormasterConfig(
+        history=HistoryConfig(
+            enabled=True,
+            embedding_backend="fts5",
+            db_dir=str(tmp_path / "db"),
+            # Note: auto_reembed_on_drift=False — manual trigger must NOT
+            # honour that gate, only the [history] enabled gate.
+            auto_reembed_on_drift=False,
+        ),
+    )
+
+    monkeypatch.setattr(
+        QAStore, "open",
+        lambda **kw: _StubStore(drift=False, processed_rows=0),
+    )
+
+    started, error = trigger_manual_reembed(config)
+    assert started is True
+    assert error is None
+
+    # Wait for the runner to finish.
+    import time as _time
+    deadline = _time.time() + 5
+    while _time.time() < deadline:
+        s = read_state()
+        if s.phase in ("done", "failed"):
+            break
+        _time.sleep(0.05)
+
+    final = read_state()
+    assert final.phase == "done"
+
+
+def test_manual_trigger_refuses_when_already_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from harbormaster.config import HarbormasterConfig, HistoryConfig
+    from harbormaster.history.auto_reembed import (
+        ReembedState,
+        _write_state,
+        trigger_manual_reembed,
+    )
+
+    state_path = tmp_path / "state.json"
+    monkeypatch.setenv("HARBORMASTER_REEMBED_STATE_FILE", str(state_path))
+
+    # Pre-write a running state.
+    _write_state(ReembedState(phase="running"), state_path)
+
+    config = HarbormasterConfig(
+        history=HistoryConfig(enabled=True, embedding_backend="fts5"),
+    )
+    started, error = trigger_manual_reembed(config)
+    assert started is False
+    assert error is not None
+    assert "already in progress" in error
+
+
+def test_manual_trigger_refuses_when_history_disabled(tmp_path: Path) -> None:
+    from harbormaster.config import HarbormasterConfig, HistoryConfig
+    from harbormaster.history.auto_reembed import trigger_manual_reembed
+
+    config = HarbormasterConfig(
+        history=HistoryConfig(enabled=False),
+    )
+    started, error = trigger_manual_reembed(config)
+    assert started is False
+    assert error is not None
+    assert "[history] is disabled" in error

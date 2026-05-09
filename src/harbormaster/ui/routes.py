@@ -209,6 +209,31 @@ def register_routes(
             "runtime": runtime,
         }
 
+    @app.post("/api/history/reembed")
+    async def api_history_reembed_trigger() -> dict[str, object]:
+        """v6.0.0a1: manually trigger an auto-reembed run.
+
+        Idempotent: returns 409 when one is already in progress
+        (prevents double-click + cross-tab races from spawning
+        two threads).
+        """
+        try:
+            from harbormaster.history import trigger_manual_reembed
+        except ImportError:
+            raise HTTPException(
+                503,
+                "[history] extra not installed; install with "
+                "`pip install harbormaster-mcp[history]`",
+            ) from None
+
+        started, error = trigger_manual_reembed(config)
+        if not started:
+            # 409 for "already running"; 400 for everything else
+            # (history disabled / config issue)
+            status = 409 if error and "already in progress" in error else 400
+            raise HTTPException(status, error or "could not start reembed")
+        return {"started": True}
+
     @app.get("/api/history/state")
     async def api_history_state() -> dict[str, object]:
         """v4.0.0a5: report the auto-reembed runner's current phase.

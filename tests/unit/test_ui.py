@@ -2070,3 +2070,94 @@ def test_dashboard_filter_match_count_shows_when_active(populated_config):
     r = client.get("/")
     # Counter switches between "X discovered" and "X of Y match"
     assert "of ${projects.length} match" in r.text
+
+
+# --- v6.0.0a1: manual reembed trigger + ETA -----------------------------
+
+
+def test_api_history_reembed_starts_run(populated_config, tmp_path, monkeypatch):
+    """POST /api/history/reembed must start a run when none in progress."""
+    monkeypatch.setenv(
+        "HARBORMASTER_REEMBED_STATE_FILE", str(tmp_path / "state.json")
+    )
+    monkeypatch.setenv("HARBORMASTER_HISTORY_DB_DIR", str(tmp_path / "db"))
+
+    # Force history enabled in this test config since populated_config
+    # is shared across tests.
+    from harbormaster.config import HarbormasterConfig, HistoryConfig
+    cfg = HarbormasterConfig(
+        history=HistoryConfig(
+            enabled=True,
+            embedding_backend="fts5",
+            db_dir=str(tmp_path / "db"),
+        ),
+    )
+    # Patch QAStore.open to a no-drift stub so the runner finishes fast.
+    from harbormaster.history import QAStore
+
+    class _NoDrift:
+        def has_embedding_drift(self): return False
+        def reembed(self, *, batch_size=100, resume=True): return 0, 0
+        def close(self): pass
+
+    monkeypatch.setattr(
+        QAStore, "open",
+        lambda **kw: _NoDrift(),
+    )
+
+    client = TestClient(create_app(cfg))
+    r = client.post("/api/history/reembed")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["started"] is True
+
+
+def test_api_history_reembed_returns_409_when_running(
+    populated_config, tmp_path, monkeypatch
+):
+    """Idempotent: a second call while running must return 409."""
+    monkeypatch.setenv(
+        "HARBORMASTER_REEMBED_STATE_FILE", str(tmp_path / "state.json")
+    )
+    from harbormaster.config import HarbormasterConfig, HistoryConfig
+    from harbormaster.history.auto_reembed import (
+        ReembedState,
+        _write_state,
+    )
+
+    cfg = HarbormasterConfig(
+        history=HistoryConfig(enabled=True, embedding_backend="fts5"),
+    )
+    _write_state(ReembedState(phase="running"), tmp_path / "state.json")
+
+    client = TestClient(create_app(cfg))
+    r = client.post("/api/history/reembed")
+    assert r.status_code == 409
+
+
+def test_api_history_reembed_returns_400_when_history_disabled(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.post("/api/history/reembed")
+    assert r.status_code == 400
+
+
+def test_reembed_panel_renders_trigger_button(populated_config):
+    """The 'run now' button + triggering state must be present."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "triggerManual()" in r.text
+    assert ">run now<" in r.text
+    assert "triggering" in r.text
+
+
+def test_reembed_panel_eta_helper(populated_config):
+    """progressLabel + _etaSeconds + _formatEta must be defined."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "progressLabel()" in r.text
+    assert "_etaSeconds()" in r.text
+    assert "_formatEta" in r.text
+    # Rate-based ETA logic.
+    assert "elapsed / s.processed" in r.text
+    assert "remaining" in r.text

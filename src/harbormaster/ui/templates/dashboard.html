@@ -80,14 +80,23 @@
          x-show="state.available && (state.phase !== 'idle' || state.auto_reembed_enabled)">
   <header class="flex items-center justify-between mb-2 gap-2 flex-wrap">
     <h3 class="text-sm font-bold text-gray-300">Auto-reembed</h3>
-    <span class="text-xs px-2 py-0.5 rounded" :class="phaseBadgeClass()"
-          x-text="phaseLabel()"></span>
+    <div class="flex items-center gap-2">
+      <!-- v6.0.0a1: manual trigger button. Disabled while running. -->
+      <button type="button" @click="triggerManual()"
+              :disabled="state.phase === 'running' || triggering"
+              class="text-xs px-2 py-0.5 rounded border border-gray-700 bg-gray-900/60 hover:bg-gray-800 disabled:bg-gray-900 disabled:text-gray-600 transition"
+              title="run reembed now (skips the auto_reembed_on_drift gate)">
+        <span x-show="!triggering">run now</span>
+        <span x-show="triggering">starting…</span>
+      </button>
+      <span class="text-xs px-2 py-0.5 rounded" :class="phaseBadgeClass()"
+            x-text="phaseLabel()"></span>
+    </div>
   </header>
   <div x-show="state.phase === 'running'" class="text-xs text-gray-400">
     <div class="flex items-baseline justify-between gap-2 mb-1">
       <span x-text="state.current_host ? `processing host: ${state.current_host}` : 'preparing…'"></span>
-      <span class="text-gray-500"
-            x-text="state.total ? `${state.processed} / ${state.total}` : ''"></span>
+      <span class="text-gray-500" x-text="progressLabel()"></span>
     </div>
     <div class="h-1.5 bg-gray-800 rounded overflow-hidden">
       <div class="h-full bg-cyan-600 transition-all"
@@ -533,10 +542,12 @@
   }
 
   // v5.0.0a1: auto-reembed status panel — polls /api/history/state.
+  // v6.0.0a1: manual trigger button + ETA estimation.
   function reembedPanel() {
     return {
       state: { available: false, phase: 'idle', auto_reembed_enabled: false },
       error: '',
+      triggering: false,
       _pollHandle: null,
 
       async loadOnce() {
@@ -566,6 +577,52 @@
             }
           }, 3000);
         }
+      },
+
+      async triggerManual() {
+        this.triggering = true;
+        this.error = '';
+        try {
+          const r = await hmFetch('/api/history/reembed', { method: 'POST' });
+          if (r.status === 409) {
+            this.error = 'already running — wait for current run to finish';
+            return;
+          }
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          await this.fetchState();
+          this._maybeStartPolling();
+        } catch (e) {
+          this.error = e.message;
+        } finally {
+          this.triggering = false;
+        }
+      },
+
+      progressLabel() {
+        // "{processed} / {total}" baseline; appended " · ~{eta}s remaining"
+        // when we have enough rate signal (>=1 host done, total > 1).
+        const base = this.state.total
+          ? `${this.state.processed} / ${this.state.total}`
+          : '';
+        const eta = this._etaSeconds();
+        if (eta == null) return base;
+        return `${base} · ~${this._formatEta(eta)} remaining`;
+      },
+
+      _etaSeconds() {
+        const s = this.state;
+        if (s.phase !== 'running') return null;
+        if (!s.started_at || !s.processed || s.processed < 1) return null;
+        if (!s.total || s.total <= s.processed) return null;
+        const elapsed = (Date.now() / 1000) - s.started_at;
+        const ratePerHost = elapsed / s.processed;
+        return ratePerHost * (s.total - s.processed);
+      },
+
+      _formatEta(seconds) {
+        if (seconds < 60) return `${seconds.toFixed(0)}s`;
+        if (seconds < 3600) return `${(seconds / 60).toFixed(1)}m`;
+        return `${(seconds / 3600).toFixed(1)}h`;
       },
 
       phaseLabel() {
