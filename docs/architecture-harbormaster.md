@@ -473,7 +473,74 @@ Single-process by default. Async event loop runs:
 
 ---
 
-## 16. Out-of-architecture (decisions deferred)
+## 16. Reverse-proxy / nginx configuration for streaming
+
+The SSE chunk stream on `/mcp/{server}` (harbormaster) and the
+FleetQ Bridge's `/api/v1/bridge/mcp/call` (agent-fleet) both
+depend on **buffering being disabled** at every reverse proxy
+in the path. Without that, chunks pile up in the proxy's buffer
+and the user sees one big response after the whole stream
+completes — defeating the streaming UX.
+
+The harbormaster daemon and the FleetQ Bridge controller both
+emit `X-Accel-Buffering: no` on streaming responses, but the
+proxy must honour it. nginx 1.5.6+ does so by default for
+`proxy_buffering`. Other proxies (Cloudflare, Tailscale Funnel,
+Traefik) usually pass it through but verify on first deployment.
+
+### nginx (ahead of harbormaster-ui or FleetQ)
+
+```nginx
+location /mcp/ {
+    proxy_pass http://harbormaster_upstream;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;          # honour X-Accel-Buffering: no
+    proxy_read_timeout 300s;      # tools take 30-90s; need headroom
+    proxy_send_timeout 300s;
+}
+
+location /api/v1/bridge/mcp/call {
+    proxy_pass http://fleetq_upstream;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+}
+```
+
+### What the daemon does on its end
+
+PHP-FPM and Laravel each maintain an output buffer by default.
+The Bridge controller's streaming callback drops them via
+`ob_get_clean()` in a guarded loop before the first `flush()`,
+so chunks reach the socket as soon as they're emitted. This is
+disabled under PHPUnit (Laravel's `TestResponse` maintains its
+own buffer around `streamedContent()`).
+
+Python / FastAPI doesn't have the same pre-existing-buffer
+problem — sse-starlette's `EventSourceResponse` writes through
+to the socket without intermediate buffering.
+
+### Verifying end-to-end
+
+```bash
+curl -N -X POST https://harbormaster.example/mcp/harbormaster \
+  -H 'Accept: text/event-stream' \
+  -H 'Content-Type: application/json' \
+  -d '{"method":"tools/call","params":{"name":"ask_project","arguments":{"name":"alpha","question":"summarize"}}}'
+```
+
+`event: chunk` lines should appear in the terminal incrementally
+(not all at once at the end). If they all arrive together at the
+end, a proxy in the path is buffering — start adding
+`proxy_buffering off` to each layer until they appear
+incrementally.
+
+---
+
+## 17. Out-of-architecture (decisions deferred)
 
 - Tauri / Electron native wrapper.
 - Multi-user UI (post-v1).

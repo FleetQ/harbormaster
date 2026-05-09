@@ -154,11 +154,13 @@ JSON mode (no `Accept: text/event-stream`, no `stream` flag) is unchanged — fu
 
 **v1.0.0a14** — Streaming widened to `delegate_task` + dispatch refactor shipped 2026-05-09. The SSE chunk-streaming path is now table-driven on `_STREAMING_TOOLS` — adding chunk events for the next tool means writing one prompt builder. `delegate_task` over SSE emits real per-token chunks; `allow_writes=true` still fails closed (now via the prompt builder before any subprocess starts). On the FleetQ side, the Harbormaster popular-tool seeder entry now has its own pinning test (4 cases, 14 assertions) so future seeder rewrites can't silently drop fields. The 6-week roadmap to general availability:
 
-| Phase | Weeks | Focus |
-|-------|-------|-------|
-| v1.0 | 1–2 | Local + SSH + Live UI scaffold + PyPI alpha |
-| v1.1 | 3–4 | FleetQ Bridge / Platform Tool / A2A integration |
-| v1.2 | 5–6 | Q&A history, federated KG, auto project graph |
+| Phase | Status | Focus |
+|-------|--------|-------|
+| v1.0 | **Complete** (a8–a14) | Local + SSH + Live UI + PyPI alpha publish pipeline + SSE chunk streaming on both sides + FleetQ Bridge HTTP-tunnel mode |
+| v1.1 | **In progress** (a13–) | Platform Tool seeder ✅ a13 · A2A Agent Card per project ✅ a15 · live FleetQ smoke ✅ a11 · `update_endpoints` watch ✅ a10 · Memory writeback (pending) |
+| v1.2 | Pending | Q&A history (sqlite-vec), federated KG via FleetQ Memory, auto project graph (parse `composer.json` / `package.json` / `pyproject.toml`), cross-session memory recall |
+
+The original 6-week roadmap is largely complete on the v1.0 axis. v1.1 has shipped its biggest deliverables (Bridge integration, streaming end-to-end, Platform Tool seed, A2A cards). v1.2 (compounding) is the remaining phase before dropping the alpha tag and tagging `v1.0.0` GA.
 
 See [`docs/design-harbormaster.md`](docs/design-harbormaster.md) for the full design.
 
