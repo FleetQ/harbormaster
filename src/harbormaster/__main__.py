@@ -271,6 +271,12 @@ def main(argv: list[str] | None = None) -> int:
 
         return plugins_main(raw_args[1:])
 
+    if raw_args and raw_args[0] == "dispatcher":
+        # v6.0.0a6: `harbormaster-mcp dispatcher status` introspection.
+        from harbormaster.dispatcher_cli import main as dispatcher_main
+
+        return dispatcher_main(raw_args[1:])
+
     parser = _build_parser()
     args = parser.parse_args(raw_args)
 
