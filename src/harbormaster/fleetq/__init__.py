@@ -12,15 +12,25 @@ from harbormaster.fleetq.endpoints import HARBORMASTER_TOOLS, build_manifest
 from harbormaster.fleetq.heartbeat import HeartbeatLoop
 from harbormaster.fleetq.memory import MemoryWriter
 from harbormaster.fleetq.relay import BridgeRelay
+from harbormaster.fleetq.state import (
+    BridgeRuntimeState,
+    BridgeRuntimeView,
+    BridgeStateWriter,
+    read_bridge_state,
+)
 
 __all__ = [
     "HARBORMASTER_TOOLS",
     "BridgeClient",
     "BridgeError",
     "BridgeRelay",
+    "BridgeRuntimeState",
+    "BridgeRuntimeView",
+    "BridgeStateWriter",
     "HeartbeatLoop",
     "MCPDispatcher",
     "MemoryWriter",
     "RegisterResponse",
     "build_manifest",
+    "read_bridge_state",
 ]

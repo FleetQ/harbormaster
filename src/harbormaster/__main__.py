@@ -181,6 +181,7 @@ def _maybe_start_fleetq_bridge(config: HarbormasterConfig, mcp: Any = None):  # 
         from harbormaster.fleetq import (
             BridgeClient,
             BridgeRelay,
+            BridgeStateWriter,
             HeartbeatLoop,
             MCPDispatcher,
             build_manifest,
@@ -202,6 +203,7 @@ def _maybe_start_fleetq_bridge(config: HarbormasterConfig, mcp: Any = None):  # 
         bridge_version=__version__,
     )
     endpoints = build_manifest()
+    state_writer = BridgeStateWriter()
     # Pass build_manifest as the drift detector so that any future change in
     # what harbormaster announces (new MCP server discovered locally, hosts
     # added at runtime, etc.) is reflected on FleetQ without a process
@@ -211,6 +213,7 @@ def _maybe_start_fleetq_bridge(config: HarbormasterConfig, mcp: Any = None):  # 
         endpoints,
         interval=config.fleetq.heartbeat_interval,
         endpoints_factory=build_manifest,
+        state_writer=state_writer,
     )
     loop.start()
 
@@ -228,6 +231,7 @@ def _maybe_start_fleetq_bridge(config: HarbormasterConfig, mcp: Any = None):  # 
                 app_key=response.reverb_app_key,
                 relay_url=response.reverb_relay_url,
                 chunk_handler=chunk_handler,
+                state_writer=state_writer,
             )
             relay.start()
         except Exception as e:  # noqa: BLE001 - relay is best-effort in v1.0.0a8

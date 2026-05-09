@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import Any
 
 from harbormaster.fleetq.bridge import BridgeClient, BridgeError, RegisterResponse
+from harbormaster.fleetq.state import BridgeStateWriter
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,11 @@ class HeartbeatLoop:
     Bridge manifest stays in sync with the running process. The factory
     should be cheap and side-effect-free — it is called every `interval`
     seconds.
+
+    Optional cross-process state surfacing: pass a `state_writer`
+    (BridgeStateWriter). Each lifecycle event (register, heartbeat,
+    session loss, stop) writes a snapshot to disk so the harbormaster-ui
+    process can render live status (v3.0.0a2).
     """
 
     def __init__(
@@ -45,11 +51,13 @@ class HeartbeatLoop:
         *,
         interval: int = 30,
         endpoints_factory: Callable[[], dict[str, Any]] | None = None,
+        state_writer: BridgeStateWriter | None = None,
     ) -> None:
         self.client = client
         self.endpoints = endpoints
         self.interval = max(1, interval)
         self.endpoints_factory = endpoints_factory
+        self.state_writer = state_writer
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._registered = False
@@ -85,9 +93,18 @@ class HeartbeatLoop:
                 "FleetQ bridge registered: session=%s team=%s",
                 response.session_id, response.team_id,
             )
+            if self.state_writer is not None:
+                self.state_writer.update(
+                    connected=True,
+                    team_id=response.team_id,
+                    session_id=response.session_id,
+                    last_error=None,
+                )
         except BridgeError as e:
             self._registered = False
             logger.warning("FleetQ bridge register failed: %s", e)
+            if self.state_writer is not None:
+                self.state_writer.mark_disconnected(error=str(e))
 
     def start(self) -> None:
         """Register synchronously (so auth failures surface to the caller),
@@ -113,6 +130,8 @@ class HeartbeatLoop:
             except BridgeError as e:
                 logger.warning("FleetQ bridge disconnect failed: %s", e)
         self.client.close()
+        if self.state_writer is not None:
+            self.state_writer.mark_disconnected()
 
     def _loop(self) -> None:
         while not self._stop.wait(self.interval):
@@ -124,6 +143,8 @@ class HeartbeatLoop:
                 alive = self.client.heartbeat()
             except BridgeError as e:
                 logger.warning("FleetQ bridge heartbeat failed: %s", e)
+                if self.state_writer is not None:
+                    self.state_writer.update(last_error=str(e))
                 continue
             if not alive:
                 # Session lost (FleetQ's detect-stale marked us Disconnected).
@@ -132,9 +153,13 @@ class HeartbeatLoop:
                 logger.info("FleetQ bridge session lost — re-registering")
                 self._register_now()
                 continue
-            # Session is alive — check whether the manifest has drifted and
-            # re-publish if so. Only runs when an endpoints_factory was set;
-            # otherwise the static `self.endpoints` from construction stands.
+            # Session is alive — refresh the heartbeat timestamp and clear
+            # the prior error (if any) so the UI badge can flip back to green.
+            if self.state_writer is not None:
+                self.state_writer.update(connected=True, last_error=None)
+            # Then check whether the manifest has drifted and re-publish if so.
+            # Only runs when an endpoints_factory was set; otherwise the
+            # static `self.endpoints` from construction stands.
             self._maybe_update_endpoints()
 
     def _maybe_update_endpoints(self) -> None:

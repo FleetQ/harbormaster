@@ -99,6 +99,7 @@ class BridgeRelay:
         pusher_factory: PusherFactory | None = None,
         auth_timeout: float = 10.0,
         chunk_handler: ChunkHandler | None = None,
+        state_writer: Any = None,
     ) -> None:
         if not team_id:
             raise ValueError("team_id is required (from RegisterResponse)")
@@ -115,6 +116,11 @@ class BridgeRelay:
         self.channel_name = f"private-daemon.{team_id}"
         self.auth_timeout = auth_timeout
         self.chunk_handler = chunk_handler
+        # state_writer is optional and typed Any so the relay does not
+        # introduce an import-time dependency on pydantic for the
+        # state module when [fleetq] is not installed (it already is,
+        # but the typing-as-Any keeps the layering robust).
+        self.state_writer = state_writer
 
         self._pusher_factory: PusherFactory = pusher_factory or _default_pusher_factory
         self._pusher: Any = None
@@ -195,6 +201,8 @@ class BridgeRelay:
             self._pusher = None
             self._subscribed = False
             self._socket_id = None
+            if self.state_writer is not None:
+                self.state_writer.update(subscribed=False)
 
     def _on_connection_established(self, data: str | dict[str, Any]) -> None:
         """Pusher fires this with the socket_id once the WS handshake completes."""
@@ -236,6 +244,8 @@ class BridgeRelay:
             "BridgeRelay: subscribed to %s — listening for agent.request events",
             self.channel_name,
         )
+        if self.state_writer is not None:
+            self.state_writer.update(subscribed=True, last_error=None)
 
     def _on_agent_request(self, data: str | dict[str, Any]) -> None:
         """Handle an inbound agent.request event.

@@ -10,11 +10,9 @@
     <header class="flex items-center justify-between mb-2">
       <h3 class="text-sm font-bold text-gray-300">FleetQ Bridge</h3>
       <span class="text-xs px-2 py-0.5 rounded"
-            :class="bridge.fleetq_enabled
-              ? (bridge.api_token_present ? 'bg-emerald-900/50 text-emerald-300'
-                                          : 'bg-amber-900/50 text-amber-300')
-              : 'bg-gray-800 text-gray-400'"
-            x-text="bridgeStateLabel()"></span>
+            :class="bridgeBadgeClass()"
+            x-text="bridgeStateLabel()"
+            :title="bridgeBadgeTooltip()"></span>
     </header>
     <dl class="text-xs space-y-1 text-gray-400" x-show="!bridgeError">
       <div><dt class="inline text-gray-500">enabled:</dt>
@@ -30,6 +28,16 @@
       <div><dt class="inline text-gray-500">writeback:</dt>
         <dd class="inline ml-1"
             x-text="`trajectories=${bridge.write_trajectories}, kg=${bridge.write_kg} (${bridge.kg_extractor})`"></dd></div>
+      <div x-show="bridge.runtime && bridge.runtime.available && bridge.runtime.state_file_present">
+        <dt class="inline text-gray-500">runtime:</dt>
+        <dd class="inline ml-1"
+            x-text="runtimeSummary()"
+            :class="runtimeColorClass()"></dd>
+      </div>
+      <div x-show="bridge.runtime && bridge.runtime.last_error" class="text-rose-400">
+        <dt class="inline text-gray-500">last_error:</dt>
+        <dd class="inline ml-1" x-text="bridge.runtime && bridge.runtime.last_error"></dd>
+      </div>
     </dl>
     <p x-show="bridgeError" class="text-xs text-red-400" x-text="bridgeError"></p>
   </article>
@@ -244,7 +252,51 @@
       bridgeStateLabel() {
         if (!this.bridge.fleetq_enabled) return 'disabled';
         if (!this.bridge.api_token_present) return 'token missing';
+        const rt = this.bridge.runtime;
+        if (rt && rt.available && rt.state_file_present) {
+          if (rt.connected && !rt.stale && rt.subscribed) return 'connected';
+          if (rt.connected && rt.stale) return 'stale';
+          if (rt.connected) return 'connecting';
+          return 'disconnected';
+        }
         return 'configured';
+      },
+      bridgeBadgeClass() {
+        if (!this.bridge.fleetq_enabled) return 'bg-gray-800 text-gray-400';
+        if (!this.bridge.api_token_present) return 'bg-amber-900/50 text-amber-300';
+        const rt = this.bridge.runtime;
+        if (rt && rt.available && rt.state_file_present) {
+          if (rt.connected && !rt.stale && rt.subscribed) return 'bg-emerald-900/50 text-emerald-300';
+          if (rt.connected && rt.stale) return 'bg-amber-900/50 text-amber-300';
+          if (rt.connected) return 'bg-cyan-900/50 text-cyan-300';
+          return 'bg-rose-900/50 text-rose-300';
+        }
+        return 'bg-emerald-900/50 text-emerald-300';
+      },
+      bridgeBadgeTooltip() {
+        const rt = this.bridge.runtime;
+        if (!rt || !rt.available || !rt.state_file_present) return 'config-derived state — runtime not yet observed';
+        if (rt.last_heartbeat) {
+          const age = rt.age_seconds != null ? `${rt.age_seconds.toFixed(1)}s ago` : '?';
+          return `last_heartbeat: ${age} (writer pid ${rt.writer_pid || '?'})`;
+        }
+        return 'no heartbeat recorded yet';
+      },
+      runtimeSummary() {
+        const rt = this.bridge.runtime || {};
+        const parts = [];
+        parts.push(rt.connected ? 'connected' : 'disconnected');
+        if (rt.subscribed) parts.push('subscribed');
+        if (rt.stale) parts.push('stale');
+        if (rt.age_seconds != null) parts.push(`hb ${rt.age_seconds.toFixed(0)}s`);
+        if (rt.team_id) parts.push(`team ${rt.team_id.slice(0, 8)}`);
+        return parts.join(' · ');
+      },
+      runtimeColorClass() {
+        const rt = this.bridge.runtime || {};
+        if (rt.connected && !rt.stale) return 'text-emerald-400';
+        if (rt.stale) return 'text-amber-400';
+        return 'text-rose-400';
       },
       pluginCounts() {
         const rows = this.plugins.plugins || [];
