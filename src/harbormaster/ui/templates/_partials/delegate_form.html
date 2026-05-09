@@ -80,6 +80,10 @@
           if (!r.ok) throw new Error('HTTP ' + r.status);
           await this._consumeSseStream(r);
           this.hasResult = true;
+          // v3.0.0a8: cross-section refresh signal for trajectoryList.
+          window.dispatchEvent(new CustomEvent('hm:trajectory:dirty', {
+            detail: { project: this.project, host: this.host || 'local' },
+          }));
         } catch (e) {
           if (e.name !== 'AbortError') this.error = e.message;
         } finally {
