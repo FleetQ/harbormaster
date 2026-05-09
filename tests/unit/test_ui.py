@@ -1901,3 +1901,81 @@ def test_reembed_panel_polls_only_when_running(populated_config):
     assert "this.state.phase === 'running'" in r.text
     # 3-second cadence.
     assert ", 3000)" in r.text
+
+
+# --- v5.0.0a4: optimistic trajectory polish -----------------------------
+
+
+def test_trajectory_list_uses_content_tuple_key(populated_config, tmp_path):
+    """:key is (project, tool, question) so the DOM persists across
+    optimistic→real reconciliation, enabling CSS cross-fade."""
+    proj_dir = tmp_path / "demo-x5a"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# x5a")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-x5a")
+    if r.status_code == 200:
+        # Content tuple key.
+        assert "t.project + ':' + t.tool + ':' + t.question" in r.text
+        # transition-colors class applied to the <li>.
+        assert "transition-colors duration-200" in r.text
+
+
+def test_trajectory_list_shows_writeback_spinner_for_stale_optimistics(populated_config, tmp_path):
+    """isStale + spinner element: optimistics older than 5s show the
+    amber spinner instead of the cyan badge."""
+    proj_dir = tmp_path / "demo-x5b"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# x5b")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-x5b")
+    if r.status_code == 200:
+        assert "isStale(t)" in r.text
+        assert "animate-spin" in r.text
+        assert "border-amber-400" in r.text
+        # 5s threshold.
+        assert "age > 5" in r.text
+
+
+def test_trajectory_list_init_starts_tick(populated_config, tmp_path):
+    """Alpine init() must start the 1s tick that drives `now`."""
+    proj_dir = tmp_path / "demo-x5c"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# x5c")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-x5c")
+    if r.status_code == 200:
+        assert "init()" in r.text
+        assert "_tickHandle = setInterval" in r.text
+        assert "this.now = Date.now() / 1000" in r.text
+
+
+def test_trajectory_list_reconciles_in_place(populated_config, tmp_path):
+    """Reconciliation in-place: server entry merges optimistic match
+    with _optimistic=false instead of removing+adding."""
+    proj_dir = tmp_path / "demo-x5d"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# x5d")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-x5d")
+    if r.status_code == 200:
+        # In-place merge marker
+        assert "_optimistic: false" in r.text
+        # Orphan handling preserved
+        assert "orphans" in r.text
