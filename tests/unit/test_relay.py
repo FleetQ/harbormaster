@@ -687,3 +687,164 @@ def test_chunk_handler_default_none_keeps_v1_log_only_behaviour(
         )
     ch.trigger.assert_not_called()
     assert any("agent.request received" in r.message for r in caplog.records)
+
+
+# --- v3.0.0a5: worker thread ---------------------------------------------
+
+
+class _StubChannel:
+    def __init__(self):
+        self.events = []
+
+    def trigger(self, event, data):
+        self.events.append((event, data))
+
+
+def test_relay_worker_thread_dispatches_off_pysher_thread(fake_pusher_factory):
+    """When worker_thread=True, the chunk_handler must run on a dedicated
+    thread — verified by capturing thread.ident from inside the handler."""
+    import threading
+    import time
+
+    handler_thread_ids = []
+
+    def slow_handler(payload):
+        handler_thread_ids.append(threading.get_ident())
+        time.sleep(0.05)
+        yield "result"
+
+    relay = BridgeRelay(
+        base_url="http://example",
+        api_token="t",
+        team_id="team-1",
+        app_key="key",
+        relay_url="wss://example:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=slow_handler,
+        worker_thread=True,
+    )
+    relay.start()
+    # Mock-out subscribe completion so trigger() works.
+    relay._channel = _StubChannel()
+
+    main_tid = threading.get_ident()
+    # Push two requests through the pysher-side entry point.
+    relay._on_agent_request({"request_id": "req-1", "method": "tools/list"})
+    relay._on_agent_request({"request_id": "req-2", "method": "tools/list"})
+
+    # Give the worker time to drain.
+    deadline = time.time() + 2.0
+    while len(handler_thread_ids) < 2 and time.time() < deadline:
+        time.sleep(0.01)
+
+    relay.stop()
+
+    assert len(handler_thread_ids) == 2
+    # Handler ran on a non-main, non-test thread.
+    assert all(tid != main_tid for tid in handler_thread_ids)
+    # Both handler invocations ran on the SAME worker thread (single-worker).
+    assert handler_thread_ids[0] == handler_thread_ids[1]
+
+
+def test_relay_worker_thread_disabled_falls_back_to_inline(fake_pusher_factory):
+    """worker_thread=False keeps v2.0.0a7 inline-dispatch behaviour —
+    handler runs synchronously on the pysher (test) thread."""
+    import threading
+
+    handler_thread_ids = []
+
+    def handler(payload):
+        handler_thread_ids.append(threading.get_ident())
+        yield "ok"
+
+    relay = BridgeRelay(
+        base_url="http://example",
+        api_token="t",
+        team_id="team-1",
+        app_key="key",
+        relay_url="wss://example:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=handler,
+        worker_thread=False,
+    )
+    relay._channel = _StubChannel()
+
+    main_tid = threading.get_ident()
+    relay._on_agent_request({"request_id": "req-1", "method": "tools/list"})
+
+    # Inline dispatch ran on this test's thread.
+    assert handler_thread_ids == [main_tid]
+
+
+def test_relay_worker_queue_full_publishes_error(fake_pusher_factory):
+    """A full inbound queue must NOT block the pysher thread; the
+    overflow path publishes a client-relay.error and drops the request."""
+    import threading
+    import time
+
+    handler_started = threading.Event()
+    handler_release = threading.Event()
+
+    def slow_handler(payload):
+        handler_started.set()
+        # Block until the test releases — keeps the worker busy so
+        # subsequent puts saturate the queue.
+        handler_release.wait(timeout=2.0)
+        yield "done"
+
+    relay = BridgeRelay(
+        base_url="http://example",
+        api_token="t",
+        team_id="team-1",
+        app_key="key",
+        relay_url="wss://example:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=slow_handler,
+        worker_thread=True,
+        worker_queue_max=1,
+    )
+    relay.start()
+    stub = _StubChannel()
+    relay._channel = stub
+
+    # First request: starts the slow handler.
+    relay._on_agent_request({"request_id": "req-1", "method": "tools/list"})
+    assert handler_started.wait(timeout=1.0)
+
+    # Second request: still fits in the queue (queue_max=1).
+    relay._on_agent_request({"request_id": "req-2", "method": "tools/list"})
+    # Third request: queue full → must publish error, NOT block.
+    relay._on_agent_request({"request_id": "req-3", "method": "tools/list"})
+
+    # Verify error event for req-3 (or req-2 — whichever overflowed).
+    error_events = [e for e in stub.events if e[0] == "client-relay.error"]
+    assert any("queue full" in ev[1]["error"] for ev in error_events)
+
+    # Release the slow handler so stop() can join cleanly.
+    handler_release.set()
+    # Give worker a moment to drain remaining queued items.
+    time.sleep(0.2)
+    relay.stop()
+
+
+def test_relay_worker_thread_clean_shutdown(fake_pusher_factory):
+    """stop() must terminate the worker thread within the join timeout."""
+    relay = BridgeRelay(
+        base_url="http://example",
+        api_token="t",
+        team_id="team-1",
+        app_key="key",
+        relay_url="wss://example:443",
+        pusher_factory=fake_pusher_factory,
+        chunk_handler=lambda payload: iter([]),
+        worker_thread=True,
+    )
+    relay.start()
+    worker = relay._worker_thread_handle
+    assert worker is not None and worker.is_alive()
+
+    relay.stop()
+
+    assert relay._worker_thread_handle is None
+    assert relay._worker_queue is None
+    assert not worker.is_alive()
