@@ -152,7 +152,7 @@ JSON mode (no `Accept: text/event-stream`, no `stream` flag) is unchanged — fu
 
 ## Status
 
-**v1.0.0a13** — SSH streaming + v1.1 first deliverable shipped 2026-05-09. `ask_project` over SSH now emits `chunk` events for every assistant text delta (matches local; `ssh -T -q` keeps banners off stdout, non-JSON noise filtered silently). Validation tightened so unknown-project errors are deterministic 400 instead of "maybe-400-maybe-502 depending on iteration timing." On the FleetQ side, Harbormaster is now seeded as a popular MCP stdio tool — fresh installs surface it under `/tools` (disabled by default like all seeded tools). The 6-week roadmap to general availability:
+**v1.0.0a14** — Streaming widened to `delegate_task` + dispatch refactor shipped 2026-05-09. The SSE chunk-streaming path is now table-driven on `_STREAMING_TOOLS` — adding chunk events for the next tool means writing one prompt builder. `delegate_task` over SSE emits real per-token chunks; `allow_writes=true` still fails closed (now via the prompt builder before any subprocess starts). On the FleetQ side, the Harbormaster popular-tool seeder entry now has its own pinning test (4 cases, 14 assertions) so future seeder rewrites can't silently drop fields. The 6-week roadmap to general availability:
 
 | Phase | Weeks | Focus |
 |-------|-------|-------|
