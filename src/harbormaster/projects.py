@@ -56,6 +56,11 @@ class ProjectInfo:
     has_serena: bool
     has_claude_md: bool
     brief: str
+    # v6.0.0a3: detected language ("python" / "javascript" / "php" /
+    # "rust" / "go") from the project's manifest file, or "unknown" when
+    # no recognised manifest is present. Drives the dashboard "group by
+    # language" toggle.
+    language: str = "unknown"
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -63,6 +68,37 @@ class ProjectInfo:
 
 def _is_project(p: Path) -> bool:
     return p.is_dir() and ((p / ".git").is_dir() or (p / "CLAUDE.md").is_file())
+
+
+def _detect_language(project_path: Path) -> str:
+    """v6.0.0a3: best-effort language detection from manifest presence.
+
+    Reuses the parser registry from harbormaster.graph.parser when
+    available; falls back to file-existence checks. Returns "unknown"
+    when no recognised manifest is present (e.g. docs-only repos).
+    """
+    try:
+        from harbormaster.graph.parser import parse_project
+
+        manifest = parse_project(project_path)
+        if manifest is not None:
+            return manifest.language
+    except Exception:  # noqa: BLE001 - never block discovery on parser fail
+        pass
+    # Lightweight fallback for repos that have a recognisable marker
+    # but the manifest itself fails to parse (broken JSON, etc.).
+    if (project_path / "pyproject.toml").is_file() or \
+            (project_path / "requirements.txt").is_file():
+        return "python"
+    if (project_path / "package.json").is_file():
+        return "javascript"
+    if (project_path / "composer.json").is_file():
+        return "php"
+    if (project_path / "Cargo.toml").is_file():
+        return "rust"
+    if (project_path / "go.mod").is_file():
+        return "go"
+    return "unknown"
 
 
 def _glob_base(pattern: str) -> Path | None:
@@ -242,6 +278,7 @@ def discover_projects(config: ProjectsConfig) -> list[ProjectInfo]:
                 has_serena=(resolved / ".serena").is_dir(),
                 has_claude_md=(resolved / "CLAUDE.md").is_file(),
                 brief=_project_brief(resolved),
+                language=_detect_language(resolved),
             ))
 
     projects.sort(

@@ -2257,3 +2257,95 @@ def test_history_config_optimistic_stale_seconds_validates_range():
     # In-range OK.
     cfg = HistoryConfig(optimistic_stale_seconds=120)
     assert cfg.optimistic_stale_seconds == 120
+
+
+# --- v6.0.0a3: dashboard sort + group controls --------------------------
+
+
+def test_dashboard_renders_sort_and_group_dropdowns(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert r.status_code == 200
+    # Sort dropdown options.
+    assert ">sort: recent<" in r.text
+    assert ">sort: alphabetical<" in r.text
+    assert ">sort: by language<" in r.text
+    # Group toggle options.
+    assert ">group: flat<" in r.text
+    assert ">group: by language<" in r.text
+
+
+def test_project_grid_factory_includes_sort_helpers(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "_sortProjects(" in r.text
+    assert "groupedProjects()" in r.text
+    # All 3 sort modes mapped.
+    assert "case 'alpha':" in r.text
+    assert "case 'language':" in r.text
+    assert "case 'last_commit':" in r.text
+
+
+def test_project_grid_persists_sort_and_group_to_url(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    # Sort/group keys persisted with default-omit.
+    assert "p.set('sort'" in r.text
+    assert "p.set('group'" in r.text
+    assert "p.delete('sort')" in r.text
+    assert "p.delete('group')" in r.text
+
+
+def test_project_grid_restores_sort_and_group_from_url(populated_config):
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "p.get('sort')" in r.text
+    assert "p.get('group')" in r.text
+    # Allowlist enforced.
+    assert "['last_commit', 'alpha', 'language'].includes" in r.text
+    assert "['flat', 'language'].includes" in r.text
+
+
+def test_api_projects_includes_language_field(populated_config, tmp_path):
+    """ProjectInfo now carries `language`; /api/projects must surface it."""
+    proj_dir = tmp_path / "py-demo"
+    proj_dir.mkdir()
+    (proj_dir / "CLAUDE.md").write_text("# py")
+    (proj_dir / "pyproject.toml").write_text(
+        '[project]\nname = "py-demo"\nversion = "0.1"\n'
+    )
+
+    js_dir = tmp_path / "js-demo"
+    js_dir.mkdir()
+    (js_dir / "CLAUDE.md").write_text("# js")
+    (js_dir / "package.json").write_text('{"name": "js-demo", "version": "0.1"}')
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/api/projects")
+    assert r.status_code == 200
+    body = r.json()
+    by_name = {p["name"]: p for p in body}
+    assert by_name["py-demo"]["language"] == "python"
+    assert by_name["js-demo"]["language"] == "javascript"
+
+
+def test_detect_language_falls_back_for_unrecognised(tmp_path):
+    """Repos without a known manifest get 'unknown'."""
+    from harbormaster.projects import _detect_language
+    proj = tmp_path / "doc-only"
+    proj.mkdir()
+    (proj / "CLAUDE.md").write_text("# docs")
+    assert _detect_language(proj) == "unknown"
+
+
+def test_detect_language_fallback_when_parser_fails(tmp_path):
+    """Even when pyproject.toml is malformed, the fallback file-existence
+    check catches it."""
+    from harbormaster.projects import _detect_language
+    proj = tmp_path / "broken"
+    proj.mkdir()
+    (proj / "CLAUDE.md").write_text("# x")
+    (proj / "pyproject.toml").write_text("not valid [toml")  # parser will fail
+    assert _detect_language(proj) == "python"
