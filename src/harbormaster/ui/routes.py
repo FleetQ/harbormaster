@@ -70,6 +70,27 @@ def register_routes(
             {"version": __version__},
         )
 
+    @app.get("/tools/fan-out", response_class=HTMLResponse)
+    async def fan_out_page(request: Request) -> HTMLResponse:
+        """Multi-project fan_out_ask form (v2.1.0a5).
+
+        Lists discovered projects with checkboxes; one question;
+        configurable max_concurrency. Submits to the existing
+        `POST /mcp/harbormaster fan_out_ask` and renders the
+        aggregated result.
+        """
+        project_names = sorted(p.name for p in discover_projects(config.projects))
+        host_labels = ["local", *sorted(config.hosts.keys())]
+        return templates.TemplateResponse(
+            request,
+            "fan_out.html",
+            {
+                "version": __version__,
+                "project_names": project_names,
+                "host_labels": host_labels,
+            },
+        )
+
     @app.get("/projects/{name}", response_class=HTMLResponse)
     async def project_detail(
         name: str, request: Request, host: str | None = None,
