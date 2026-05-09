@@ -56,13 +56,16 @@
      filtered by this project. Each row is a collapsible Q&A pair. -->
 <!-- v3.0.0a8: cross-section refresh — listen for hm:trajectory:dirty
      events dispatched on stream completion by ask/delegate forms,
-     and reload trajectories when the dispatched project matches. -->
+     and reload trajectories when the dispatched project matches.
+     v4.0.0a4: hm:trajectory:append prepends the just-streamed Q&A
+     synthetically (instant feedback) before the dirty reload runs. -->
 <section x-data="trajectoryList({
            project: {{ project_name | tojson }},
            host: {{ host | tojson }},
          })"
          x-init="load()"
          x-on:hm:trajectory:dirty.window="if ($event.detail && $event.detail.project === project) load()"
+         x-on:hm:trajectory:append.window="if ($event.detail && $event.detail.project === project) prepend($event.detail.entry)"
          class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40">
   <header class="mb-3 flex items-baseline justify-between gap-2 flex-wrap">
     <h3 class="text-base font-bold text-gray-300">Recent Q&amp;A</h3>
@@ -85,13 +88,16 @@
   <ul class="space-y-2">
     <template x-for="t in trajectories" :key="t.id">
       <li x-data="{ open: false }"
-          class="border border-gray-800 rounded bg-gray-950/50">
+          :class="t._optimistic
+            ? 'border border-cyan-700/40 rounded bg-cyan-950/30'
+            : 'border border-gray-800 rounded bg-gray-950/50'">
         <button type="button" @click="open = !open"
                 class="w-full text-left px-3 py-2 hover:bg-gray-900/50 transition flex items-baseline justify-between gap-2">
           <span class="text-sm text-gray-200 truncate" x-text="t.question"></span>
           <span class="text-xs text-gray-500 shrink-0 flex gap-2">
+            <span x-show="t._optimistic" class="text-cyan-400 font-bold">●&nbsp;new</span>
             <span x-text="t.tool"></span>
-            <span x-text="formatDate(t.created_at)"></span>
+            <span x-text="formatDate(t.created_at || t.timestamp_s)"></span>
             <span x-text="open ? '▾' : '▸'"></span>
           </span>
         </button>
@@ -127,11 +133,34 @@
           const r = await hmFetch('/api/trajectories?' + params.toString());
           if (!r.ok) throw new Error('HTTP ' + r.status);
           const data = await r.json();
-          this.trajectories = data.trajectories || [];
+          // v4.0.0a4: reconcile optimistic entries.
+          // Server-assigned trajectories replace any optimistic entries
+          // whose (question, project, tool) tuple matches. Any optimistic
+          // entry that has no server match yet (writeback in flight)
+          // stays at the top until the next load resolves it.
+          const fresh = data.trajectories || [];
+          const optimistic = (this.trajectories || []).filter(
+            t => t._optimistic && !fresh.some(
+              s => s.project === t.project &&
+                   s.tool === t.tool &&
+                   s.question === t.question,
+            ),
+          );
+          this.trajectories = [...optimistic, ...fresh];
           if (data.message) this.message = data.message;
         } catch (e) {
           this.error = e.message;
         }
+      },
+
+      // v4.0.0a4: prepend an optimistic Q&A entry without a round-trip.
+      // The next load() will reconcile (matching server entry replaces it).
+      prepend(entry) {
+        if (!entry) return;
+        // Avoid duplicates if the same id is dispatched twice rapidly.
+        const exists = this.trajectories.some(t => t.id === entry.id);
+        if (exists) return;
+        this.trajectories = [entry, ...this.trajectories];
       },
 
       formatDate(epoch_s) {

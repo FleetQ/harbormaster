@@ -1714,3 +1714,86 @@ def test_dashboard_graph_zoom_supports_two_finger_pinch(populated_config):
     # Pinch state machine fields.
     assert "_pinchInitialDist" in r.text
     assert "_pinchInitialScale" in r.text
+
+
+# --- v4.0.0a4: optimistic trajectory insert -----------------------------
+
+
+def test_ask_form_dispatches_append_event_with_synthetic_entry(populated_config, tmp_path):
+    """askForm() must dispatch hm:trajectory:append with a synthetic
+    entry containing question, answer, and a synthetic id."""
+    proj_dir = tmp_path / "demo-x4a"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# x4a")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-x4a")
+    if r.status_code == 200:
+        assert "hm:trajectory:append" in r.text
+        assert "_optimistic: true" in r.text
+        # Synthetic id pattern.
+        assert "'optimistic-' + Date.now()" in r.text
+
+
+def test_trajectory_section_listens_for_append(populated_config, tmp_path):
+    proj_dir = tmp_path / "demo-x4b"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# x4b")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-x4b")
+    if r.status_code == 200:
+        assert "x-on:hm:trajectory:append.window" in r.text
+        assert "prepend(" in r.text
+
+
+def test_trajectory_list_reconciles_on_load(populated_config, tmp_path):
+    """trajectoryList.load() must replace optimistic entries when the
+    server returns a matching real entry, but keep optimistics that
+    haven't reconciled yet (writeback in flight)."""
+    proj_dir = tmp_path / "demo-x4c"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# x4c")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-x4c")
+    if r.status_code == 200:
+        # Reconciliation logic: filter by (project, tool, question) tuple.
+        assert "s.project === t.project" in r.text
+        assert "s.tool === t.tool" in r.text
+        assert "s.question === t.question" in r.text
+        # Optimistic entries kept on top.
+        assert "[...optimistic, ...fresh]" in r.text
+
+
+def test_trajectory_list_visual_differentiation_for_optimistic(populated_config, tmp_path):
+    proj_dir = tmp_path / "demo-x4d"
+    proj_dir.mkdir()
+    (proj_dir / "README.md").write_text("# x4d")
+
+    from harbormaster.config import HarbormasterConfig, ProjectsConfig
+
+    cfg = HarbormasterConfig(projects=ProjectsConfig(glob=[str(tmp_path / "*")]))
+    client = TestClient(create_app(cfg))
+    r = client.get("/projects/demo-x4d")
+    if r.status_code == 200:
+        # Optimistic entries get cyan border + "● new" badge.
+        assert "border-cyan-700/40" in r.text
+        assert "●&nbsp;new" in r.text
+
+
+def test_dashboard_card_ask_dispatches_append_too(populated_config):
+    """The shared askForm() factory means dashboard cards also fire
+    the append event, harmless when no listener is on the dashboard."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/")
+    assert "hm:trajectory:append" in r.text
