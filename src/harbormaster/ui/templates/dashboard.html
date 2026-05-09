@@ -1003,18 +1003,21 @@
           if (!r.ok) throw new Error('HTTP ' + r.status);
           this.graph = await r.json();
           this.mermaidMarkup = this.graph.mermaid || 'graph LR\n  empty[No projects]';
-          // v6.0.1 fix: two regressions, fixed together.
-          //   1) v4.0.0a3 wrapped the <pre> inside graphZoom()'s nested
-          //      x-data scope, breaking the parent scope's ref lookup
-          //      (Alpine refs are per-component). Replaced with a
-          //      querySelector that bypasses scope nesting.
-          //   2) The Mermaid ESM bundle is loaded async via <script
-          //      type="module"> in base.html. When loadGraph fires on
-          //      x-init, the global window.__hmMermaid may not exist
-          //      yet; the previous rAF callback would silently no-op
-          //      and leave the raw markup visible. Now we poll up to
-          //      3s for mermaid to be ready before running.
+          // v6.0.1 fixed two regressions (Alpine $refs scope leak +
+          // async ESM race). v6.0.2 fixes a third: the section is
+          // hidden via x-show="!graphLoading" while loadGraph runs,
+          // so Mermaid measures the still-hidden <pre> at 0×0 and
+          // emits a placeholder viewBox="-8 -8 16 16". The graph
+          // content renders fine inside the SVG, but the SVG itself
+          // shrinks to 16×16 and stays invisible.
+          //
+          // Fix: flip graphLoading=false BEFORE mermaid.run() so the
+          // viewport is laid out at its real dimensions. requestAnimationFrame
+          // gives Alpine + the browser one frame to apply the layout
+          // before mermaid measures.
+          this.graphLoading = false;
           await this._waitForMermaid(3000);
+          await new Promise((r) => requestAnimationFrame(r));
           const node = document.querySelector('pre.mermaid');
           if (node && window.__hmMermaid) {
             // Force re-process: clear `data-processed` if mermaid set it.
@@ -1028,6 +1031,8 @@
         } catch (e) {
           this.graphError = e.message;
         } finally {
+          // graphLoading was already flipped above when the fetch
+          // succeeded; only flip here for the error path.
           this.graphLoading = false;
         }
       },
