@@ -6,6 +6,7 @@ prefixed strings so the envelope stays consistent across tools).
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 from collections.abc import Iterator
@@ -15,6 +16,8 @@ from harbormaster.backends import BackendError, get_backend
 from harbormaster.config import HarbormasterConfig
 from harbormaster.projects import resolve_project, validate_project_name
 from harbormaster.ssh import is_remote
+
+logger = logging.getLogger("harbormaster.tools._helpers")
 
 
 def _dump_dir() -> Path:
@@ -99,6 +102,16 @@ def run_backend(
         duration_ms=result.duration_ms,
     )
 
+    _maybe_record_qa(
+        config=config,
+        project_name=name,
+        host=host,
+        prompt=prompt,
+        answer=result.output,
+        tool=label_prefix,
+        duration_ms=result.duration_ms,
+    )
+
     return _truncate(result.output, cap, label)
 
 
@@ -156,6 +169,88 @@ def _maybe_writeback_to_fleetq(
         )
     finally:
         writer.close()
+
+
+def _history_logging_enabled_for(config: HarbormasterConfig, tool: str) -> bool:
+    """Per-tool gate. Each tool can opt out via [history] log_<tool> = false.
+    Unknown tools default to enabled (matches "if history.enabled = true,
+    log everything new")."""
+    if not config.history.enabled:
+        return False
+    flag_name = f"log_{tool}"
+    return bool(getattr(config.history, flag_name, True))
+
+
+def _maybe_record_qa(
+    *,
+    config: HarbormasterConfig,
+    project_name: str,
+    host: str | None,
+    prompt: str,
+    answer: str,
+    tool: str,
+    duration_ms: int,
+) -> None:
+    """Best-effort write of the trajectory to the local sqlite Q&A
+    history store. Mirrors _maybe_writeback_to_fleetq's three-gate
+    pattern; the store opens the per-host db, inserts, and closes.
+
+    Skipped silently when:
+      - [history] is disabled
+      - log_<tool> is false for this tool
+      - the [history] extra is not installed (or fastembed import fails
+        and we have not yet decided on FTS5 fallback)
+
+    Failures inside the store (sqlite errors, embedding failures) are
+    logged at WARNING level but never propagate. Same fire-and-forget
+    semantics as the FleetQ writeback.
+    """
+    if not _history_logging_enabled_for(config, tool):
+        return
+
+    try:
+        from harbormaster.history import (
+            QARecord,
+            QAStore,
+            get_embedding_backend,
+        )
+    except ImportError:
+        return
+
+    try:
+        backend = get_embedding_backend(config)
+        store = QAStore.open(
+            db_dir=config.history.db_dir,
+            host=host,
+            embedding_backend=backend,
+            embedding_dim=config.history.embedding_dim,
+        )
+    except Exception:
+        logger.exception("opening history store failed; skipping record")
+        return
+
+    try:
+        store.record(
+            QARecord(
+                question=prompt,
+                answer=answer,
+                project=project_name,
+                host=host or "local",
+                tool=tool,
+                duration_ms=duration_ms,
+            )
+        )
+    except Exception:
+        logger.exception("history record failed; swallowing")
+    finally:
+        try:
+            store.prune(
+                retain_recent_k=config.history.retain_recent_k,
+                retain_top_recalled_r=config.history.retain_top_recalled_r,
+            )
+        except Exception:
+            logger.exception("history prune failed; swallowing")
+        store.close()
 
 
 def make_local_backend_stream(

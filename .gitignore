@@ -5,3 +5,5 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 .DS_Store
+.serena/
+.mypy_cache/
