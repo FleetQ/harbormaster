@@ -12,6 +12,36 @@
   {% endif %}
 </nav>
 
+{# v19.0.0a2: tab system. Tabs live above main pane content; URL hash
+   #tab=<id> persists active tab across reloads; keyboard shortcuts 1-5
+   cycle tabs (skipped when typing in inputs/textareas). The Overview
+   tab carries the existing project header + status; Trajectories tab
+   wraps the existing trajectoryList component (relocated, not
+   duplicated); Memories / Q&A History tabs are placeholders that land
+   in v19.0.0a6 / v19.0.0a5; Settings shows read-only metadata until
+   v19.0.0a4 adds per-project budget edit. #}
+<div x-data="projectTabs()" x-init="restoreFromHash()">
+  <nav id="hm-project-tabs" class="border-b border-border mb-4 -mt-4 -mx-4 px-4">
+    <ul class="flex gap-0" role="tablist">
+      <template x-for="tab in tabs" :key="tab.id">
+        <li>
+          <button type="button"
+                  @click="setTab(tab.id)"
+                  :class="active === tab.id ? 'text-accent border-accent-strong' : 'text-foreground-muted border-transparent hover:text-foreground'"
+                  class="px-3 py-2 text-sm border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                  :aria-selected="active === tab.id"
+                  :aria-label="tab.label + ' tab (shortcut ' + tab.shortcut + ')'"
+                  role="tab">
+            <span x-text="tab.label"></span>
+            <kbd class="ml-1 text-xs opacity-50" x-text="tab.shortcut"></kbd>
+          </button>
+        </li>
+      </template>
+    </ul>
+  </nav>
+
+  <!-- Overview tab: existing project header + status. -->
+  <section x-show="active === 'overview'" x-transition role="tabpanel" aria-label="Overview">
 <header class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40">
   <div class="flex items-baseline justify-between gap-4 flex-wrap">
     <h2 class="text-xl font-bold text-accent">{{ project_name }}</h2>
@@ -52,6 +82,16 @@
 
 {% include "_partials/ask_form.html" %}
 {% include "_partials/delegate_form.html" %}
+  </section>
+
+  <!-- Memories tab: placeholder for v19.0.0a6 dedicated editor; the
+       existing memoriesPanel viewer/editor remains mounted below the
+       banner so current edit/diff/history flows keep working until
+       a6's redesign lands. -->
+  <section x-show="active === 'memories'" x-transition role="tabpanel" aria-label="Memories">
+    <div class="text-sm text-foreground-muted p-4 mb-4 text-center border border-border rounded bg-gray-900/40">
+      Memories editor — full implementation lands in v19.0.0a6.
+    </div>
 
 {# v10.0.0a5: per-project memories viewer (read-only). Lists
    CLAUDE.md + .serena/memories/*.md for the current project; click a
@@ -904,7 +944,11 @@
     };
   }
 </script>
+  </section>
 
+  <!-- Trajectories tab: relocated trajectoryList component (v19.0.0a2;
+       previously rendered standalone below the memories panel). -->
+  <section x-show="active === 'trajectories'" x-transition role="tabpanel" aria-label="Trajectories">
 <!-- v2.1.0a6: trajectory history. Pulls from /api/trajectories
      filtered by this project. Each row is a collapsible Q&A pair. -->
 <!-- v3.0.0a8: cross-section refresh — listen for hm:trajectory:dirty
@@ -1156,6 +1200,80 @@
           return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
         return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      },
+    };
+  }
+</script>
+  </section>
+
+  <!-- Q&A History tab: project-scoped recall lands in v19.0.0a5. -->
+  <section x-show="active === 'qa-history'" x-transition role="tabpanel" aria-label="Q and A History">
+    <div class="text-sm text-foreground-muted p-8 text-center border border-border rounded bg-gray-900/40">
+      Project-scoped Q&amp;A history search — full impl in v19.0.0a5.
+    </div>
+  </section>
+
+  <!-- Settings tab: read-only metadata (v19.0.0a2). Per-project budget
+       edit lands in a4+. Renders nothing on remote-host views since
+       `project` is None there (matches the existing header guard). -->
+  <section x-show="active === 'settings'" x-transition role="tabpanel" aria-label="Settings">
+    {% if project %}
+      <dl class="grid grid-cols-2 gap-2 text-sm border border-border rounded-lg p-4 bg-gray-900/40">
+        <dt class="text-foreground-muted">Project name</dt>
+        <dd class="text-foreground">{{ project.name }}</dd>
+        <dt class="text-foreground-muted">Path</dt>
+        <dd class="font-mono text-xs text-foreground break-all">{{ project.path }}</dd>
+        <dt class="text-foreground-muted">Last commit</dt>
+        <dd class="font-mono text-xs text-foreground">
+          {% if project.last_commit %}{{ project.last_commit.hash }}{% else %}(no git){% endif %}
+        </dd>
+        <dt class="text-foreground-muted">Language</dt>
+        <dd class="text-foreground">{{ project.language or 'unknown' }}</dd>
+        <dt class="text-foreground-muted">Daily call budget</dt>
+        <dd class="text-foreground">inherits</dd>
+      </dl>
+    {% else %}
+      <p class="text-sm text-foreground-muted p-4 text-center border border-border rounded bg-gray-900/40">
+        Settings are unavailable for remote-host project views.
+      </p>
+    {% endif %}
+  </section>
+</div>
+
+<script>
+  // v19.0.0a2: tab system controller. URL hash (#tab=<id>) drives the
+  // active tab so reloads + bookmarks are sticky; keyboard 1..5 cycles
+  // tabs (skipped when typing in inputs/textareas, or when modifier
+  // keys are held — those belong to the command palette / browser).
+  function projectTabs() {
+    return {
+      tabs: [
+        { id: 'overview',     label: 'Overview',     shortcut: '1' },
+        { id: 'memories',     label: 'Memories',     shortcut: '2' },
+        { id: 'trajectories', label: 'Trajectories', shortcut: '3' },
+        { id: 'qa-history',   label: 'Q&A History',  shortcut: '4' },
+        { id: 'settings',     label: 'Settings',     shortcut: '5' },
+      ],
+      active: 'overview',
+
+      restoreFromHash() {
+        const m = window.location.hash.match(/^#tab=([\w-]+)$/);
+        if (m && this.tabs.find(t => t.id === m[1])) this.active = m[1];
+
+        window.addEventListener('keydown', (e) => {
+          if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+          if (e.target.isContentEditable) return;
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
+          if (/^[1-5]$/.test(e.key)) {
+            const idx = parseInt(e.key, 10) - 1;
+            if (this.tabs[idx]) this.setTab(this.tabs[idx].id);
+          }
+        });
+      },
+
+      setTab(id) {
+        this.active = id;
+        window.history.replaceState(null, '', '#tab=' + id);
       },
     };
   }
