@@ -31,6 +31,14 @@
             class="px-2 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent">
       Chat
     </button>
+    <!-- v14.0.0a4: timeline view — horizontal-bar event density -->
+    <button type="button" id="hm-network-view-timeline"
+            x-data
+            @click="$dispatch('hm:network:view', 'timeline')"
+            aria-label="Switch to timeline view"
+            class="px-2 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent">
+      Timeline
+    </button>
   </div>
 </header>
 
@@ -225,6 +233,61 @@
       </li>
     </template>
   </ul>
+
+  <!-- v14.0.0a4: timeline view — horizontal-bar event-density chart.
+       Pure inline SVG (no new vendor deps). 1h window uses 1-min
+       buckets (60 bars); 24h uses 1-hour buckets (24 bars). Each
+       bar's height is proportional to event count in that bucket. -->
+  <div x-show="view === 'timeline' && events.length > 0"
+       id="hm-network-timeline"
+       class="border border-border rounded bg-surface-1 p-3"
+       style="min-height: 60vh;">
+    <div class="flex items-center justify-between gap-2 mb-3 text-xs">
+      <span class="text-foreground-muted">
+        Event density —
+        <span x-text="timelineWindow === '1h' ? 'last hour (1-min buckets)' : 'last 24h (1-hour buckets)'"></span>
+      </span>
+      <div class="flex items-center gap-1" role="group" aria-label="Timeline window">
+        <button type="button"
+                @click="timelineWindow = '1h'"
+                :aria-pressed="timelineWindow === '1h'"
+                :class="timelineWindow === '1h'
+                        ? 'border-accent-strong text-accent bg-cyan-900/30'
+                        : 'border-border text-foreground-muted hover:text-accent'"
+                class="px-2 py-0.5 rounded border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          1h
+        </button>
+        <button type="button"
+                @click="timelineWindow = '24h'"
+                :aria-pressed="timelineWindow === '24h'"
+                :class="timelineWindow === '24h'
+                        ? 'border-accent-strong text-accent bg-cyan-900/30'
+                        : 'border-border text-foreground-muted hover:text-accent'"
+                class="px-2 py-0.5 rounded border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          24h
+        </button>
+      </div>
+    </div>
+    <svg :viewBox="`0 0 ${timelineBuckets.length * 8} 100`"
+         preserveAspectRatio="none"
+         class="w-full h-32 bg-gray-950/40 rounded"
+         role="img"
+         :aria-label="`${timelineEventsTotal} events over the last ${timelineWindow}`">
+      <template x-for="(b, i) in timelineBuckets" :key="'tb:' + i">
+        <rect :x="i * 8"
+              :y="100 - (timelineMaxBucket > 0 ? (b.count / timelineMaxBucket) * 100 : 0)"
+              width="7"
+              :height="timelineMaxBucket > 0 ? (b.count / timelineMaxBucket) * 100 : 0"
+              :class="b.count > 0 ? 'fill-accent' : 'fill-transparent'">
+          <title x-text="`${b.label}: ${b.count} events`"></title>
+        </rect>
+      </template>
+    </svg>
+    <p class="text-[11px] text-foreground-subtle mt-2">
+      <span x-text="timelineEventsTotal"></span> events ·
+      peak bucket: <span x-text="timelineMaxBucket"></span>
+    </p>
+  </div>
 </section>
 
 <script src="/static/vendor/cytoscape.min.js"></script>
@@ -235,6 +298,9 @@
       // to 'graph' on first visit; subsequent loads pick up the
       // operator's last toggle.
       view: 'graph',          // toggled by hm:network:view dispatch from header
+      // v14.0.0a4: timeline view state. Default 1h; switch to 24h
+      // when the operator wants the bigger picture.
+      timelineWindow: '1h',
       events: [],
       cy: null,
       connected: false,
@@ -320,7 +386,8 @@
         // v10.0.0a8: restore the last-used view.
         try {
           const saved = localStorage.getItem('hm:network:view');
-          if (saved === 'chat' || saved === 'graph') this.view = saved;
+          // v14.0.0a4: 'timeline' is now an accepted persisted view.
+          if (saved === 'chat' || saved === 'graph' || saved === 'timeline') this.view = saved;
         } catch (_) { /* default 'graph' */ }
         // Listen for the header view-toggle. Persist on change.
         window.addEventListener('hm:network:view', (e) => {
@@ -375,6 +442,49 @@
         this._chatOrderCache = [...this.events].reverse();
         this._chatOrderEventsLen = this.events.length;
         return this._chatOrderCache;
+      },
+
+      // v14.0.0a4: bucket events into per-minute (1h window) or
+      // per-hour (24h window) bins. Pure client-side — operates on
+      // the same `events` array the chat view uses, so no extra
+      // network round-trip. Returns array of {label, count} ascending
+      // chronologically (oldest left, newest right).
+      get timelineBuckets() {
+        const isHour = this.timelineWindow === '24h';
+        const bucketCount = isHour ? 24 : 60;
+        const bucketMs = isHour ? (60 * 60 * 1000) : (60 * 1000);
+        const now = Date.now();
+        const start = now - bucketCount * bucketMs;
+        const buckets = [];
+        for (let i = 0; i < bucketCount; i++) {
+          const t = start + i * bucketMs;
+          const d = new Date(t);
+          const label = isHour
+            ? `${d.getHours().toString().padStart(2, '0')}:00`
+            : `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+          buckets.push({ label, count: 0 });
+        }
+        for (const ev of this.events) {
+          if (!ev.timestamp_ms || ev.timestamp_ms < start || ev.timestamp_ms > now) continue;
+          const idx = Math.min(
+            bucketCount - 1,
+            Math.floor((ev.timestamp_ms - start) / bucketMs),
+          );
+          buckets[idx].count++;
+        }
+        return buckets;
+      },
+
+      get timelineMaxBucket() {
+        let m = 0;
+        for (const b of this.timelineBuckets) if (b.count > m) m = b.count;
+        return m;
+      },
+
+      get timelineEventsTotal() {
+        let n = 0;
+        for (const b of this.timelineBuckets) n += b.count;
+        return n;
       },
 
       async _loadInitial() {

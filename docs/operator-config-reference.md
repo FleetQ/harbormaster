@@ -110,6 +110,7 @@ project-targeting tools can target via `host="<label>"`.
 | `backend`         | `str`     | `"claude"`    | Backend name to invoke remotely. Must exist in `[backends.<name>]`. |
 | `connect_timeout` | `int` (s) | `10`          | Passed to `ssh -o ConnectTimeout`. |
 | `total_timeout`   | `int` (s) | `120`         | Outer wall-clock budget (kills the remote command after N seconds). |
+| `daily_call_budget` | `int`   | _none_        | v14.0.0a4: optional soft cap on the number of MCP calls routed to this host per 24h. Surfaced via `GET /api/hosts/budget` and the dashboard KPI strip. `None` (default) means no budget tracked. |
 
 ```toml
 [hosts.friday]

@@ -58,9 +58,9 @@
      / dispatcher state without scanning the body. Auto-refreshes
      every 30s; soft-fails per cell if the underlying source is
      missing. -->
-<section x-data="kpiStrip()" x-init="loadKpi(); startPolling()"
+<section x-data="kpiStrip()" x-init="loadKpi(); loadBudget(); startPolling()"
          aria-label="Dashboard at-a-glance metrics"
-         class="mb-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+         class="mb-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
   <div class="border border-border rounded-lg p-3 bg-gray-900/40"
        data-kpi-cell="projects">
     <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Projects</p>
@@ -97,6 +97,17 @@
     <p class="text-sm font-bold pt-1.5 text-success"
        x-text="kpi.dispatcher ?? '—'"
        :aria-label="`Dispatcher ${kpi.dispatcher || 'unknown'}`"></p>
+  </div>
+  <!-- v14.0.0a4: per-host call budget summary. Shows the worst-usage
+       host's percentage; "—" if no hosts have a budget configured.
+       Click cell-text to navigate to /network for the full breakdown. -->
+  <div class="border border-border rounded-lg p-3 bg-gray-900/40"
+       data-kpi-cell="hosts-budget">
+    <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Host budget</p>
+    <p class="text-2xl font-bold pt-0.5"
+       :class="hostBudgetClass()"
+       x-text="hostBudgetLabel()"
+       :aria-label="hostBudgetAriaLabel()"></p>
   </div>
 </section>
 
@@ -656,6 +667,9 @@
   function kpiStrip() {
     return {
       kpi: {},
+      // v14.0.0a4: per-host call budget summary. Loaded separately so
+      // the existing /api/kpi shape doesn't have to grow.
+      hostBudget: { hosts: [] },
       _interval: null,
 
       async loadKpi() {
@@ -668,8 +682,21 @@
         }
       },
 
+      // v14.0.0a4: hits /api/hosts/budget every 30s alongside the
+      // KPI poll. Soft-fails (leaves hostBudget.hosts = []).
+      async loadBudget() {
+        try {
+          const r = await hmFetch('/api/hosts/budget');
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          this.hostBudget = await r.json();
+        } catch (_) { /* soft-fail */ }
+      },
+
       startPolling() {
-        this._interval = setInterval(() => this.loadKpi(), 30000);
+        this._interval = setInterval(() => {
+          this.loadKpi();
+          this.loadBudget();
+        }, 30000);
       },
 
       activeEmbedsLabel() {
@@ -706,6 +733,39 @@
           disconnected: 'text-danger',
         };
         return map[state] || 'text-foreground-muted';
+      },
+
+      // v14.0.0a4: pick the worst-usage configured host for the cell.
+      // Hosts without a budget set are filtered out.
+      _worstBudgetUsage() {
+        const tracked = (this.hostBudget.hosts || [])
+          .filter(h => h.budget != null && h.usage_pct != null);
+        if (tracked.length === 0) return null;
+        let worst = tracked[0];
+        for (const h of tracked) {
+          if (h.usage_pct > worst.usage_pct) worst = h;
+        }
+        return worst;
+      },
+
+      hostBudgetLabel() {
+        const w = this._worstBudgetUsage();
+        if (!w) return '—';
+        return `${w.usage_pct}%`;
+      },
+
+      hostBudgetClass() {
+        const w = this._worstBudgetUsage();
+        if (!w) return 'text-foreground-muted';
+        if (w.usage_pct >= 100) return 'text-danger';
+        if (w.usage_pct >= 80) return 'text-warning';
+        return 'text-success';
+      },
+
+      hostBudgetAriaLabel() {
+        const w = this._worstBudgetUsage();
+        if (!w) return 'No host call budgets configured';
+        return `Worst host budget: ${w.host} at ${w.usage_pct}% of ${w.budget} calls/24h`;
       },
     };
   }
