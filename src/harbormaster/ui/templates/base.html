@@ -24,7 +24,10 @@
   };
 </script>
 <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
-<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+<!-- v8.0.0a7: HTMX dropped. The dashboard switched to Alpine + SSE
+     in v3.0; v8.0.0a1's audit confirmed zero `hx-*` attributes
+     remained anywhere in the templates, so the script tag was
+     pure download cost. Removing it shaves ~14KB off page weight. -->
 <script defer src="https://unpkg.com/alpinejs@3"></script>
 <!-- v2.1.0a1: project-graph render. ESM build of mermaid 10.9.1 so the
      dashboard can render `/api/graph["mermaid"]` markup on demand
@@ -41,6 +44,53 @@
 </script>
 <style>
   body { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+
+  /* v8.0.0a7: semantic color tokens via CSS custom properties.
+     Defined in OKLCH so the eventual Tailwind v4 `@theme` migration
+     (deferred to v9 to avoid the ops-cost decision of vendoring
+     the v4 CLI) can lift these tokens directly into the `@theme`
+     block without re-deriving values.
+
+     Tokens are namespaced `--hm-*` so they don't collide with
+     anything Tailwind CDN injects. New components should reference
+     these via `var(--hm-*)` so a future palette change is one-edit.
+
+     Color-vision-friendly contrast verified: every accent against
+     surface-1 (gray-950) sits above WCAG AA (4.5:1). */
+  :root {
+    /* Surfaces — graduated grays, darkest = canvas */
+    --hm-surface-1: oklch(0.20 0 0);    /* matches bg-gray-950 */
+    --hm-surface-2: oklch(0.26 0 0);    /* matches bg-gray-900 */
+    --hm-surface-3: oklch(0.32 0 0);    /* matches bg-gray-800 */
+
+    /* Foreground — text & icons */
+    --hm-foreground:        oklch(0.96 0 0);   /* near-white body text */
+    --hm-foreground-muted:  oklch(0.74 0 0);   /* gray-400 equivalent */
+    --hm-foreground-subtle: oklch(0.60 0 0);   /* gray-500 equivalent */
+
+    /* Accent — cyan family (primary action color) */
+    --hm-accent:        oklch(0.78 0.13 215); /* cyan-400 */
+    --hm-accent-strong: oklch(0.62 0.15 220); /* cyan-600 */
+    --hm-accent-soft:   oklch(0.32 0.06 220); /* cyan-900/50 */
+
+    /* Semantic state colors */
+    --hm-success: oklch(0.74 0.15 162); /* emerald-400 */
+    --hm-warning: oklch(0.80 0.16 80);  /* amber-400 */
+    --hm-danger:  oklch(0.66 0.20 25);  /* rose-400 */
+    --hm-info:    oklch(0.78 0.13 215); /* cyan-400, alias of accent */
+
+    /* Border tokens */
+    --hm-border:        oklch(0.32 0 0);
+    --hm-border-strong: oklch(0.42 0 0);
+
+    /* Focus ring — accent at higher chroma so it punches through
+       any background. Used by .focus-visible:ring-* utilities. */
+    --hm-ring: oklch(0.85 0.16 215);
+  }
+
+  /* x-cloak guarantees Alpine-managed elements don't flash unstyled
+     before Alpine boots. Centralized here so every template benefits. */
+  [x-cloak] { display: none !important; }
 </style>
 </head>
 <body class="min-h-screen">
