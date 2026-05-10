@@ -9,12 +9,14 @@
       host: initial.host,
       question: '', maxTurns: 5,
       streamText: '', chunks: 0, error: '',
+      usage: null, // v9.0.0a5: typed `usage` event payload
       loading: false, hasResult: false, elapsedMs: 0,
       _abortController: null,
 
       async ask() {
         if (this.question.trim().length < 3) return;
         this.streamText = ''; this.chunks = 0; this.error = '';
+        this.usage = null;
         this.hasResult = false; this.loading = true;
         this.elapsedMs = 0;
         const t0 = performance.now();
@@ -81,6 +83,13 @@
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        // v9.0.0a5: typed-events migration. The server emits BOTH
+        // legacy `chunk` (data.text) AND new `token` (data.delta) for
+        // every text delta — with separate ids per event. We prefer
+        // `token` and ignore the matching `chunk` to avoid double-counting.
+        // Strategy: if we ever see a `token` event we set a flag and
+        // ignore subsequent `chunk` events for the rest of the stream.
+        let preferTokenEvents = false;
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -89,12 +98,40 @@
           buffer = events.pop() || '';
           for (const block of events) {
             const ev = this._parseEvent(block);
-            if (ev.event === 'chunk') {
+            if (ev.event === 'token') {
+              // v9.0.0a5: typed token event.
+              preferTokenEvents = true;
               try {
                 const parsed = JSON.parse(ev.data);
-                this.streamText += (parsed.delta ?? parsed.chunk ?? '');
+                this.streamText += (parsed.delta ?? '');
+                this.chunks += 1;
+              } catch (_) { /* drop malformed token */ }
+            } else if (ev.event === 'chunk') {
+              if (preferTokenEvents) continue;
+              try {
+                const parsed = JSON.parse(ev.data);
+                this.streamText += (parsed.delta ?? parsed.text ?? parsed.chunk ?? '');
                 this.chunks += 1;
               } catch (_) { /* drop malformed chunk */ }
+            } else if (ev.event === 'tool') {
+              // v9.0.0a5: tool-call notice. Render inline as a faint
+              // badge so operators see when the model invoked a tool.
+              try {
+                const parsed = JSON.parse(ev.data);
+                const phase = parsed.phase || 'start';
+                const name = parsed.tool_name || 'tool';
+                this.streamText += `\n[tool ${phase}: ${name}]\n`;
+              } catch (_) { /* drop malformed tool event */ }
+            } else if (ev.event === 'usage') {
+              // v9.0.0a5: usage stats arrive just before `result`.
+              // Surface the chunk count for the operator if no real
+              // token counter is available yet.
+              try {
+                const parsed = JSON.parse(ev.data);
+                if (parsed.output_chunks !== undefined) {
+                  this.usage = parsed;
+                }
+              } catch (_) { /* ignore */ }
             } else if (ev.event === 'result') {
               try {
                 const parsed = JSON.parse(ev.data);

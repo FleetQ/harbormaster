@@ -1419,6 +1419,13 @@ async def _emit_chunks_then_result(
 
     v9.0.0a4: every emitted event carries a per-stream monotonic
     SSE ``id`` so the browser's EventSource records ``lastEventId``.
+
+    v9.0.0a5: every text delta emits BOTH a legacy ``chunk`` event
+    (data = ``{"text": ...}``) AND a typed ``token`` event
+    (data = ``{"delta": ...}``). The ``chunk`` event is deprecated
+    and will be removed in v10 — clients should migrate to ``token``.
+    A final ``usage`` event with best-effort counters precedes the
+    terminal ``result`` event.
     """
     chunks: list[str] = []
     sentinel = object()
@@ -1454,11 +1461,37 @@ async def _emit_chunks_then_result(
         if chunk is sentinel:
             break
         chunks.append(chunk)
+        # v9.0.0a5: emit BOTH events for one full version. Legacy
+        # consumers reading `chunk` keep working; new consumers read
+        # `token`. Each carries its own monotonic id so reconnect
+        # de-dup is unambiguous.
         yield {
             "event": "chunk",
             "id": next_id.next(),
             "data": json.dumps({"text": chunk}),
         }
+        yield {
+            "event": "token",
+            "id": next_id.next(),
+            "data": json.dumps({"delta": chunk}),
+        }
+
+    # v9.0.0a5: best-effort usage event. We don't have real
+    # token counting yet — the backends emit text deltas, not
+    # token boundaries. Approximate `output_tokens` as the chunk
+    # count so dashboards have a directional signal until backend
+    # instrumentation lands. Documented as approximate.
+    yield {
+        "event": "usage",
+        "id": next_id.next(),
+        "data": json.dumps(
+            {
+                "output_chunks": len(chunks),
+                "output_chars": sum(len(c) for c in chunks),
+                "approximate": True,
+            }
+        ),
+    }
 
     envelope = {
         "result": {

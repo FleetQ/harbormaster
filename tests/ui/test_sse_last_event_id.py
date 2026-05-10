@@ -201,7 +201,11 @@ def test_ready_event_includes_resumed_from(trace_client: TestClient) -> None:
 
 def test_emit_chunks_then_result_yields_ids() -> None:
     """The chunk pipeline used by ask_project / delegate_task / fan_out
-    streams must emit one id per event."""
+    streams must emit one id per event.
+
+    v9.0.0a5 layered typed events on top: each text delta now emits
+    BOTH `chunk` and `token`, plus a final `usage` before `result`.
+    """
     from harbormaster.ui.routes import _emit_chunks_then_result
 
     def fake_iter() -> Any:
@@ -215,12 +219,12 @@ def test_emit_chunks_then_result_yields_ids() -> None:
         return out
 
     events = asyncio.run(collect())
-    # Two chunks + one result.
-    assert len(events) == 3
-    assert all("id" in ev for ev in events), [list(ev.keys()) for ev in events]
+    # 2 chunks * (chunk + token) + usage + result = 6 events.
+    kinds = [ev["event"] for ev in events]
+    assert kinds == ["chunk", "token", "chunk", "token", "usage", "result"]
+    assert all("id" in ev for ev in events)
     ids = [int(ev["id"]) for ev in events]
-    # IDs are monotonic (1, 2, 3).
-    assert ids == [1, 2, 3]
-    assert events[0]["event"] == "chunk"
-    assert events[1]["event"] == "chunk"
-    assert events[2]["event"] == "result"
+    # IDs are strictly monotonic.
+    assert ids == sorted(ids)
+    assert ids[0] == 1
+    assert len(set(ids)) == len(ids)
