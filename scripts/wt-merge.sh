@@ -30,23 +30,30 @@
 #
 #   bash scripts/wt-merge.sh                          # uses current branch name
 #   bash scripts/wt-merge.sh feat/v12.0-foo           # explicit branch
+#   bash scripts/wt-merge.sh --dry-run                # preview without pushing/merging
 #   bash scripts/wt-merge.sh --help
 #
 # Exit codes:
 #   0  success
 #   1  invariant violated (e.g. dirty tree, run from main)
 #   2  push or merge failed
+#
+# v14.0.0a1: added --dry-run flag (invariants still checked, but no
+# push or merge is executed) so operators can verify the parent-detect
+# logic before committing to the side-effecting flow.
 set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: wt-merge.sh [BRANCH]
+Usage: wt-merge.sh [--dry-run] [BRANCH]
 
 Push the current worktree branch and merge it (--no-ff) into the
 parent repo's main. Run from inside a git worktree.
 
-  BRANCH    Branch to push + merge. Defaults to the current branch.
-  --help    Show this help.
+  BRANCH      Branch to push + merge. Defaults to the current branch.
+  --dry-run   Print what would happen without pushing or merging.
+              All invariants are still checked.
+  --help      Show this help.
 
 Invariants enforced:
   - Working tree must be clean (commit first).
@@ -62,12 +69,30 @@ Exit codes:
 USAGE
 }
 
-case "${1:-}" in
-  --help|-h)
-    usage
-    exit 0
-    ;;
-esac
+DRY_RUN=0
+# Consume optional --dry-run anywhere in the args; remaining positional
+# is treated as BRANCH. Backwards-compat with v12.0.0a5 callers.
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --dry-run|-n)
+      DRY_RUN=1
+      ;;
+    *)
+      ARGS+=("$arg")
+      ;;
+  esac
+done
+# Restore positional args (may be empty — guard against `set -u` here).
+if [ ${#ARGS[@]} -gt 0 ]; then
+  set -- "${ARGS[@]}"
+else
+  set --
+fi
 
 BRANCH="${1:-$(git symbolic-ref --short HEAD 2>/dev/null || true)}"
 if [ -z "$BRANCH" ]; then
@@ -112,6 +137,14 @@ if [ -z "$PARENT" ]; then
 fi
 
 REMOTE="${REMOTE:-origin}"
+
+if [ "$DRY_RUN" = "1" ]; then
+  echo "wt-merge: DRY RUN — invariants OK"
+  echo "wt-merge: would push  $BRANCH -> $REMOTE"
+  echo "wt-merge: would merge $BRANCH into main at $PARENT (--no-ff)"
+  echo "wt-merge: no changes made."
+  exit 0
+fi
 
 echo "wt-merge: pushing $BRANCH to $REMOTE (backup)…"
 if ! git push "$REMOTE" "$BRANCH"; then

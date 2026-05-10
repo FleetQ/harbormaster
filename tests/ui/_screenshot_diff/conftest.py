@@ -38,6 +38,21 @@ def is_bootstrap_mode() -> bool:
     return os.environ.get("HM_SCREENSHOT_BOOTSTRAP") == "1"
 
 
+def is_autobootstrap_mode() -> bool:
+    """Return True when missing baselines should be auto-blessed in-place.
+
+    v14.0.0a1: when ``HM_SCREENSHOT_AUTOBOOTSTRAP=1`` is set, the harness
+    writes the captured screenshot directly to the baseline path (not
+    ``__actual.png``) and the test passes. Designed for CI ``main``-push
+    runs so a deliberately-shipped UI change auto-blesses on the first
+    post-merge build, then subsequent PR runs assert against it.
+
+    Distinct from :func:`is_bootstrap_mode`, which only writes
+    ``__actual.png`` for human review and skips the test.
+    """
+    return os.environ.get("HM_SCREENSHOT_AUTOBOOTSTRAP") == "1"
+
+
 @pytest.fixture
 def screenshot_page(page):  # type: ignore[no-untyped-def]
     """Yield a Playwright page already sized to the harness viewport.
