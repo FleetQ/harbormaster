@@ -100,10 +100,17 @@
   [x-cloak] { display: none !important; }
 </style>
 </head>
-<body class="min-h-screen">
-<header class="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-  <div class="flex items-baseline gap-3">
-    <!-- v8.0.0a6: hamburger toggle for the sidebar (mobile only). -->
+<body class="h-screen overflow-hidden">
+<!-- v10.0.0a3: full app-shell layout.
+     The body is height-fixed and `overflow-hidden`; the topbar and
+     sidebar are `position: fixed`; the main content area scrolls in
+     its own context. This guarantees nav is always visible no matter
+     how long the page content is. Footer collapses into a slim
+     bottom-bar that's part of the shell, not the scroll context. -->
+<header id="hm-topbar"
+        class="fixed top-0 inset-x-0 z-40 h-12 bg-gray-950 border-b border-gray-800 px-4 flex items-center justify-between">
+  <div class="flex items-center gap-3 min-w-0">
+    <!-- Hamburger toggle for the sidebar (mobile only). -->
     <button type="button"
             x-data
             @click="$dispatch('hm:sidebar:toggle')"
@@ -111,17 +118,22 @@
             class="md:hidden text-gray-300 hover:text-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950 px-1">
       <span aria-hidden="true">☰</span>
     </button>
-    <span class="text-2xl" aria-hidden="true">⚓</span>
-    <h1 class="text-xl font-bold">Harbormaster</h1>
-    <span class="text-gray-500 text-sm">v{{ version }}</span>
+    <a href="/" class="flex items-baseline gap-2 hover:text-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+      <span class="text-xl" aria-hidden="true">⚓</span>
+      <span class="text-base font-bold tracking-tight">Harbormaster</span>
+      <span class="text-gray-500 text-xs">v{{ version }}</span>
+    </a>
   </div>
-  <nav class="flex gap-4 text-sm">
+  <nav class="flex gap-3 text-sm" aria-label="Primary navigation">
+    <!-- v10.0.0a3: removed /api/projects + /api/health (operator
+         flagged useless). KEEP Dashboard / Fan-out / Dispatcher. -->
     <a href="/" class="text-gray-300 hover:text-cyan-400">Dashboard</a>
     <a href="/tools/fan-out" class="text-gray-300 hover:text-cyan-400">Fan-out</a>
     <a href="/dispatcher" class="text-gray-300 hover:text-cyan-400">Dispatcher</a>
-    <a href="/api/projects" class="text-gray-300 hover:text-cyan-400">/api/projects</a>
-    <a href="/api/health" class="text-gray-300 hover:text-cyan-400">/api/health</a>
     <a href="https://github.com/FleetQ/harbormaster" class="text-gray-300 hover:text-cyan-400">GitHub</a>
+    {% if auth_token %}
+    <span class="text-gray-500 text-xs hidden md:inline" title="Authenticated session">🔒</span>
+    {% endif %}
   </nav>
 </header>
 
@@ -140,12 +152,14 @@
        class="fixed inset-0 z-30 bg-gray-950/70 md:hidden"
        aria-hidden="true"></div>
 
-  <!-- Sidebar rail. -->
-  <aside :class="[
+  <!-- Sidebar rail. v10.0.0a3: top-12 to sit flush under the new
+       fixed h-12 topbar; bottom-7 leaves room for the slim footer. -->
+  <aside id="hm-sidebar"
+         :class="[
                   mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
                   railCollapsed ? 'md:w-12' : 'md:w-60',
                 ]"
-         class="fixed top-[57px] bottom-0 left-0 z-30 w-60 bg-gray-950 border-r border-gray-800 transform transition-all overflow-y-auto"
+         class="fixed top-12 bottom-7 left-0 z-30 w-60 bg-gray-950 border-r border-gray-800 transform transition-all overflow-y-auto"
          role="navigation"
          aria-label="Project navigation">
     <div :class="railCollapsed ? 'p-2' : 'p-3'">
@@ -290,11 +304,16 @@
     </div>
   </aside>
 
-  <!-- Main content area, offset for sidebar on desktop. v9.0.0a6:
-       offset shrinks to 48px when rail is collapsed. -->
-  <main :class="railCollapsed ? 'md:ml-12' : 'md:ml-60'"
-        class="flex-1 px-6 py-6 max-w-7xl mx-auto transition-[margin]">
-    {% block content %}{% endblock %}
+  <!-- Main content area. v10.0.0a3: own scroll context — fixed
+       between the topbar (top-12) and the bottom footer-bar (bottom-7).
+       Desktop: offset by sidebar width (w-60 / w-12 collapsed).
+       Mobile: full width; sidebar slides in over content. -->
+  <main id="hm-main"
+        :class="railCollapsed ? 'md:left-12' : 'md:left-60'"
+        class="fixed top-12 bottom-7 left-0 right-0 overflow-y-auto transition-[left]">
+    <div class="px-6 py-6 max-w-7xl mx-auto">
+      {% block content %}{% endblock %}
+    </div>
   </main>
 </div>
 
@@ -764,8 +783,11 @@
     };
   }
 </script>
-<footer class="border-t border-gray-800 px-6 py-3 text-xs text-gray-500">
-  Part of the <a href="https://fleetq.net" class="text-cyan-500 hover:text-cyan-400">FleetQ</a> ecosystem · MIT
+<!-- v10.0.0a3: slim fixed footer-bar. Sits below the scrollable
+     main; reserved space via `bottom-7` on sidebar + main. -->
+<footer id="hm-footer"
+        class="fixed bottom-0 inset-x-0 z-40 h-7 border-t border-gray-800 px-4 text-[11px] text-gray-500 flex items-center bg-gray-950">
+  Part of the <a href="https://fleetq.net" class="text-cyan-500 hover:text-cyan-400 ml-1">FleetQ</a> ecosystem · MIT
 </footer>
 </body>
 </html>

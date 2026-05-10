@@ -99,6 +99,8 @@ def test_sidebar_loads_recent_from_trajectories() -> None:
 
 
 def test_sidebar_main_layout_offsets_for_rail() -> None:
-    """Main content area must reserve 240px on desktop for the rail."""
+    """Main content area must reserve 240px on desktop for the rail.
+    v10.0.0a3: switched from `ml-` (margin) to `left-` (positioning)
+    because `main` is now `position: fixed` for its own scroll context."""
     src = _read("base.html")
-    assert "md:ml-60" in src
+    assert "md:left-60" in src

@@ -102,11 +102,19 @@ def test_root_returns_dashboard_html(populated_config):
     assert "htmx" not in body
 
 
-def test_root_links_to_api_endpoints(populated_config):
+def test_root_topbar_omits_useless_api_endpoints(populated_config):
+    """v10.0.0a3: the topbar no longer exposes /api/projects and
+    /api/health (operator flagged as useless). The endpoints still
+    exist and respond — they just aren't surfaced as nav links.
+    """
     client = TestClient(create_app(populated_config))
     body = client.get("/").text
-    assert "/api/projects" in body
-    assert "/api/health" in body
+    # Nav literals must be gone from the topbar.
+    assert ">/api/projects<" not in body
+    assert ">/api/health<" not in body
+    # But hmFetch('/api/projects') in JS scope is unaffected — ensure
+    # we didn't accidentally also strip the legitimate JS reference.
+    assert "/api/projects" in body  # still referenced by sidebar JS
 
 
 # ----- v2.1.0a1 — Mermaid graph render + status panels ---------------------
