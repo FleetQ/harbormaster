@@ -312,6 +312,21 @@
       // .reverse() each time is wasteful when no new events arrived.
       _chatOrderCache: null,
       _chatOrderEventsLen: -1,
+      // v15.0.0a3: timeline bucket cache. SSE bursts can fire many
+      // events per second; without throttling the getter recomputes
+      // all 60 buckets each push. We cache buckets and invalidate at
+      // most once per second (the smallest visible bucket width).
+      _timelineCache: null,
+      _timelineCacheStamp: 0,
+      _timelineCacheWindow: '',
+      _timelineCacheLen: -1,
+      // v15.0.0a3: 1s interval handle for throttle tick.
+      _timelineThrottleTimer: null,
+      // v15.0.0a3: timeline reactivity bumper. Reading this in the
+      // getter creates an Alpine dep so the SVG re-paints when the
+      // throttle timer fires. We bump it every 1s when there are
+      // pending events; the getter re-runs and the cache is rebuilt.
+      _timelineTick: 0,
       // v13.0.0a4: server-side filters. `fromLocal` / `toLocal` hold
       // the datetime-local input strings ("YYYY-MM-DDTHH:MM"); they're
       // converted to unix-ms before being sent to the API. URL state
@@ -412,6 +427,9 @@
         await this._loadSourceOptions();
         await this._loadInitial();
         this._subscribe();
+        // v15.0.0a3: start the timeline throttle tick so SSE-driven
+        // bucket counts re-render at most once per second.
+        this._startTimelineThrottle();
         if (this.view === 'graph' && this.events.length > 0) this._renderGraph();
         this.initialized = true;
       },
@@ -427,6 +445,24 @@
           const data = await r.json();
           if (Array.isArray(data.sources)) this.sourceOptions = data.sources;
         } catch (_) { /* non-fatal */ }
+      },
+
+      // v15.0.0a3: live-add an event's caller (source) to the
+      // dropdown if it's not already there. Set-based dedup. Used
+      // by the SSE handler so newly-active sources appear without a
+      // page reload — closes the v14.a2 staleness gap.
+      _maybeAppendSourceOption(ev) {
+        const src = ev && ev.caller;
+        if (!src) return;
+        // sourceOptions is small (typically <50); a Set conversion
+        // here is cheap and avoids missing a fresh source under
+        // back-to-back SSE events.
+        if (!(this._sourceOptionsSet)) {
+          this._sourceOptionsSet = new Set(this.sourceOptions || []);
+        }
+        if (this._sourceOptionsSet.has(src)) return;
+        this._sourceOptionsSet.add(src);
+        this.sourceOptions = [...this.sourceOptions, src].sort();
       },
 
       // v10.0.0a8: chat view shows newest-first so the latest
@@ -449,11 +485,26 @@
       // the same `events` array the chat view uses, so no extra
       // network round-trip. Returns array of {label, count} ascending
       // chronologically (oldest left, newest right).
+      // v15.0.0a3: cached + 1s-throttled. SSE bursts no longer cause
+      // an O(N×60) recompute per event push. We invalidate when:
+      //   - the timeline window changed (1h ↔ 24h),
+      //   - the events.length changed AND the cached stamp is >1s old,
+      //   - or the periodic 1s _timelineTick bumper fired.
       get timelineBuckets() {
+        // Touch reactive deps so Alpine re-runs us on tick / event push.
+        // (Reading is enough — Alpine tracks the get.)
+        // eslint-disable-next-line no-unused-expressions
+        this._timelineTick;
+        const now = Date.now();
+        const sameWindow = this._timelineCacheWindow === this.timelineWindow;
+        const sameLen = this._timelineCacheLen === this.events.length;
+        const cacheFresh = (now - this._timelineCacheStamp) < 1000;
+        if (this._timelineCache && sameWindow && sameLen && cacheFresh) {
+          return this._timelineCache;
+        }
         const isHour = this.timelineWindow === '24h';
         const bucketCount = isHour ? 24 : 60;
         const bucketMs = isHour ? (60 * 60 * 1000) : (60 * 1000);
-        const now = Date.now();
         const start = now - bucketCount * bucketMs;
         const buckets = [];
         for (let i = 0; i < bucketCount; i++) {
@@ -472,7 +523,21 @@
           );
           buckets[idx].count++;
         }
+        this._timelineCache = buckets;
+        this._timelineCacheStamp = now;
+        this._timelineCacheWindow = this.timelineWindow;
+        this._timelineCacheLen = this.events.length;
         return buckets;
+      },
+
+      // v15.0.0a3: start the 1s throttle timer. Bumping
+      // `_timelineTick` triggers Alpine to re-evaluate the getter,
+      // which then sees the cache as stale (>1s) and rebuilds.
+      _startTimelineThrottle() {
+        if (this._timelineThrottleTimer) return;
+        this._timelineThrottleTimer = setInterval(() => {
+          this._timelineTick = (this._timelineTick + 1) % 1_000_000;
+        }, 1000);
       },
 
       get timelineMaxBucket() {
@@ -514,6 +579,10 @@
               this.events.push(ev);
               if (this.events.length > 500) this.events.shift();
               if (this.view === 'graph' && this.cy) this._addEventToGraph(ev);
+              // v15.0.0a3: live-add the source into the filter dropdown.
+              // Set-based dedup — appending an already-present option
+              // would duplicate the visible row.
+              this._maybeAppendSourceOption(ev);
             } catch (_) { /* drop malformed */ }
           });
           this._eventSource.addEventListener('open', () => {
