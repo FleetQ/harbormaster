@@ -83,13 +83,9 @@
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        // v9.0.0a5: typed-events migration. The server emits BOTH
-        // legacy `chunk` (data.text) AND new `token` (data.delta) for
-        // every text delta — with separate ids per event. We prefer
-        // `token` and ignore the matching `chunk` to avoid double-counting.
-        // Strategy: if we ever see a `token` event we set a flag and
-        // ignore subsequent `chunk` events for the rest of the stream.
-        let preferTokenEvents = false;
+        // v10.0.0a2: legacy `chunk` event removed server-side. Only
+        // typed `token` events are emitted per text delta. The
+        // double-emit migration helper from v9.0.0a5 is gone.
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -99,20 +95,11 @@
           for (const block of events) {
             const ev = this._parseEvent(block);
             if (ev.event === 'token') {
-              // v9.0.0a5: typed token event.
-              preferTokenEvents = true;
               try {
                 const parsed = JSON.parse(ev.data);
                 this.streamText += (parsed.delta ?? '');
                 this.chunks += 1;
               } catch (_) { /* drop malformed token */ }
-            } else if (ev.event === 'chunk') {
-              if (preferTokenEvents) continue;
-              try {
-                const parsed = JSON.parse(ev.data);
-                this.streamText += (parsed.delta ?? parsed.text ?? parsed.chunk ?? '');
-                this.chunks += 1;
-              } catch (_) { /* drop malformed chunk */ }
             } else if (ev.event === 'tool') {
               // v9.0.0a5: tool-call notice. Render inline as a faint
               // badge so operators see when the model invoked a tool.

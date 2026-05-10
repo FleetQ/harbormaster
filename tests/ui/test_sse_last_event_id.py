@@ -203,8 +203,8 @@ def test_emit_chunks_then_result_yields_ids() -> None:
     """The chunk pipeline used by ask_project / delegate_task / fan_out
     streams must emit one id per event.
 
-    v9.0.0a5 layered typed events on top: each text delta now emits
-    BOTH `chunk` and `token`, plus a final `usage` before `result`.
+    v10.0.0a2: legacy `chunk` event removed. Each text delta emits
+    one `token` event, plus a final `usage` before `result`.
     """
     from harbormaster.ui.routes import _emit_chunks_then_result
 
@@ -219,9 +219,9 @@ def test_emit_chunks_then_result_yields_ids() -> None:
         return out
 
     events = asyncio.run(collect())
-    # 2 chunks * (chunk + token) + usage + result = 6 events.
+    # 2 deltas * token + usage + result = 4 events (v10.0.0a2: no chunk).
     kinds = [ev["event"] for ev in events]
-    assert kinds == ["chunk", "token", "chunk", "token", "usage", "result"]
+    assert kinds == ["token", "token", "usage", "result"]
     assert all("id" in ev for ev in events)
     ids = [int(ev["id"]) for ev in events]
     # IDs are strictly monotonic.
