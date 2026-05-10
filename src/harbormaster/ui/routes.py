@@ -678,6 +678,73 @@ def register_routes(
         runs = read_reembed_runs()
         return {"runs": [r.model_dump(mode="json") for r in runs]}
 
+    @app.get("/api/history/reembed/runs/diff")
+    async def api_history_reembed_runs_diff(
+        from_: int = Query(..., alias="from"),
+        to: int = Query(...),
+    ) -> dict[str, object]:
+        """v13.0.0a3: parity with memory-revision diff — compare two
+        completed reembed runs by index.
+
+        Indices are zero-based offsets into the chronological list
+        returned by ``/api/history/reembed/runs`` (``from`` and ``to``
+        must both fall within that list). The response is a per-field
+        delta dict so the dashboard can render a compact "what
+        changed between these two runs" panel without re-deriving
+        differences client-side.
+
+        Shape::
+
+            {
+                "from_index": 3,
+                "to_index": 7,
+                "from": <ReembedRunRecord dict>,
+                "to": <ReembedRunRecord dict>,
+                "delta": {
+                    "duration_seconds": 12.4,  # to.finished_at - to.started_at - (...)
+                    "total":     +5,
+                    "succeeded": +3,
+                    "failed":    -1,
+                    "cancelled":  0,
+                    "model_changed": false
+                }
+            }
+
+        Returns 404 when either index is out of range, 503 when the
+        ``[history]`` extra isn't installed.
+        """
+        try:
+            from harbormaster.history import read_reembed_runs
+        except ImportError:
+            raise HTTPException(
+                503,
+                "[history] extra not installed; install with "
+                "`pip install harbormaster-mcp[history]`",
+            ) from None
+        runs = read_reembed_runs()
+        if from_ < 0 or from_ >= len(runs):
+            raise HTTPException(404, f"from index {from_} out of range")
+        if to < 0 or to >= len(runs):
+            raise HTTPException(404, f"to index {to} out of range")
+        a = runs[from_]
+        b = runs[to]
+        delta = {
+            "duration_seconds": (b.finished_at - b.started_at)
+            - (a.finished_at - a.started_at),
+            "total": b.total - a.total,
+            "succeeded": b.succeeded - a.succeeded,
+            "failed": b.failed - a.failed,
+            "cancelled": b.cancelled - a.cancelled,
+            "model_changed": (a.model or "") != (b.model or ""),
+        }
+        return {
+            "from_index": from_,
+            "to_index": to,
+            "from": a.model_dump(mode="json"),
+            "to": b.model_dump(mode="json"),
+            "delta": delta,
+        }
+
     @app.post("/api/history/reembed/cancel")
     async def api_history_reembed_cancel() -> dict[str, object]:
         """v7.0.0a3: request cooperative cancel of a running reembed.
@@ -1346,6 +1413,7 @@ def register_routes(
         name: str, file: str,
         from_: int = Query(..., alias="from"),
         to: int | None = None,
+        format: str = "unified",
     ) -> Response:
         """v12.0.0a4: unified-diff endpoint for memory revisions.
 
@@ -1355,9 +1423,16 @@ def register_routes(
           on-disk file content. This is the common operator action:
           "what changed between this revision and now?".
 
-        Output is a `text/plain; charset=utf-8` unified diff string
-        produced by `difflib.unified_diff`. The fromfile / tofile
-        labels carry the revision ids so the diff is self-describing.
+        Output formats (v13.0.0a3):
+
+        - `?format=unified` (default, v12.0.0a4 contract preserved) →
+          ``text/plain`` unified diff via ``difflib.unified_diff``.
+        - `?format=html` → ``text/html`` side-by-side diff via
+          ``difflib.HtmlDiff().make_table`` with line numbers + change
+          highlights. Wrapped in a minimal `<style>`-free fragment so
+          the dashboard can drop the response body straight into a
+          container; the fragment is also bleach-friendly (uses the
+          v12.0.0a4 extended allowlist).
         """
         import difflib
 
@@ -1411,6 +1486,29 @@ def register_routes(
                 raise HTTPException(404, "current file not found") from e
             to_label = "current"
 
+        if format == "html":
+            # v13.0.0a3: side-by-side HTML diff. HtmlDiff.make_table
+            # emits a <table class="diff">…</table> fragment with
+            # change highlights via td.diff_chg / td.diff_add / .diff_sub.
+            # We don't include the surrounding <html>/<style> chrome —
+            # the dashboard provides its own styles in base.html.
+            html_diff = difflib.HtmlDiff(wrapcolumn=80)
+            body = html_diff.make_table(
+                rev_from.content.splitlines(),
+                to_content.splitlines(),
+                fromdesc=f"revision {from_}",
+                todesc=to_label,
+                context=False,
+            )
+            return Response(
+                content=body,
+                media_type="text/html; charset=utf-8",
+            )
+        if format != "unified":
+            raise HTTPException(
+                400,
+                "format must be 'unified' (default) or 'html'",
+            )
         diff_lines = difflib.unified_diff(
             rev_from.content.splitlines(keepends=True),
             to_content.splitlines(keepends=True),
