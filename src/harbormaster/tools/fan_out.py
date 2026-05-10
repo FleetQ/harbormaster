@@ -126,7 +126,11 @@ def _build_targets(
 
     for host in hosts:
         if host == "local":
-            local_names = [p.name for p in discover_projects(config.projects)]
+            local_names = [
+                p.name for p in discover_projects(
+                    config.projects, ignore_patterns=config.ignore.patterns,
+                )
+            ]
             for name in local_names:
                 if project_filter is None or name in project_filter:
                     targets.append(_Target(host="local", project=name))

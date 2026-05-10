@@ -301,6 +301,34 @@
 
       <p x-show="loading" :aria-hidden="!loading" class="text-xs text-gray-400">loading…</p>
       <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="error"></p>
+
+      <!-- v10.0.0a4: ignored-projects indicator. Lazy-loads the count
+           on mount; expand to view the names. Read-only — operators
+           edit the list via [ignore].patterns in harbormaster.toml. -->
+      <section x-show="!railCollapsed && ignored.count > 0"
+               data-sidebar-group="ignored"
+               class="mt-3 pt-3 border-t border-gray-800/60">
+        <button type="button"
+                @click="ignoredOpen = !ignoredOpen"
+                :aria-expanded="ignoredOpen"
+                aria-label="Toggle ignored projects list"
+                class="text-[10px] uppercase tracking-wide text-gray-500 hover:text-gray-300 mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+          <span aria-hidden="true" x-text="ignoredOpen ? '▾' : '▸'"></span>
+          <span x-text="`Ignored (${ignored.count})`"></span>
+        </button>
+        <ul x-show="ignoredOpen" class="space-y-0.5">
+          <template x-for="name in ignored.names" :key="'ign:' + name">
+            <li class="text-[11px] text-gray-600 px-2 py-0.5 truncate"
+                :title="name"
+                x-text="name"></li>
+          </template>
+          <li x-show="ignored.patterns.length > 0"
+              class="text-[10px] text-gray-700 px-2 pt-1 italic"
+              :title="`patterns: ${ignored.patterns.join(', ')}`">
+            via <span x-text="ignored.patterns.length"></span> pattern(s)
+          </li>
+        </ul>
+      </section>
     </div>
   </aside>
 
@@ -336,12 +364,19 @@
       archivedCollapsed: true,        // archived group collapsed by default
       hostFilter: '__all__',          // localStorage-backed; '__all__' = no filter
       availableHosts: ['__all__', 'local'], // populated from /api/projects' "host" or default
+      // v10.0.0a4: ignored-projects diagnostic indicator.
+      ignored: { patterns: [], count: 0, names: [] },
+      ignoredOpen: false,
 
       async init() {
         this._loadPersisted();
         // v9.0.0a6: persist hostFilter on change.
         this.$watch('hostFilter', () => this._persistHost());
-        await Promise.all([this._loadProjects(), this._loadRecent()]);
+        await Promise.all([
+          this._loadProjects(),
+          this._loadRecent(),
+          this._loadIgnored(),
+        ]);
       },
 
       _loadPersisted() {
@@ -401,6 +436,22 @@
           this.availableHosts = Array.from(hosts);
         } catch (e) { this.error = e.message; }
         finally { this.loading = false; }
+      },
+
+      async _loadIgnored() {
+        // v10.0.0a4: best-effort fetch — sidebar still works if missing.
+        try {
+          const r = await hmFetch('/api/ignored-projects');
+          if (!r.ok) return;
+          const data = await r.json();
+          if (data && typeof data.count === 'number') {
+            this.ignored = {
+              patterns: Array.isArray(data.patterns) ? data.patterns : [],
+              count: data.count,
+              names: Array.isArray(data.names) ? data.names : [],
+            };
+          }
+        } catch (_) { /* silent */ }
       },
 
       async _loadRecent() {

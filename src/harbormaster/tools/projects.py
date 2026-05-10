@@ -46,7 +46,11 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                 return [f"Error: remote ls exit {proc.returncode}: {stderr_tail}"]
             return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
-        return [p.as_dict() for p in discover_projects(config.projects)]
+        return [
+            p.as_dict() for p in discover_projects(
+                config.projects, ignore_patterns=config.ignore.patterns,
+            )
+        ]
 
     @mcp.tool()
     def project_status(name: str, host: str | None = None) -> str:
@@ -63,7 +67,9 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
 
 def _local_status(name: str, config: HarbormasterConfig) -> str:
     try:
-        p = resolve_project(name, config.projects)
+        p = resolve_project(
+            name, config.projects, ignore_patterns=config.ignore.patterns,
+        )
     except ValueError as e:
         return f"Error: {e}"
 

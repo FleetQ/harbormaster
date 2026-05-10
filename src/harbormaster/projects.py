@@ -168,6 +168,41 @@ def _is_excluded(path: Path, patterns: list[str]) -> bool:
     return False
 
 
+def _matches_ignore_patterns(path: Path, patterns: list[str]) -> bool:
+    """v10.0.0a4: glob-match the project basename + full path against
+    every pattern in `[ignore].patterns`.
+
+    Distinct semantics from `_is_excluded`:
+      - patterns are ALWAYS fnmatched (no gitignore-style component
+        shortcut; `node_modules` won't auto-match a path component).
+      - The basename (`path.name`) is checked first; that's the
+        common case for project-name globs like `*-ui` or `*-archive`.
+      - Then the full string path, so absolute patterns
+        `/full/path/*` still work.
+      - `**/segment/**` is normalized so the `segment` part fnmatches
+        each path component too — letting operators write
+        `**/config-only/**` and have it hide projects under any
+        `config-only` directory.
+    """
+    if not patterns:
+        return False
+    name = path.name
+    s = str(path)
+    parts = path.parts
+    for raw in patterns:
+        if not raw:
+            continue
+        if fnmatch.fnmatchcase(name, raw):
+            return True
+        if fnmatch.fnmatchcase(s, raw):
+            return True
+        if raw.startswith("**/") and raw.endswith("/**"):
+            core = raw[3:-3]
+            if core and any(fnmatch.fnmatchcase(p, core) for p in parts):
+                return True
+    return False
+
+
 def _git_last_commit(path: Path) -> dict[str, str] | None:
     try:
         out = subprocess.run(
@@ -240,16 +275,26 @@ def _iter_glob_matches(config: ProjectsConfig) -> list[tuple[Path, list[Path]]]:
     return out
 
 
-def find_project_path(name: str, config: ProjectsConfig) -> Path:
+def find_project_path(
+    name: str,
+    config: ProjectsConfig,
+    *,
+    ignore_patterns: list[str] | None = None,
+) -> Path:
     """Fast project-by-name lookup. No git, no rich metadata, no sort.
 
     Walks configured globs and returns the first match whose directory name
-    equals `name` and which passes the containment + exclude filters. Validates
-    `name` against the strict regex first.
+    equals `name` and which passes the containment + exclude + ignore
+    filters. Validates `name` against the strict regex first.
+
+    `ignore_patterns` (v10.0.0a4) are top-level `[ignore].patterns`
+    from HarbormasterConfig; default `None` keeps the v9 contract for
+    callers that haven't been updated yet.
     """
     validate_project_name(name)
     bases_with_matches = _iter_glob_matches(config)
     bases = [b for b, _ in bases_with_matches if str(b) != "/"]
+    ignore = ignore_patterns or []
 
     for _base, matches in bases_with_matches:
         for child in matches:
@@ -263,6 +308,8 @@ def find_project_path(name: str, config: ProjectsConfig) -> Path:
                 continue
             if _is_excluded(resolved, config.exclude):
                 continue
+            if _matches_ignore_patterns(resolved, ignore):
+                continue
             if bases and not _is_under_any_base(resolved, bases):
                 continue
             if config.require_marker and not (resolved / "CLAUDE.md").is_file() \
@@ -273,16 +320,25 @@ def find_project_path(name: str, config: ProjectsConfig) -> Path:
     raise ValueError(f"project {name!r} not found in configured globs")
 
 
-def discover_projects(config: ProjectsConfig) -> list[ProjectInfo]:
+def discover_projects(
+    config: ProjectsConfig,
+    *,
+    ignore_patterns: list[str] | None = None,
+) -> list[ProjectInfo]:
     """Walk configured globs and return rich ProjectInfo for every match.
 
     Sorted by last commit date desc. Pays one `git log` subprocess per match —
     use this for the list_projects MCP tool, NOT for hot lookup paths.
+
+    `ignore_patterns` (v10.0.0a4) are top-level `[ignore].patterns`
+    from HarbormasterConfig; default `None` keeps the v9 contract for
+    callers that haven't been updated yet.
     """
     bases_with_matches = _iter_glob_matches(config)
     bases = [b for b, _ in bases_with_matches if str(b) != "/"]
     seen: set[Path] = set()
     projects: list[ProjectInfo] = []
+    ignore = ignore_patterns or []
 
     for _base, matches in bases_with_matches:
         for child in matches:
@@ -295,6 +351,8 @@ def discover_projects(config: ProjectsConfig) -> list[ProjectInfo]:
             if not _is_project(resolved):
                 continue
             if _is_excluded(resolved, config.exclude):
+                continue
+            if _matches_ignore_patterns(resolved, ignore):
                 continue
             if bases and not _is_under_any_base(resolved, bases):
                 continue
@@ -321,11 +379,18 @@ def discover_projects(config: ProjectsConfig) -> list[ProjectInfo]:
     return projects
 
 
-def resolve_project(name: str, config: ProjectsConfig) -> Path:
+def resolve_project(
+    name: str,
+    config: ProjectsConfig,
+    *,
+    ignore_patterns: list[str] | None = None,
+) -> Path:
     """Public API: return the path of a project by name.
 
     Now an alias for find_project_path — kept under the original name to
     preserve external API stability. Callers that need rich metadata should
     use discover_projects() and filter on .name.
+
+    `ignore_patterns` (v10.0.0a4) is plumbed through to find_project_path.
     """
-    return find_project_path(name, config)
+    return find_project_path(name, config, ignore_patterns=ignore_patterns)
