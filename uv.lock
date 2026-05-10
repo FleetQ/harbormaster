@@ -590,11 +590,13 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "bleach" },
     { name = "fastapi" },
     { name = "fastembed" },
     { name = "httpx" },
     { name = "hypothesis" },
     { name = "jinja2" },
+    { name = "markdown-it-py" },
     { name = "mypy" },
     { name = "onnxruntime" },
     { name = "pysher" },
@@ -618,6 +620,7 @@ ui = [
     { name = "bleach" },
     { name = "fastapi" },
     { name = "jinja2" },
+    { name = "markdown-it-py" },
     { name = "sse-starlette" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -628,6 +631,7 @@ ui-test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "bleach", marker = "extra == 'dev'", specifier = ">=6.1" },
     { name = "bleach", marker = "extra == 'ui'", specifier = ">=6.1" },
     { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.110" },
     { name = "fastapi", marker = "extra == 'ui'", specifier = ">=0.110" },
@@ -638,6 +642,8 @@ requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
     { name = "jinja2", marker = "extra == 'dev'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'ui'", specifier = ">=3.1" },
+    { name = "markdown-it-py", marker = "extra == 'dev'", specifier = ">=3.0" },
+    { name = "markdown-it-py", marker = "extra == 'ui'", specifier = ">=3.0" },
     { name = "mcp", specifier = ">=1.2.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8" },
     { name = "onnxruntime", marker = "extra == 'dev'", specifier = "<1.26" },

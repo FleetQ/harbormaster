@@ -6,89 +6,22 @@ import shlex
 import subprocess
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass, field
 from pathlib import Path
 
-from harbormaster.backends.base import BackendError, BackendResult
+from harbormaster.backends.base import (
+    BackendError,
+    BackendResult,
+    StreamUsage,
+    _StreamWithUsage,
+)
 from harbormaster.config import BackendConfig
 from harbormaster.ssh import SshTimeoutError, diagnose_ssh_failure, run_ssh
 
-
-@dataclass
-class StreamUsage:
-    """v11.0.0a5: real backend-reported usage captured from
-    `claude --output-format stream-json` per-message metadata.
-
-    Populated as the stream emits assistant + result messages. After
-    the iterator is fully drained, this object holds final values.
-    Callers (e.g. the SSE `usage` event emitter) read fields on
-    completion; mid-stream reads return whatever was reported up to
-    that point.
-    """
-
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_creation_input_tokens: int = 0
-    cache_read_input_tokens: int = 0
-    model: str | None = None
-    # Set True once we've extracted at least one real usage record from
-    # the backend stream. Distinguishes "backend gave no metadata"
-    # (callers fall back to approximate) from "backend reported zero".
-    has_real_usage: bool = field(default=False)
-
-    def merge_message_usage(self, msg: dict[str, object]) -> None:
-        """Pull usage fields from one parsed stream-json line.
-
-        Both `assistant` messages (incremental) and the final `result`
-        summary include a `usage` block. The result summary is the
-        authoritative final tally; assistant messages are interim.
-        """
-        message = msg.get("message")
-        if isinstance(message, dict):
-            usage = message.get("usage")
-            if isinstance(usage, dict):
-                self._absorb_usage_block(usage)
-            model = message.get("model")
-            if isinstance(model, str):
-                self.model = model
-        # `result` summary line — top-level usage block.
-        usage = msg.get("usage")
-        if isinstance(usage, dict):
-            self._absorb_usage_block(usage)
-
-    def _absorb_usage_block(self, usage: dict[str, object]) -> None:
-        for key in (
-            "input_tokens",
-            "output_tokens",
-            "cache_creation_input_tokens",
-            "cache_read_input_tokens",
-        ):
-            v = usage.get(key)
-            if isinstance(v, int):
-                setattr(self, key, v)
-                self.has_real_usage = True
-
-
-class _StreamWithUsage(Iterator[str]):
-    """Wrap a text-delta iterator + a side-channel `StreamUsage`.
-
-    Iterating yields the underlying text deltas. Once the wrapped
-    iterator is exhausted, `self.usage` holds the final captured
-    usage (if the backend reported any). Callers who don't care
-    about usage iterate as if it were a plain `Iterator[str]`.
-    """
-
-    def __init__(
-        self, source: Iterator[str], usage: StreamUsage,
-    ) -> None:
-        self._source = source
-        self.usage = usage
-
-    def __iter__(self) -> Iterator[str]:
-        return self
-
-    def __next__(self) -> str:
-        return next(self._source)
+# Re-exports (v11 callers + tests imported these names from claude.py;
+# v12.0.0a1 lifted the dataclass + wrapper into backends/base.py so
+# codex can share the shape. Keep the re-exports so the public symbol
+# location stays the same.)
+__all__ = ["ClaudeBackend", "StreamUsage", "_StreamWithUsage"]
 
 
 class ClaudeBackend:
