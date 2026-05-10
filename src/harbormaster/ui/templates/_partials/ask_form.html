@@ -33,21 +33,28 @@
         <input type="number" min="1" max="10" x-model.number="maxTurns"
                class="w-14 bg-gray-950 border border-gray-800 rounded px-2 py-1 text-center">
       </label>
-      <span class="text-gray-600" x-show="loading">streaming…</span>
-      <span class="text-gray-500 ml-auto" x-show="!loading && hasResult"
+      <span class="text-gray-400" x-show="loading">streaming…</span>
+      <span class="text-gray-400 ml-auto" x-show="!loading && hasResult"
             x-text="`${chunks} chunks · ${(elapsedMs/1000).toFixed(1)}s`"></span>
       <button type="submit"
               :disabled="loading || question.trim().length < 3"
-              class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold px-4 py-1.5 rounded transition">
+              :aria-busy="loading"
+              class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-400 text-white font-bold px-4 py-1.5 rounded transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
         <span x-show="!loading">Ask</span>
-        <span x-show="loading">…</span>
+        <span x-show="loading" aria-hidden="true">…</span>
       </button>
       <button type="button" x-show="loading" @click="abort()"
-              class="text-amber-400 hover:text-amber-300 underline">stop</button>
+              aria-label="Stop streaming"
+              :aria-hidden="!loading"
+              class="text-amber-400 hover:text-amber-300 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">stop</button>
     </div>
   </form>
-  <div x-show="error" class="mt-3 text-xs text-red-400" x-text="error"></div>
+  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="mt-3 text-xs text-red-400" x-text="error"></div>
   <pre x-show="streamText"
+       :aria-hidden="!streamText"
+       aria-live="polite"
+       aria-atomic="false"
+       aria-label="Streaming answer"
        class="mt-3 text-sm whitespace-pre-wrap break-words border border-gray-800 rounded p-3 bg-gray-950/50 text-gray-200 leading-relaxed"
        x-text="streamText"></pre>
 </section>

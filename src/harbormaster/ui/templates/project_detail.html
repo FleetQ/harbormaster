@@ -79,10 +79,11 @@
             x-text="`${trajectories.length} record${trajectories.length === 1 ? '' : 's'}`"></span>
     </div>
   </header>
-  <p x-show="message" class="text-xs text-amber-400" x-text="message"></p>
-  <p x-show="error" class="text-xs text-red-400" x-text="error"></p>
+  <p x-show="message" :aria-hidden="!message" role="status" aria-live="polite" class="text-xs text-amber-400" x-text="message"></p>
+  <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="error"></p>
   <p x-show="!message && !error && trajectories.length === 0"
-     class="text-xs text-gray-500">
+     :aria-hidden="!(!message && !error && trajectories.length === 0)"
+     class="text-xs text-gray-400">
     No prior trajectories yet — ask or delegate something above and it will record here.
   </p>
   <ul class="space-y-2">
@@ -95,7 +96,9 @@
           class="rounded border transition-colors duration-200"
           :class="optimisticBorderClass(t)">
         <button type="button" @click="open = !open"
-                class="w-full text-left px-3 py-2 hover:bg-gray-900/50 transition flex items-baseline justify-between gap-2">
+                :aria-expanded="open"
+                :aria-label="open ? 'Collapse trajectory details' : 'Expand trajectory details'"
+                class="w-full text-left px-3 py-2 hover:bg-gray-900/50 transition flex items-baseline justify-between gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
           <span class="text-sm text-gray-200 truncate" x-text="t.question"></span>
           <span class="text-xs text-gray-500 shrink-0 flex gap-2 items-center">
             <!-- v6.0.0a2: three escalation tiers driven by tier(t):

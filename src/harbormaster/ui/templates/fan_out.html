@@ -52,10 +52,14 @@
     <div>
       <div class="flex items-baseline justify-between mb-1">
         <label class="text-sm text-gray-300 font-bold">Targets</label>
-        <div class="text-xs text-gray-500 flex gap-3">
-          <button type="button" @click="selectAll()" class="hover:text-cyan-400">all</button>
-          <button type="button" @click="selectNone()" class="hover:text-cyan-400">none</button>
-          <span x-text="`${selected.length} of ${projects.length} selected`"></span>
+        <div class="text-xs text-gray-400 flex gap-3">
+          <button type="button" @click="selectAll()"
+                  aria-label="Select all projects"
+                  class="hover:text-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">all</button>
+          <button type="button" @click="selectNone()"
+                  aria-label="Deselect all projects"
+                  class="hover:text-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">none</button>
+          <span x-text="`${selected.length} of ${projects.length} selected`" aria-live="polite"></span>
         </div>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1 max-h-48 overflow-y-auto border border-gray-800 rounded p-2">
@@ -70,25 +74,33 @@
     <div class="flex items-center gap-3">
       <button type="submit"
               :disabled="loading || question.trim().length < 3 || selected.length === 0"
-              class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold px-4 py-2 rounded transition">
+              :aria-busy="loading"
+              class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-400 text-white font-bold px-4 py-2 rounded transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
         <span x-show="!loading">Run fan-out</span>
-        <span x-show="loading">…</span>
+        <span x-show="loading" aria-hidden="true">…</span>
       </button>
       <button type="button" x-show="loading" @click="abort()"
-              class="text-amber-400 hover:text-amber-300 underline text-xs">stop</button>
+              aria-label="Stop fan-out"
+              :aria-hidden="!loading"
+              class="text-amber-400 hover:text-amber-300 underline text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">stop</button>
       <!-- v4.0.0a2: copy share link. Persists URL first, then copies. -->
       <button type="button" @click="copyShareLink()"
               :disabled="question.trim().length < 3"
-              class="text-xs px-2 py-1 rounded border border-gray-800 hover:border-cyan-700 disabled:border-gray-900 disabled:text-gray-700 transition">
+              aria-label="Copy shareable link to this fan-out configuration"
+              class="text-xs px-2 py-1 rounded border border-gray-800 hover:border-cyan-700 disabled:border-gray-900 disabled:text-gray-600 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
         <span x-show="!shareLinkCopied">copy link</span>
         <span x-show="shareLinkCopied" class="text-emerald-400">copied ✓</span>
       </button>
-      <span class="text-xs text-gray-500 ml-auto" x-show="hasResult"
+      <span class="text-xs text-gray-400 ml-auto" x-show="hasResult"
             x-text="`${(elapsedMs/1000).toFixed(1)}s`"></span>
     </div>
   </form>
-  <div x-show="error" class="mt-3 text-xs text-red-400" x-text="error"></div>
+  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="mt-3 text-xs text-red-400" x-text="error"></div>
   <pre x-show="resultText"
+       :aria-hidden="!resultText"
+       aria-live="polite"
+       aria-atomic="false"
+       aria-label="Fan-out result"
        class="mt-4 text-sm whitespace-pre-wrap break-words border border-gray-800 rounded p-3 bg-gray-950/50 text-gray-200 leading-relaxed"
        x-text="resultText"></pre>
 </section>
