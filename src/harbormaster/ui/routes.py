@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
@@ -1276,13 +1276,22 @@ def register_routes(
 
 
     @app.get("/api/config/diff")
-    async def api_config_diff(host: str) -> dict[str, object]:
+    async def api_config_diff(
+        host: str,
+        format: str = "json",
+    ) -> Response:
         """v15.0.0a2: unified diff between local + remote config text.
 
         Reads the local ``harbormaster.toml`` from the same search paths
         as ``load_config`` and SSHs to the remote host for ``cat
         ~/.config/harbormaster.toml`` via :func:`query_remote_config`.
-        Returns::
+
+        v16.0.0a4: ``?format=html`` returns a side-by-side HTML diff
+        rendered via ``difflib.HtmlDiff`` (mirrors the v13.a3 memory-
+        revisions side-by-side toggle pattern). The default
+        ``?format=json`` shape is unchanged.
+
+        JSON response shape::
 
             {
                 "host": "<name>",
@@ -1292,11 +1301,22 @@ def register_routes(
                 "error": "<msg>",                # only on remote failure
             }
 
+        HTML response: a ``text/html`` body containing a complete
+        ``difflib.HtmlDiff().make_file()`` document with a custom
+        title. Operators can drop it into an iframe / new tab without
+        any further wrapping.
+
         404 when ``host`` is not in ``[hosts.*]``. Local-side errors
         (no config on disk) degrade to ``local_path = ""`` and
         ``local_text = ""``; the diff is computed against an empty
         local file in that case.
         """
+        if format not in ("json", "html"):
+            raise HTTPException(
+                400,
+                f"format must be 'json' or 'html'; got {format!r}",
+            )
+
         host_cfg = config.hosts.get(host)
         if host_cfg is None:
             raise HTTPException(
@@ -1325,12 +1345,29 @@ def register_routes(
         remote_path = str(remote_payload.get("path") or "")
         remote_err = remote_payload.get("error")
 
+        from_label = local_path or "<local>"
+        to_label = (
+            f"{host}:{remote_path}" if remote_path else f"{host}:<remote>"
+        )
+
+        if format == "html":
+            html_diff = difflib.HtmlDiff(tabsize=4, wrapcolumn=80)
+            html = html_diff.make_file(
+                local_text.splitlines(),
+                remote_text.splitlines(),
+                fromdesc=from_label,
+                todesc=to_label,
+                context=True,
+                numlines=3,
+            )
+            return Response(content=html, media_type="text/html")
+
         diff = "".join(
             difflib.unified_diff(
                 local_text.splitlines(keepends=True),
                 remote_text.splitlines(keepends=True),
-                fromfile=local_path or "<local>",
-                tofile=f"{host}:{remote_path}" if remote_path else f"{host}:<remote>",
+                fromfile=from_label,
+                tofile=to_label,
             )
         )
         out: dict[str, object] = {
@@ -1341,7 +1378,7 @@ def register_routes(
         }
         if remote_err:
             out["error"] = str(remote_err)
-        return out
+        return JSONResponse(content=out)
 
     # v7.0.0a6: TTL cache for /api/projects.
     # Per-process cache; on a 20+ project install this avoids the
