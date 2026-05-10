@@ -1341,7 +1341,16 @@ async def _stream_local_tool(
         }
         return
 
-    async for evt in _emit_chunks_then_result(sync_iter):
+    async for evt in _emit_chunks_then_result(
+        sync_iter,
+        record_ctx={
+            "config": config,
+            "project_name": project_name,
+            "host": None,
+            "prompt": full_prompt,
+            "tool": _tool_name_for_builder(prompt_builder),
+        },
+    ):
         yield evt
 
 
@@ -1400,12 +1409,36 @@ async def _stream_remote_tool(
         }
         return
 
-    async for evt in _emit_chunks_then_result(sync_iter):
+    async for evt in _emit_chunks_then_result(
+        sync_iter,
+        record_ctx={
+            "config": config,
+            "project_name": project_name,
+            "host": host,
+            "prompt": full_prompt,
+            "tool": _tool_name_for_builder(prompt_builder),
+        },
+    ):
         yield evt
+
+
+def _tool_name_for_builder(builder: PromptBuilder) -> str:
+    """Reverse-lookup the registered tool name for a builder.
+
+    v10.0.0a1: needed by the streaming dispatcher to forward a
+    semantically correct `tool` label into `_maybe_record_qa` so that
+    Recent Q&A rows match the sync-path schema.
+    """
+    for name, b in _STREAMING_TOOLS.items():
+        if b is builder:
+            return name
+    return "unknown"
 
 
 async def _emit_chunks_then_result(
     sync_iter: Any,
+    *,
+    record_ctx: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict[str, str]]:
     """Drive a sync iterator from an async generator, emitting one
     `chunk` event per yielded text delta and a final `result` event
@@ -1430,6 +1463,7 @@ async def _emit_chunks_then_result(
     chunks: list[str] = []
     sentinel = object()
     next_id = _StreamIdSeq()
+    start_monotonic = time.monotonic()
 
     def _next_or_sentinel() -> Any:
         try:
@@ -1493,9 +1527,34 @@ async def _emit_chunks_then_result(
         ),
     }
 
+    assembled = "".join(chunks)
+
+    # v10.0.0a1: bug fix — Recent Q&A was empty for streamed calls.
+    # Sync `run_backend` calls `_maybe_record_qa`; streaming dispatcher
+    # didn't. Mirror the same write-back here so the dashboard,
+    # fan-out, and project-detail surfaces (all streaming-path) populate
+    # the local sqlite history store. Failures are swallowed inside
+    # `_maybe_record_qa` (matches sync-path semantics).
+    if record_ctx is not None and assembled:
+        duration_ms = int((time.monotonic() - start_monotonic) * 1000)
+        try:
+            from harbormaster.tools._helpers import _maybe_record_qa
+
+            _maybe_record_qa(
+                config=record_ctx["config"],
+                project_name=record_ctx["project_name"],
+                host=record_ctx["host"],
+                prompt=record_ctx["prompt"],
+                answer=assembled,
+                tool=record_ctx["tool"],
+                duration_ms=duration_ms,
+            )
+        except Exception:  # noqa: BLE001 — never break the stream
+            pass
+
     envelope = {
         "result": {
-            "content": [{"type": "text", "text": "".join(chunks)}],
+            "content": [{"type": "text", "text": assembled}],
         },
     }
     yield {"event": "result", "id": next_id.next(), "data": json.dumps(envelope)}
