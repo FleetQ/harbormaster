@@ -240,6 +240,7 @@
   <!-- Sidebar rail. v10.0.0a3: top-12 to sit flush under the new
        fixed h-12 topbar; bottom-7 leaves room for the slim footer. -->
   <aside id="hm-sidebar"
+         data-tour-step="sidebar"
          :class="[
                   mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
                   railCollapsed ? 'md:w-12' : 'md:w-60',
@@ -660,7 +661,7 @@
 <!-- v8.0.0a4: Cmd-K command palette. Global mount so every page
      can summon it. Lazy-loads /api/projects on first open so empty
      installs don't pay the network cost on page paint. -->
-<div x-data="commandPalette()" x-init="bindKeyboard()" x-cloak>
+<div x-data="commandPalette()" x-init="bindKeyboard()" data-tour-step="palette" x-cloak>
   <div x-show="open" @click.self="close()"
        role="dialog" aria-modal="true" aria-label="Command palette"
        class="fixed inset-0 z-40 bg-gray-950/80 backdrop-blur-sm flex items-start justify-center pt-24"
