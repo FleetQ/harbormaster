@@ -13,6 +13,18 @@
       loading: false, hasResult: false, elapsedMs: 0,
       _abortController: null,
 
+      // v11.0.0a4: `?q=<question>` URL pre-fill. Lets operators share
+      // project URLs with a question pre-loaded — the cmd-K palette's
+      // `Ask <project> <question>` action already builds these URLs;
+      // this closes the loop on the receiving end.
+      init() {
+        try {
+          const url = new URL(window.location.href);
+          const q = url.searchParams.get('q');
+          if (q) this.question = q;
+        } catch (_) { /* SSR / non-browser context */ }
+      },
+
       async ask() {
         if (this.question.trim().length < 3) return;
         this.streamText = ''; this.chunks = 0; this.error = '';
