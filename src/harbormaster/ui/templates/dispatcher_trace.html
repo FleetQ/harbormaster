@@ -6,13 +6,13 @@
 <section x-data="traceWaterfall()"
          x-init="init()"
          x-cloak
-         class="bg-surface-2 border border-border rounded-lg p-4">
+         class="bg-surface-2 border border-border rounded-md p-2.5">
   <header class="flex items-center justify-between mb-4 gap-2 flex-wrap">
-    <div class="flex items-baseline gap-3">
+    <div class="flex items-baseline gap-2">
       <h2 class="text-lg font-bold">Dispatcher trace</h2>
       <a href="/" class="text-xs text-foreground-muted hover:text-accent">← Dashboard</a>
     </div>
-    <div class="flex items-center gap-3 text-xs text-foreground-muted">
+    <div class="flex items-center gap-2 text-xs text-foreground-muted">
       <span :class="connected ? 'text-success' : 'text-warning'">
         <span aria-hidden="true">●</span>
         <span x-text="connected ? 'streaming' : 'reconnecting…'"></span>
@@ -22,14 +22,14 @@
   </header>
 
   <!-- Active (in-flight) spans -->
-  <section class="mb-6" aria-label="Active spans">
+  <section class="mb-4" aria-label="Active spans">
     <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">In-flight</h3>
     <div x-show="active.length === 0" role="status" class="text-xs text-foreground-subtle">
       No spans currently in flight. Run a tool to see spans appear here.
     </div>
     <ul x-show="active.length > 0" class="space-y-1">
       <template x-for="span in active" :key="'active:' + span.span_id">
-        <li class="flex items-center gap-3 text-xs"
+        <li class="flex items-center gap-2 text-xs"
             :data-span-id="span.span_id">
           <span class="w-32 truncate text-accent font-mono"
                 x-text="span.tool"></span>
@@ -160,7 +160,7 @@
   </section>
 
   <p x-show="error" role="alert" aria-live="assertive"
-     class="mt-3 text-xs text-danger" x-text="error"></p>
+     class="mt-2 text-xs text-danger" x-text="error"></p>
 </section>
 
 <script>
@@ -430,7 +430,7 @@
    the inspector mirrors the headline counters so the operator can see
    "is anything happening right now?" at a glance. #}
 {% block inspector %}
-<div class="p-3" x-data="dispatcherInspector()" x-init="load(); start()"
+<div class="p-2" x-data="dispatcherInspector()" x-init="load(); start()"
      data-tour-step="inspector-content">
   <section class="mb-4">
     <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">In-flight</h3>

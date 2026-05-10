@@ -9,7 +9,7 @@
   <span class="text-foreground-muted">Network</span>
 </nav>
 
-<header class="mb-4 flex items-center justify-between gap-3 flex-wrap">
+<header class="mb-4 flex items-center justify-between gap-2 flex-wrap">
   <div>
     <h2 class="text-xl font-bold text-accent">Inter-project network</h2>
     <p class="text-xs text-foreground-subtle mt-1">
@@ -46,7 +46,7 @@
 <!-- v11.0.0a6: aggregate metrics over the last 1h / 24h / 7d.
      Polls /api/network/stats; the window dropdown re-fetches. -->
 <section x-data="networkStats()" x-init="loadStats()"
-         class="mb-4 border border-border rounded-lg p-3 bg-gray-900/40">
+         class="mb-4 border border-border rounded-md p-2 bg-surface-2/40">
   <header class="flex items-center justify-between gap-2 mb-2 flex-wrap">
     <h3 class="text-sm font-bold text-foreground-muted">Network stats</h3>
     <select x-model="window" @change="loadStats()"
@@ -60,16 +60,16 @@
   </header>
   <p x-show="error" role="alert" class="text-xs text-danger" x-text="error"></p>
   <dl x-show="stats" class="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
-    <div class="border border-border rounded p-2 bg-gray-950/40">
+    <div class="border border-border rounded p-2 bg-surface-1/40">
       <dt class="text-foreground-subtle">total calls</dt>
       <dd class="text-accent font-bold text-lg" x-text="stats?.total_calls ?? 0"></dd>
     </div>
-    <div class="border border-border rounded p-2 bg-gray-950/40">
+    <div class="border border-border rounded p-2 bg-surface-1/40">
       <dt class="text-foreground-subtle">error rate</dt>
       <dd class="text-warning font-bold text-lg"
           x-text="((stats?.error_rate ?? 0) * 100).toFixed(1) + '%'"></dd>
     </div>
-    <div class="border border-border rounded p-2 bg-gray-950/40">
+    <div class="border border-border rounded p-2 bg-surface-1/40">
       <dt class="text-foreground-subtle mb-1">by tool</dt>
       <dd class="text-foreground-muted text-[11px]">
         <template x-for="(count, tool) in stats?.by_tool ?? {}" :key="'tool:' + tool">
@@ -83,7 +83,7 @@
     </div>
     <!-- v12.0.0a5: per-source breakdown — call counts + per-source
          error rate. Operators can spot a misbehaving project quickly. -->
-    <div class="border border-border rounded p-2 bg-gray-950/40">
+    <div class="border border-border rounded p-2 bg-surface-1/40">
       <dt class="text-foreground-subtle mb-1">by source</dt>
       <dd class="text-foreground-muted text-[11px]">
         {# v13.0.0a4: each source row is a button that dispatches the
@@ -102,7 +102,7 @@
         </template>
       </dd>
     </div>
-    <div class="border border-border rounded p-2 bg-gray-950/40">
+    <div class="border border-border rounded p-2 bg-surface-1/40">
       <dt class="text-foreground-subtle mb-1">top projects</dt>
       <dd class="text-foreground-muted text-[11px]">
         <template x-for="row in stats?.top_projects_by_calls ?? []" :key="'p:' + row.project">
@@ -117,14 +117,14 @@
 </section>
 
 <section x-data="networkPanel()" x-init="init()"
-         class="border border-border rounded-lg p-3 bg-gray-900/40">
+         class="border border-border rounded-md p-2 bg-surface-2/40">
   {# v13.0.0a4: server-side filter controls. Tool + source dropdowns
      are derived from the stats panel above (auto-refresh every 30s);
      the date inputs accept HTML5 datetime-local strings (operator's
      local TZ, converted to unix ms before being sent to the API).
      Filter state is mirrored to the URL so an operator can share /
      bookmark a filtered view. #}
-  <div class="flex flex-wrap items-end gap-2 mb-3 text-xs"
+  <div class="flex flex-wrap items-end gap-2 mb-2 text-xs"
        data-filter-controls
        data-tour-step="network-filter">
     <div class="flex flex-col gap-0.5">
@@ -184,7 +184,7 @@
      class="text-xs text-danger mb-2" x-text="error"></p>
   <p x-show="!error && events.length === 0" role="status"
      data-empty-state="network.no-events"
-     class="text-xs text-foreground-muted px-4 py-6 text-center">
+     class="text-xs text-foreground-muted px-3 py-6 text-center">
     No MCP calls recorded yet — ask a project something and watch this fill in.
   </p>
 
@@ -204,12 +204,12 @@
       style="max-height: 60vh;">
     <template x-for="(ev, i) in chatOrder()" :key="'ce:' + i + ':' + ev.timestamp_ms">
       <li x-data="{ open: false }"
-          class="px-3 py-1.5 text-xs hover:bg-gray-900/30">
+          class="px-3 py-1.5 text-xs hover:bg-surface-2/30">
         <button type="button"
                 @click="open = !open"
                 :aria-expanded="open"
                 aria-label="Toggle event details"
-                class="w-full text-left flex items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+                class="w-full text-left flex items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           <span class="font-mono text-foreground-subtle shrink-0"
                 x-text="new Date(ev.timestamp_ms).toLocaleTimeString()"></span>
           <span class="text-foreground-muted" x-text="ev.caller"></span>
@@ -243,9 +243,9 @@
        bar's height is proportional to event count in that bucket. -->
   <div x-show="view === 'timeline' && events.length > 0"
        id="hm-network-timeline"
-       class="border border-border rounded bg-surface-1 p-3"
+       class="border border-border rounded bg-surface-1 p-2"
        style="min-height: 60vh;">
-    <div class="flex items-center justify-between gap-2 mb-3 text-xs">
+    <div class="flex items-center justify-between gap-2 mb-2 text-xs">
       <span class="text-foreground-muted">
         Event density —
         <span x-text="timelineWindow === '1h' ? 'last hour (1-min buckets)' : 'last 24h (1-hour buckets)'"></span>
@@ -256,7 +256,7 @@
                 @click="timelineWindow = '1h'"
                 :aria-pressed="timelineWindow === '1h'"
                 :class="timelineWindow === '1h'
-                        ? 'border-accent-strong text-accent bg-cyan-900/30'
+                        ? 'border-accent-strong text-accent bg-accent-soft/30'
                         : 'border-border text-foreground-muted hover:text-accent'"
                 class="px-2 py-0.5 rounded border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           1h
@@ -265,7 +265,7 @@
                 @click="timelineWindow = '24h'"
                 :aria-pressed="timelineWindow === '24h'"
                 :class="timelineWindow === '24h'
-                        ? 'border-accent-strong text-accent bg-cyan-900/30'
+                        ? 'border-accent-strong text-accent bg-accent-soft/30'
                         : 'border-border text-foreground-muted hover:text-accent'"
                 class="px-2 py-0.5 rounded border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           24h
@@ -274,7 +274,7 @@
     </div>
     <svg :viewBox="`0 0 ${timelineBuckets.length * 8} 100`"
          preserveAspectRatio="none"
-         class="w-full h-32 bg-gray-950/40 rounded"
+         class="w-full h-32 bg-surface-1/40 rounded"
          role="img"
          :aria-label="`${timelineEventsTotal} events over the last ${timelineWindow}`">
       <template x-for="(b, i) in timelineBuckets" :key="'tb:' + i">
@@ -716,11 +716,11 @@
      class="fixed inset-0 z-50 pointer-events-none"
      role="dialog"
      :aria-label="`Network tour step ${stepIndex + 1} of ${steps.length}`">
-  <div class="absolute inset-0 bg-gray-950/40 pointer-events-auto"
+  <div class="absolute inset-0 bg-surface-1/40 pointer-events-auto"
        @click="next()"></div>
   <div x-show="anchorRect"
        :style="`top: ${popoverTop}px; left: ${popoverLeft}px;`"
-       class="absolute pointer-events-auto bg-surface-2 border border-accent-strong rounded-lg p-4 shadow-2xl max-w-sm">
+       class="absolute pointer-events-auto bg-surface-2 border border-accent-strong rounded-md p-2.5 shadow-2xl max-w-sm">
     <header class="flex items-center justify-between mb-2 gap-2">
       <span class="text-[10px] uppercase tracking-wide text-accent"
             x-text="`Step ${stepIndex + 1} of ${steps.length}`"></span>
@@ -732,7 +732,7 @@
     </header>
     <h3 class="text-sm font-bold text-foreground mb-1"
         x-text="currentStep().title"></h3>
-    <p class="text-xs text-foreground-muted mb-3"
+    <p class="text-xs text-foreground-muted mb-2"
        x-text="currentStep().body"></p>
     <div class="flex items-center justify-between gap-2">
       <button type="button" @click="prev()"
@@ -743,7 +743,7 @@
       </button>
       <button type="button" @click="next()"
               aria-label="Next step"
-              class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent">
+              class="text-xs px-3 py-1 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent">
         <span x-text="stepIndex === steps.length - 1 ? 'Done' : 'Next'"></span>
       </button>
     </div>
@@ -844,11 +844,11 @@
    so the operator gets a glance at network health regardless of which
    view (graph / chat / timeline) is selected in main. #}
 {% block inspector %}
-<div class="p-3" x-data="networkInspector()" x-init="load(); start()"
+<div class="p-2" x-data="networkInspector()" x-init="load(); start()"
      data-tour-step="inspector-content">
   <section>
     <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Last 1h</h3>
-    <dl class="grid grid-cols-2 gap-x-2 gap-y-1 text-xs mb-3">
+    <dl class="grid grid-cols-2 gap-x-2 gap-y-1 text-xs mb-2">
       <dt class="text-foreground-muted">total calls</dt>
       <dd class="text-accent font-mono font-bold" x-text="stats?.total_calls ?? '—'"></dd>
       <dt class="text-foreground-muted">error rate</dt>
@@ -856,7 +856,7 @@
           x-text="((stats?.error_rate ?? 0) * 100).toFixed(1) + '%'"></dd>
     </dl>
   </section>
-  <section class="border-t border-border pt-3 mb-3">
+  <section class="border-t border-border pt-3 mb-2">
     <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">By tool</h3>
     <ul class="text-xs space-y-1">
       <template x-for="(count, tool) in (stats?.by_tool ?? {})" :key="'i-tool:' + tool">

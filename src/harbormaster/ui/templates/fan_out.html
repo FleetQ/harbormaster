@@ -9,7 +9,7 @@
   <span class="text-foreground-muted">Fan-out ask</span>
 </nav>
 
-<header class="mb-6">
+<header class="mb-4">
   <h2 class="text-xl font-bold">Fan-out ask</h2>
   <p class="text-sm text-foreground-muted mt-1">
     Ask the same question across multiple projects in parallel.
@@ -23,7 +23,7 @@
            hosts: {{ host_labels | tojson }},
          })'
          x-init="restoreFromUrl()"
-         class="border border-border rounded-lg p-4 bg-gray-900/40">
+         class="border border-border rounded-md p-2.5 bg-surface-2/40">
   <form @submit.prevent="run()" class="space-y-3">
     <div>
       <label class="text-sm text-foreground-muted font-bold mb-1 block">Question</label>
@@ -32,7 +32,7 @@
                 placeholder="e.g. what testing strategy is in use?"
                 class="w-full bg-surface-1 border border-border rounded px-3 py-2 text-sm focus:border-accent-strong focus:outline-none resize-y"></textarea>
     </div>
-    <div class="flex flex-wrap gap-4 text-xs text-foreground-muted">
+    <div class="flex flex-wrap gap-2 text-xs text-foreground-muted">
       <label class="flex items-center gap-1.5">
         max_concurrency
         <input type="number" min="1" max="10" x-model.number="maxConcurrency"
@@ -53,20 +53,20 @@
     <div>
       <div class="flex items-baseline justify-between mb-1">
         <label class="text-sm text-foreground-muted font-bold">Targets</label>
-        <div class="text-xs text-foreground-muted flex gap-3">
+        <div class="text-xs text-foreground-muted flex gap-2">
           <button type="button" @click="selectAll()"
                   aria-label="Select all projects"
-                  class="hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">all</button>
+                  class="hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">all</button>
           <button type="button" @click="selectNone()"
                   aria-label="Deselect all projects"
-                  class="hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">none</button>
+                  class="hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">none</button>
           <span x-text="`${selected.length} of ${projects.length} selected`" aria-live="polite"></span>
         </div>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1 max-h-48 overflow-y-auto border border-border rounded p-2">
         <template x-for="p in projects" :key="p">
-          <label class="flex items-center gap-1.5 text-xs hover:bg-gray-800/50 px-1 py-0.5 rounded cursor-pointer">
-            <input type="checkbox" :value="p" x-model="selected" class="accent-cyan-500">
+          <label class="flex items-center gap-1.5 text-xs hover:bg-surface-3/50 px-1 py-0.5 rounded cursor-pointer">
+            <input type="checkbox" :value="p" x-model="selected" class="accent-accent">
             <span class="truncate" x-text="p"></span>
           </label>
         </template>
@@ -76,7 +76,7 @@
            :aria-hidden="selected.length !== 0"
            role="status"
            data-empty-state="fanout.no-selection"
-           class="mt-2 border border-border bg-gray-900/40 text-foreground-muted px-3 py-3 rounded text-center">
+           class="mt-2 border border-border bg-surface-2/40 text-foreground-muted px-3 py-2 rounded text-center">
         <p class="text-xs font-bold text-foreground mb-1">Pick at least one project</p>
         <p class="text-[11px] text-foreground-muted mb-2">
           Click <span class="text-accent">all</span> above to select every visible project,
@@ -84,28 +84,28 @@
         </p>
         <button type="button" @click="selectAll()"
                 aria-label="Select all projects"
-                class="text-[11px] px-2 py-0.5 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                class="text-[11px] px-2 py-0.5 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
           Select all
         </button>
       </div>
     </div>
-    <div class="flex items-center gap-3">
+    <div class="flex items-center gap-2">
       <button type="submit"
               :disabled="loading || question.trim().length < 3 || selected.length === 0"
               :aria-busy="loading"
-              class="bg-accent-strong hover:bg-accent disabled:bg-surface-3 disabled:text-foreground-muted text-white font-bold px-4 py-2 rounded transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+              class="bg-accent-strong hover:bg-accent disabled:bg-surface-3 disabled:text-foreground-muted text-white font-bold px-3 py-2 rounded transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
         <span x-show="!loading">Run fan-out</span>
         <span x-show="loading" aria-hidden="true">…</span>
       </button>
       <button type="button" x-show="loading" @click="abort()"
               aria-label="Stop fan-out"
               :aria-hidden="!loading"
-              class="text-warning hover:text-warning underline text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">stop</button>
+              class="text-warning hover:text-warning underline text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">stop</button>
       <!-- v4.0.0a2: copy share link. Persists URL first, then copies. -->
       <button type="button" @click="copyShareLink()"
               :disabled="question.trim().length < 3"
               aria-label="Copy shareable link to this fan-out configuration"
-              class="text-xs px-2 py-1 rounded border border-border hover:border-accent-strong disabled:border-border-strong disabled:text-foreground-subtle transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+              class="text-xs px-2 py-1 rounded border border-border hover:border-accent-strong disabled:border-border-strong disabled:text-foreground-subtle transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
         <span x-show="!shareLinkCopied">copy link</span>
         <span x-show="shareLinkCopied" class="text-success">copied ✓</span>
       </button>
@@ -113,13 +113,13 @@
             x-text="`${(elapsedMs/1000).toFixed(1)}s`"></span>
     </div>
   </form>
-  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="mt-3 text-xs text-danger" x-text="error"></div>
+  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="mt-2 text-xs text-danger" x-text="error"></div>
   <pre x-show="resultText"
        :aria-hidden="!resultText"
        aria-live="polite"
        aria-atomic="false"
        aria-label="Fan-out result"
-       class="mt-4 text-sm whitespace-pre-wrap break-words border border-border rounded p-3 bg-gray-950/50 text-foreground leading-relaxed"
+       class="mt-4 text-sm whitespace-pre-wrap break-words border border-border rounded p-2 bg-surface-1/50 text-foreground leading-relaxed"
        x-text="resultText"></pre>
 </section>
 
@@ -238,9 +238,9 @@
    column is dominated by the form itself; the inspector reminds the
    operator what fan-out does and links to related tools. #}
 {% block inspector %}
-<div class="p-3 text-xs" data-tour-step="inspector-content">
+<div class="p-2 text-xs" data-tour-step="inspector-content">
   <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">About fan-out</h3>
-  <p class="text-foreground-muted mb-3">
+  <p class="text-foreground-muted mb-2">
     Asks the same question across multiple projects in parallel. Each
     target replies independently; results stream in as they finish.
   </p>

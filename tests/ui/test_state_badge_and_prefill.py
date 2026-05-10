@@ -47,8 +47,9 @@ def test_state_badge_helper_present_on_dashboard(tmp_path: Path) -> None:
     assert "bg-emerald-900/50" in body
     assert "bg-amber-900/50" in body
     assert "bg-rose-900/50" in body
-    assert "bg-cyan-900/50" in body
-    assert "bg-gray-800" in body
+    # v19.0.0a4: cyan badge migrated to the accent-soft semantic token.
+    assert "bg-accent-soft/50" in body
+    assert "bg-surface-3" in body
 
 
 def test_state_badge_helper_present_on_project_detail(tmp_path: Path) -> None:

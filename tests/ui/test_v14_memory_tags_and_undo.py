@@ -127,9 +127,11 @@ def test_project_detail_has_tag_filter_input() -> None:
 
 def test_project_detail_renders_tag_pills() -> None:
     body = _read("project_detail.html")
-    # Tag pills loop with the cyan-pill class.
+    # Tag pills loop with the accent-tinted pill class.
+    # v19.0.0a4 migrated `bg-cyan-900/40` to `bg-accent-soft/40` as
+    # part of the Linear-violet rebrand.
     assert "x-for=\"t in (f.tags || [])\"" in body
-    assert "bg-cyan-900/40 text-accent" in body
+    assert "bg-accent-soft/40 text-accent" in body
 
 
 def test_project_detail_filtered_files_handles_empty_filter() -> None:

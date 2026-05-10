@@ -94,31 +94,32 @@
 <style>
   body { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 
-  /* v8.0.0a7: semantic color tokens via CSS custom properties.
-     Color-vision-friendly contrast verified: every accent against
-     surface-1 sits above WCAG AA (4.5:1). */
+  /* v19.0.0a4: Linear-style violet tokens (hue 290) + cool near-black
+     surfaces. Tailwind v4 @theme block in tailwind.input.css is the
+     primary source — these inline tokens are the CDN fallback
+     served when /static/tailwind.css is unreachable. */
   :root {
-    --hm-surface-1: oklch(0.20 0 0);
-    --hm-surface-2: oklch(0.26 0 0);
-    --hm-surface-3: oklch(0.32 0 0);
+    --hm-surface-1: oklch(0.15 0.005 280);
+    --hm-surface-2: oklch(0.18 0.008 280);
+    --hm-surface-3: oklch(0.22 0.010 280);
 
-    --hm-foreground:        oklch(0.96 0 0);
-    --hm-foreground-muted:  oklch(0.74 0 0);
-    --hm-foreground-subtle: oklch(0.60 0 0);
+    --hm-foreground:        oklch(0.96 0.005 280);
+    --hm-foreground-muted:  oklch(0.75 0.005 280);
+    --hm-foreground-subtle: oklch(0.55 0.005 280);
 
-    --hm-accent:        oklch(0.78 0.13 215);
-    --hm-accent-strong: oklch(0.62 0.15 220);
-    --hm-accent-soft:   oklch(0.32 0.06 220);
+    --hm-accent:        oklch(0.78 0.13 290);
+    --hm-accent-strong: oklch(0.62 0.22 290);
+    --hm-accent-soft:   oklch(0.32 0.06 290);
 
-    --hm-success: oklch(0.74 0.15 162);
-    --hm-warning: oklch(0.80 0.16 80);
-    --hm-danger:  oklch(0.66 0.20 25);
-    --hm-info:    oklch(0.78 0.13 215);
+    --hm-success: oklch(0.72 0.18 145);
+    --hm-warning: oklch(0.78 0.16 75);
+    --hm-danger:  oklch(0.65 0.22 25);
+    --hm-info:    oklch(0.70 0.13 240);
 
-    --hm-border:        oklch(0.32 0 0);
-    --hm-border-strong: oklch(0.42 0 0);
+    --hm-border:        oklch(0.28 0.008 280);
+    --hm-border-strong: oklch(0.36 0.010 280);
 
-    --hm-ring: oklch(0.85 0.16 215);
+    --hm-ring: oklch(0.78 0.18 290);
   }
 
   [x-cloak] { display: none !important; }
@@ -134,14 +135,14 @@
    Layout is intentionally flat; per-page content goes straight into
    the content block with no inner max-width wrapper. #}
 <header id="hm-topbar"
-        class="fixed top-0 inset-x-0 h-12 bg-surface-2 border-b border-border z-50 flex items-center px-4 gap-4">
-  <a href="/" class="font-bold flex items-baseline gap-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+        class="fixed top-0 inset-x-0 h-12 bg-surface-2 border-b border-border z-50 flex items-center px-3 gap-2">
+  <a href="/" class="font-bold flex items-baseline gap-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
     <span aria-hidden="true">⚓</span>
     <span>Harbormaster</span>
     <span class="text-xs opacity-60">v{{ version }}</span>
   </a>
   <span class="flex-1 text-center text-sm opacity-80">{% block page_title %}{% endblock %}</span>
-  <div class="flex items-center gap-3 text-sm">
+  <div class="flex items-center gap-2 text-sm">
     <!-- Cmd-K hint — opens the palette mounted below. -->
     <span x-data
           @click="window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))"
@@ -154,7 +155,7 @@
             @click="cycle()"
             :aria-label="`Theme: ${mode}. Click to cycle.`"
             :title="`Theme: ${mode} (click to cycle: auto → light → dark)`"
-            class="text-foreground-muted hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 px-1">
+            class="text-foreground-muted hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent px-1">
       <span aria-hidden="true" x-text="icon()"></span>
     </button>
     {% if auth_token %}
@@ -182,7 +183,7 @@
   <!-- Main: page content. -->
   <main id="hm-main"
         data-tour-step="main"
-        class="overflow-y-auto h-[calc(100vh-3rem)] p-4">
+        class="overflow-y-auto h-[calc(100vh-3rem)] p-2.5">
     {% block content %}{% endblock %}
   </main>
 
@@ -193,7 +194,7 @@
          x-show="!inspectorCollapsed"
          x-transition:enter-start="opacity-0"
          x-transition:enter-end="opacity-100">
-    <div class="p-3 border-b border-border flex items-center justify-between">
+    <div class="p-2 border-b border-border flex items-center justify-between">
       <span class="text-xs opacity-60">INSPECTOR</span>
       <button @click="toggleInspector()"
               class="text-sm opacity-60 hover:opacity-100"
@@ -202,7 +203,7 @@
     {# v19.0.0a3: each page defines its own inspector content via this
        block. Default placeholder shows when a page declines to override. #}
     {% block inspector %}
-    <div class="p-3 text-xs text-foreground-subtle">
+    <div class="p-2 text-xs text-foreground-subtle">
       No inspector widgets for this page.
     </div>
     {% endblock %}
@@ -233,9 +234,9 @@
 <div x-data="commandPalette()" x-init="bindKeyboard()" data-tour-step="palette" x-cloak>
   <div x-show="open" @click.self="close()"
        role="dialog" aria-modal="true" aria-label="Command palette"
-       class="fixed inset-0 z-50 bg-gray-950/80 backdrop-blur-sm flex items-start justify-center pt-24"
+       class="fixed inset-0 z-50 bg-surface-1/80 backdrop-blur-sm flex items-start justify-center pt-24"
        @keydown.escape.window="if (open) close()">
-    <div class="w-full max-w-xl mx-4 bg-surface-2 border border-border rounded-lg shadow-2xl overflow-hidden"
+    <div class="w-full max-w-xl mx-4 bg-surface-2 border border-border rounded-md shadow-2xl overflow-hidden"
          @click.stop>
       <header class="flex items-center gap-2 border-b border-border px-3 py-2">
         <span class="text-accent" aria-hidden="true">⌘</span>
@@ -260,7 +261,7 @@
               :aria-selected="i === selectedIndex"
               @mouseenter="selectedIndex = i"
               @click="activate()"
-              :class="i === selectedIndex ? 'bg-cyan-900/40 text-accent' : 'text-foreground hover:bg-gray-800/60'"
+              :class="i === selectedIndex ? 'bg-accent-soft/40 text-accent' : 'text-foreground hover:bg-surface-3/60'"
               class="px-3 py-1.5 text-sm flex items-center gap-2 cursor-pointer">
             <span class="text-[10px] uppercase tracking-wide text-foreground-subtle w-16 shrink-0"
                   x-text="r.category"></span>
