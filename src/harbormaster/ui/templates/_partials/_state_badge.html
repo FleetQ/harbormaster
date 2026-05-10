@@ -18,11 +18,23 @@
      <span x-html="stateBadgeHtml({ state, icon, color, label })"></span>
 
    Props:
-     state  — semantic state name (used as data-state attr for tests)
-     icon   — single character / emoji (e.g. ✓, ⚠, ⊘)
-     color  — tailwind color name (emerald, amber, rose, gray, cyan)
-     label  — human-readable text shown to the right of the icon
-              (also becomes the aria-label).
+     state    — semantic state name (used as data-state attr for tests)
+     icon     — single character / emoji (e.g. ✓, ⚠, ⊘) OR raw HTML
+                if `iconHtml: true` is passed (used by reembedPanel for
+                its animated spinner span).
+     iconHtml — when true, `icon` is treated as raw HTML (NOT escaped).
+                v12.0.0a2: opt-in to support the existing animated
+                spinner element. Caller is responsible for the markup.
+     color    — tailwind color name (emerald, amber, rose, gray, cyan)
+     label    — human-readable text shown to the right of the icon
+                (also becomes the aria-label).
+     ariaLabel — optional; overrides `label` for the aria-label
+                  attribute. Use when the visible text is a glyph or
+                  ambiguous (e.g. "Bridge connected" while the badge
+                  text reads only "connected").
+     title    — optional tooltip (rendered as the `title` attr).
+                v12.0.0a2: introduced for statusStrip's heartbeat-age
+                tooltip.
 
    The helper attaches itself to `window.harbormaster.stateBadgeHtml`
    so it's reachable from any Alpine factory without per-component
@@ -53,17 +65,29 @@
   function stateBadgeHtml(props) {
     const state = props && props.state ? props.state : 'unknown';
     const icon  = props && props.icon  ? props.icon  : '';
+    const iconHtml = !!(props && props.iconHtml);
     const color = props && props.color && COLOR_CLASSES[props.color]
                   ? props.color
                   : 'gray';
     const label = props && props.label ? props.label : '';
+    const ariaLabel = props && props.ariaLabel ? props.ariaLabel : label;
+    const title = props && props.title ? props.title : '';
     const colorClass = COLOR_CLASSES[color];
+    const titleAttr = title
+      ? ' title="' + escapeHtml(title) + '"'
+      : '';
+    const iconSpan = icon
+      ? '<span aria-hidden="true">'
+        + (iconHtml ? icon : escapeHtml(icon))
+        + '</span>'
+      : '';
     return (
       '<span class="text-xs px-2 py-0.5 rounded inline-flex items-center gap-1 '
       + escapeHtml(colorClass)
       + '" data-state="' + escapeHtml(state) + '"'
-      + ' aria-label="' + escapeHtml(label) + '">'
-      + (icon ? '<span aria-hidden="true">' + escapeHtml(icon) + '</span>' : '')
+      + titleAttr
+      + ' aria-label="' + escapeHtml(ariaLabel) + '">'
+      + iconSpan
       + '<span>' + escapeHtml(label) + '</span>'
       + '</span>'
     );

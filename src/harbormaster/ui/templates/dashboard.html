@@ -107,15 +107,11 @@
   <article class="border border-gray-800 rounded-lg p-4 bg-gray-900/40">
     <header class="flex items-center justify-between mb-2">
       <h3 class="text-sm font-bold text-gray-300">FleetQ Bridge</h3>
-      <!-- v8.0.0a2: state badge gets an icon glyph + full aria-label.
-           Color stays as it was; icon is purely additive. -->
-      <span class="text-xs px-2 py-0.5 rounded inline-flex items-center gap-1"
-            :class="bridgeBadgeClass()"
-            :title="bridgeBadgeTooltip()"
-            :aria-label="`Bridge ${bridgeStateLabel()}`">
-        <span aria-hidden="true" x-text="bridgeStateIcon()"></span>
-        <span x-text="bridgeStateLabel()"></span>
-      </span>
+      <!-- v12.0.0a2: migrated from inline color/icon spans to the
+           shared `stateBadgeHtml` helper. Visual output identical;
+           `bridgeBadgeProps()` consolidates state, icon, color, and
+           tooltip selection in one place. -->
+      <span x-html="window.harbormaster.stateBadgeHtml(bridgeBadgeProps())"></span>
     </header>
     <dl class="text-xs space-y-1 text-gray-400" x-show="!bridgeError">
       <div><dt class="inline text-gray-500">enabled:</dt>
@@ -148,13 +144,8 @@
   <article class="border border-gray-800 rounded-lg p-4 bg-gray-900/40">
     <header class="flex items-center justify-between mb-2">
       <h3 class="text-sm font-bold text-gray-300">Plugins</h3>
-      <span class="text-xs px-2 py-0.5 rounded inline-flex items-center gap-1"
-            :class="plugins.enabled ? 'bg-emerald-900/50 text-emerald-300'
-                                    : 'bg-gray-800 text-gray-400'"
-            :aria-label="plugins.enabled ? `Plugins enabled, ${pluginCounts().loaded} loaded` : 'Plugins disabled'">
-        <span aria-hidden="true" x-text="plugins.enabled ? '✓' : '⊘'"></span>
-        <span x-text="plugins.enabled ? `enabled (${pluginCounts().loaded} loaded)` : 'disabled'"></span>
-      </span>
+      <!-- v12.0.0a2: migrated to shared stateBadgeHtml helper. -->
+      <span x-html="window.harbormaster.stateBadgeHtml(pluginsBadgeProps())"></span>
     </header>
     <div x-show="!pluginsError" class="text-xs space-y-1">
       <p class="text-gray-500" x-show="(plugins.plugins || []).length === 0">
@@ -162,18 +153,9 @@
       </p>
       <template x-for="row in (plugins.plugins || [])" :key="row.entry_point + ':' + row.dist_name">
         <div class="flex items-baseline gap-2">
-          <!-- v8.0.0a2: plugin status badge with icon + full aria-label. -->
-          <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1"
-                :class="{
-                  'bg-emerald-900/50 text-emerald-300': row.status === 'loaded',
-                  'bg-gray-800 text-gray-400': ['disabled','not-allowlisted'].includes(row.status),
-                  'bg-amber-900/50 text-amber-300': row.status === 'missing',
-                  'bg-rose-900/50 text-rose-300': row.status === 'no-dist-name',
-                }"
-                :aria-label="`Plugin status ${row.status}`">
-            <span aria-hidden="true" x-text="pluginStatusIcon(row.status)"></span>
-            <span x-text="row.status"></span>
-          </span>
+          <!-- v12.0.0a2: per-plugin status badge migrated to shared
+               stateBadgeHtml helper. -->
+          <span x-html="window.harbormaster.stateBadgeHtml(pluginRowBadgeProps(row))"></span>
           <span class="text-gray-300 truncate" x-text="row.dist_name || '<unknown>'"></span>
           <span class="text-gray-500 text-[10px]" x-show="row.entry_point" x-text="`(${row.entry_point})`"></span>
         </div>
@@ -213,13 +195,10 @@
         <span x-show="!cancelling">cancel</span>
         <span x-show="cancelling">cancelling…</span>
       </button>
-      <!-- v8.0.0a2: phase badge gains icon + full aria-label. -->
-      <span class="text-xs px-2 py-0.5 rounded inline-flex items-center gap-1"
-            :class="phaseBadgeClass()"
-            :aria-label="`Reembed ${phaseLabel()}`">
-        <span aria-hidden="true" x-html="phaseIconHtml()"></span>
-        <span x-text="phaseLabel()"></span>
-      </span>
+      <!-- v12.0.0a2: phase badge migrated to shared stateBadgeHtml
+           helper. Spinner span passed via iconHtml=true so the
+           animated SVG-equivalent stays as a live element. -->
+      <span x-html="window.harbormaster.stateBadgeHtml(phaseBadgeProps())"></span>
     </div>
   </header>
   <div x-show="state.phase === 'running'" class="text-xs text-gray-400">
@@ -752,6 +731,65 @@
         };
         return map[status] || '●';
       },
+      // v12.0.0a2: per-row plugin badge color name (passed to
+      // stateBadgeHtml). Mirrors the previous inline `:class` map but
+      // returns the color *name* the helper understands.
+      pluginRowBadgeColor(status) {
+        if (status === 'loaded') return 'emerald';
+        if (status === 'missing') return 'amber';
+        if (status === 'no-dist-name') return 'rose';
+        return 'gray';  // disabled / not-allowlisted / unknown
+      },
+      pluginRowBadgeProps(row) {
+        return {
+          state: row.status,
+          icon: this.pluginStatusIcon(row.status),
+          color: this.pluginRowBadgeColor(row.status),
+          label: row.status,
+          ariaLabel: `Plugin status ${row.status}`,
+        };
+      },
+      pluginsBadgeProps() {
+        const enabled = this.plugins.enabled;
+        const counts = this.pluginCounts();
+        return {
+          state: enabled ? 'enabled' : 'disabled',
+          icon: enabled ? '✓' : '⊘',
+          color: enabled ? 'emerald' : 'gray',
+          label: enabled ? `enabled (${counts.loaded} loaded)` : 'disabled',
+          ariaLabel: enabled
+            ? `Plugins enabled, ${counts.loaded} loaded`
+            : 'Plugins disabled',
+        };
+      },
+      // v12.0.0a2: collapse bridgeBadgeClass + bridgeStateIcon +
+      // bridgeStateLabel + bridgeBadgeTooltip into one props builder
+      // so the template only contains the helper invocation. The
+      // per-helper accessors stay (other UI elements still call
+      // bridgeStateLabel for the runtime line).
+      bridgeBadgeColor() {
+        if (!this.bridge.fleetq_enabled) return 'gray';
+        if (!this.bridge.api_token_present) return 'amber';
+        const rt = this.bridge.runtime;
+        if (rt && rt.available && rt.state_file_present) {
+          if (rt.connected && !rt.stale && rt.subscribed) return 'emerald';
+          if (rt.connected && rt.stale) return 'amber';
+          if (rt.connected) return 'cyan';
+          return 'rose';
+        }
+        return 'emerald';
+      },
+      bridgeBadgeProps() {
+        const label = this.bridgeStateLabel();
+        return {
+          state: label,
+          icon: this.bridgeStateIcon(),
+          color: this.bridgeBadgeColor(),
+          label: label,
+          ariaLabel: `Bridge ${label}`,
+          title: this.bridgeBadgeTooltip(),
+        };
+      },
       bridgeBadgeTooltip() {
         const rt = this.bridge.runtime;
         if (!rt || !rt.available || !rt.state_file_present) return 'config-derived state — runtime not yet observed';
@@ -1199,6 +1237,38 @@
         }
         const map = { idle: '⏸', done: '✓', failed: '✗', cancelled: '⚠' };
         return map[phase] || '●';
+      },
+
+      // v12.0.0a2: phase badge color name. Mirrors phaseBadgeClass()
+      // but returns the color name the shared stateBadgeHtml helper
+      // understands.
+      phaseBadgeColor() {
+        const map = {
+          running: 'cyan',
+          done: 'emerald',
+          failed: 'rose',
+          idle: 'gray',
+          cancelled: 'amber',
+        };
+        if (this.state.phase === 'running' && this.state.cancel_requested) {
+          return 'amber';
+        }
+        return map[this.state.phase] || 'gray';
+      },
+      phaseBadgeProps() {
+        const phase = this.state.phase;
+        // The `running` icon is a spinner span — pass iconHtml=true
+        // so stateBadgeHtml inserts it raw. Other phases use a glyph
+        // and run through the default text-escape path.
+        const isRunning = phase === 'running' && !this.state.cancel_requested;
+        return {
+          state: phase,
+          icon: this.phaseIconHtml(),
+          iconHtml: isRunning,  // only the spinner is HTML; glyphs are text
+          color: this.phaseBadgeColor(),
+          label: this.phaseLabel(),
+          ariaLabel: `Reembed ${this.phaseLabel()}`,
+        };
       },
 
       formatDuration(start, end) {

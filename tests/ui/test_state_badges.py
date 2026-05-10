@@ -38,36 +38,54 @@ def _read(rel: str) -> str:
 
 
 def test_bridge_state_badge_has_icon_and_aria_label() -> None:
+    """v12.0.0a2: bridge badge migrated to shared stateBadgeHtml helper.
+    The icon + aria-label now live in `bridgeBadgeProps()` instead of
+    inline template attribute bindings."""
     src = _read("dashboard.html")
-    # The bridge badge is the first inline-flex badge after `FleetQ Bridge`.
-    # Locate the section by header text to guard against false positives.
+    # The bridge badge is the first helper invocation after `FleetQ Bridge`.
     idx = src.find("FleetQ Bridge")
     assert idx != -1
     block = src[idx : idx + 800]
-    assert "bridgeStateIcon()" in block, "bridge badge must use bridgeStateIcon()"
-    assert ":aria-label=\"`Bridge ${bridgeStateLabel()}`\"" in block
+    assert "stateBadgeHtml(bridgeBadgeProps())" in block, (
+        "bridge badge must route through shared helper"
+    )
+    # Props builder still surfaces icon + label + aria-label.
+    assert "bridgeStateIcon()" in src
+    assert "ariaLabel: `Bridge ${label}`" in src
 
 
 def test_plugins_enabled_badge_has_icon_and_aria_label() -> None:
+    """v12.0.0a2: plugins enabled badge migrated to shared helper.
+    Icon (✓ vs ⊘) and aria-label live in `pluginsBadgeProps()`."""
     src = _read("dashboard.html")
     idx = src.find('"text-sm font-bold text-gray-300">Plugins')
     assert idx != -1
     block = src[idx : idx + 800]
-    assert ":aria-label=\"plugins.enabled" in block
-    # Icon span (✓ or ⊘) is rendered inline.
-    assert "'✓' : '⊘'" in block
+    assert "stateBadgeHtml(pluginsBadgeProps())" in block
+    # Props builder retains the same icon + aria-label semantics.
+    assert "pluginsBadgeProps()" in src
+    assert "icon: enabled ? '✓' : '⊘'" in src
+    assert "Plugins enabled" in src  # in pluginsBadgeProps's ariaLabel
 
 
 def test_plugin_row_status_badge_has_icon_and_aria_label() -> None:
+    """v12.0.0a2: per-row plugin badge migrated to shared helper. Icon
+    + aria-label live in `pluginRowBadgeProps(row)`."""
     src = _read("dashboard.html")
     assert "pluginStatusIcon(row.status)" in src
-    assert ":aria-label=\"`Plugin status ${row.status}`\"" in src
+    assert "stateBadgeHtml(pluginRowBadgeProps(row))" in src
+    assert "ariaLabel: `Plugin status ${row.status}`" in src
 
 
 def test_reembed_phase_badge_has_icon_and_aria_label() -> None:
+    """v12.0.0a2: reembed phase badge migrated to shared helper. Icon
+    + aria-label live in `phaseBadgeProps()`. The spinner icon
+    (running phase) is passed via `iconHtml: true` so the animated
+    span renders unescaped."""
     src = _read("dashboard.html")
     assert "phaseIconHtml()" in src
-    assert ":aria-label=\"`Reembed ${phaseLabel()}`\"" in src
+    assert "stateBadgeHtml(phaseBadgeProps())" in src
+    assert "ariaLabel: `Reembed ${this.phaseLabel()}`" in src
 
 
 def test_trajectory_tier_badges_carry_aria_label() -> None:
