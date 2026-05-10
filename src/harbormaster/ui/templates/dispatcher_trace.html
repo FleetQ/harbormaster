@@ -16,7 +16,7 @@
         <span aria-hidden="true">●</span>
         <span x-text="connected ? 'streaming' : 'reconnecting…'"></span>
       </span>
-      <span x-text="`${recent.length} recent · ${active.length} active`"></span>
+      <span x-text="`${traces.length} traces · ${active.length} active`"></span>
     </div>
   </header>
 
@@ -45,35 +45,93 @@
     </ul>
   </section>
 
-  <!-- Recent (completed) spans, newest first -->
-  <section aria-label="Recent completed spans">
+  <!-- Trace waterfall — grouped by trace_id, indented by depth -->
+  <section aria-label="Trace waterfall">
     <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">
-      Recent completed
-      <span class="text-foreground-subtle" x-text="`(last ${recent.length})`"></span>
+      Recent traces
+      <span class="text-foreground-subtle" x-text="`(${traces.length})`"></span>
     </h3>
-    <div x-show="recent.length === 0" role="status" class="text-xs text-foreground-subtle">
-      No completed spans yet. The ring buffer holds the last 100 — they'll
-      appear here as tools finish.
+    <div x-show="traces.length === 0" role="status" class="text-xs text-foreground-subtle">
+      No completed traces yet. The ring buffer holds the last 100 spans —
+      they'll appear here grouped by trace_id as tools finish.
     </div>
-    <ul x-show="recent.length > 0" class="space-y-1"
-        data-trace-recent-list>
-      <template x-for="span in recent" :key="'done:' + span.span_id">
-        <li class="flex items-center gap-3 text-xs"
-            :data-span-id="span.span_id"
-            :class="span.ok ? '' : 'text-danger'">
-          <span class="w-32 truncate font-mono"
-                :class="span.ok ? 'text-success' : 'text-danger'"
-                x-text="span.tool"></span>
-          <span class="w-32 truncate text-foreground-muted"
-                x-text="span.project || '—'"></span>
-          <span class="flex-1 h-2 bg-surface-3 rounded overflow-hidden">
-            <span class="block h-full"
-                  :class="span.ok ? 'bg-emerald-700' : 'bg-rose-700'"
-                  :style="`width: ${barPct(span)}%`"
-                  :aria-label="`${span.tool} took ${span.duration_ms}ms`"></span>
-          </span>
-          <span class="w-20 text-right text-foreground-subtle"
-                x-text="`${span.duration_ms}ms`"></span>
+    <ul x-show="traces.length > 0" class="space-y-3"
+        data-trace-waterfall-list>
+      <template x-for="trace in traces" :key="'trace:' + trace.trace_id">
+        <li class="border border-border rounded p-2 bg-surface-1"
+            :data-trace-id="trace.trace_id">
+          <!-- Trace header: clickable to collapse/expand -->
+          <button type="button"
+                  class="w-full flex items-center gap-2 text-xs text-left"
+                  :aria-expanded="!trace.collapsed"
+                  data-trace-toggle
+                  @click="trace.collapsed = !trace.collapsed">
+            <span class="w-3 text-foreground-subtle"
+                  x-text="trace.collapsed ? '▶' : '▼'"></span>
+            <span class="font-mono text-accent"
+                  x-text="trace.root.tool"></span>
+            <span class="text-foreground-muted"
+                  x-text="trace.root.project || '—'"></span>
+            <span class="text-foreground-subtle"
+                  x-text="`(${trace.spans.length} span${trace.spans.length === 1 ? '' : 's'})`"></span>
+            <span class="ml-auto text-foreground-subtle"
+                  x-text="`${traceDurationMs(trace)}ms`"></span>
+          </button>
+
+          <!-- Span rows: nested via depth -->
+          <ul x-show="!trace.collapsed"
+              class="mt-2 space-y-1"
+              data-trace-spans>
+            <template x-for="span in trace.spans" :key="'span:' + span.span_id">
+              <li class="flex items-start gap-2 text-xs"
+                  :data-span-id="span.span_id"
+                  :data-depth="span.depth">
+                <!-- Indent column scales with depth (1.25rem per level) -->
+                <span class="block flex-shrink-0"
+                      :style="`width: ${0.25 + span.depth * 1.25}rem`"
+                      aria-hidden="true"></span>
+                <!-- Expand/collapse for span attributes -->
+                <button type="button"
+                        class="w-3 text-foreground-subtle flex-shrink-0"
+                        :aria-expanded="!!span.expanded"
+                        :aria-label="span.expanded ? `Hide ${span.tool} attributes` : `Show ${span.tool} attributes`"
+                        data-span-toggle
+                        @click="span.expanded = !span.expanded"
+                        x-text="span.expanded ? '−' : '+'"></button>
+                <span class="flex-1 min-w-0">
+                  <!-- Single-line summary -->
+                  <span class="flex items-center gap-2">
+                    <span class="font-mono truncate"
+                          :class="span.ok ? 'text-success' : 'text-danger'"
+                          x-text="`[${formatRel(trace, span, 'start')}—${formatRel(trace, span, 'end')}] ${span.tool}`">
+                    </span>
+                    <span class="text-foreground-subtle text-[10px] uppercase tracking-wide"
+                          x-text="span.ok ? 'ok' : 'error'"></span>
+                    <span class="ml-auto h-1.5 bg-surface-3 rounded overflow-hidden flex-1 max-w-[40%]">
+                      <span class="block h-full"
+                            :class="span.ok ? 'bg-emerald-700' : 'bg-rose-700'"
+                            :style="`margin-left: ${barOffsetPct(trace, span)}%; width: ${barWidthPct(trace, span)}%`"
+                            :aria-label="`${span.tool} took ${span.duration_ms}ms`"></span>
+                    </span>
+                    <span class="text-foreground-subtle w-16 text-right"
+                          x-text="`${span.duration_ms}ms`"></span>
+                  </span>
+                  <!-- Expanded attribute panel -->
+                  <dl x-show="span.expanded"
+                      class="mt-1 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-foreground-muted"
+                      data-span-attributes>
+                    <dt>span_id</dt><dd class="font-mono" x-text="span.span_id"></dd>
+                    <dt>parent</dt><dd class="font-mono"
+                                       x-text="span.parent_span_id ?? '—'"></dd>
+                    <dt>trace</dt><dd class="font-mono" x-text="span.trace_id"></dd>
+                    <dt>project</dt><dd x-text="span.project || '—'"></dd>
+                    <dt>started</dt><dd x-text="formatTime(span.started_at)"></dd>
+                    <dt>ended</dt><dd x-text="formatTime(span.ended_at)"></dd>
+                  </dl>
+                </span>
+              </li>
+            </template>
+          </ul>
         </li>
       </template>
     </ul>
@@ -84,19 +142,29 @@
 </section>
 
 <script>
-  // v9.0.0a3: dispatcher trace waterfall Alpine scope.
+  // v17.0.0a1: dispatcher trace waterfall renderer.
   //
-  // First paint: GET /api/dispatcher/recent for the last-N completed spans.
-  // Live: EventSource('/api/dispatcher/trace') receives span_start /
-  //       span_end events.
+  // Consumes hierarchical SSE events from v16.a6 (span_start /
+  // span_end, both carry parent_span_id + trace_id). Groups completed
+  // spans by trace_id, sorts each group by started_at, computes depth
+  // by walking parent links, then renders as a nested waterfall with
+  // bars positioned and sized relative to the trace's start/end
+  // window.
   //
-  // Bar widths are scaled against the longest span in the recent list;
-  // active spans get their bar width from elapsed time vs. the same
-  // baseline (so an in-flight tool grows visually as it runs).
+  // First paint: GET /api/dispatcher/recent for the last-N completed
+  // spans. Live: EventSource('/api/dispatcher/trace') receives
+  // span_start / span_end events; span_end appends to the matching
+  // trace and re-derives depth.
+  //
+  // The `traceWaterfall()` factory name is preserved (the dispatcher
+  // page test pins it). The "active" / in-flight rendering also
+  // preserved unchanged so the live indicator keeps working.
   function traceWaterfall() {
     return {
       active: [],   // span_start without matching span_end
-      recent: [],   // last-N completed spans, newest first
+      // traces: array of {trace_id, root, spans: [], collapsed}
+      // — newest trace first. Each span carries depth + duration_ms.
+      traces: [],
       connected: false,
       error: '',
       _es: null,
@@ -114,11 +182,12 @@
 
       async _loadRecent() {
         try {
-          const r = await hmFetch('/api/dispatcher/recent?limit=20');
+          const r = await hmFetch('/api/dispatcher/recent?limit=100');
           if (!r.ok) throw new Error('HTTP ' + r.status);
           const data = await r.json();
-          // Newest last from server; reverse to show newest first in UI.
-          this.recent = (data.spans || []).slice().reverse();
+          // Server returns newest last; group all into traces.
+          const spans = data.spans || [];
+          this.traces = this._groupIntoTraces(spans);
         } catch (e) {
           this.error = e.message;
         }
@@ -148,23 +217,147 @@
         try {
           const span = JSON.parse(e.data);
           this.active = this.active.filter(s => s.span_id !== span.span_id);
-          const completed = {
-            span_id: span.span_id,
-            tool: span.tool,
-            project: span.project,
-            started_at: span.started_at,
-            ended_at: span.ended_at,
-            duration_ms: Math.max(0, Math.round((span.ended_at - span.started_at) * 1000)),
-            ok: span.ok,
-          };
-          // Newest first; cap at 100 to match server ring buffer.
-          this.recent = [completed, ...this.recent].slice(0, 100);
+          const completed = this._normalizeSpan(span);
+          this._appendCompleted(completed);
         } catch (_) { /* malformed event ignored */ }
       },
 
-      _maxDurationMs() {
-        let max = 1; // avoid div-by-zero
-        for (const s of this.recent) if (s.duration_ms > max) max = s.duration_ms;
+      // Convert a server span dict into the renderer's row shape.
+      _normalizeSpan(s) {
+        return {
+          span_id: s.span_id,
+          parent_span_id: s.parent_span_id ?? null,
+          trace_id: s.trace_id ?? s.span_id,
+          tool: s.tool,
+          project: s.project ?? null,
+          started_at: s.started_at,
+          ended_at: s.ended_at,
+          duration_ms: typeof s.duration_ms === 'number'
+            ? s.duration_ms
+            : Math.max(0, Math.round((s.ended_at - s.started_at) * 1000)),
+          ok: !!s.ok,
+          depth: 0,        // recomputed by _rebuildTrace
+          expanded: false, // attribute panel state
+        };
+      },
+
+      // Group a flat span list into per-trace_id buckets, sorted by
+      // root started_at desc (newest first).
+      _groupIntoTraces(rawSpans) {
+        const norm = rawSpans.map(s => this._normalizeSpan(s));
+        const byTrace = new Map();
+        for (const s of norm) {
+          if (!byTrace.has(s.trace_id)) byTrace.set(s.trace_id, []);
+          byTrace.get(s.trace_id).push(s);
+        }
+        const traces = [];
+        for (const [trace_id, spans] of byTrace) {
+          traces.push(this._buildTrace(trace_id, spans));
+        }
+        traces.sort((a, b) => b.root.started_at - a.root.started_at);
+        return traces;
+      },
+
+      // Build one trace from its span list: pick root, compute depth,
+      // sort spans by started_at.
+      _buildTrace(trace_id, spans) {
+        // Sort by start time so render order matches temporal order.
+        spans.sort((a, b) => a.started_at - b.started_at);
+        // Find root: parent_span_id is null, OR span_id == trace_id.
+        let root = spans.find(s => s.parent_span_id === null
+                                   || s.span_id === s.trace_id);
+        if (!root) root = spans[0];
+        // Compute depth via parent walk; cap at 8 to keep indent sane.
+        const byId = new Map(spans.map(s => [s.span_id, s]));
+        for (const s of spans) {
+          let depth = 0;
+          let cur = s;
+          while (cur && cur.parent_span_id != null && byId.has(cur.parent_span_id)) {
+            depth += 1;
+            cur = byId.get(cur.parent_span_id);
+            if (depth >= 8) break;
+          }
+          s.depth = depth;
+        }
+        return {
+          trace_id,
+          root,
+          spans,
+          collapsed: false,
+        };
+      },
+
+      // Append a completed span to its trace (creating a new trace if
+      // needed). Cap at 100 traces to mirror the server ring.
+      _appendCompleted(span) {
+        let trace = this.traces.find(t => t.trace_id === span.trace_id);
+        if (!trace) {
+          trace = this._buildTrace(span.trace_id, [span]);
+          this.traces = [trace, ...this.traces].slice(0, 100);
+          return;
+        }
+        // Avoid duplicate appends if the same span_id is already there
+        // (e.g. SSE replay after reconnect).
+        if (trace.spans.some(s => s.span_id === span.span_id)) return;
+        trace.spans = [...trace.spans, span];
+        // Re-build to recompute depth + sort order.
+        const rebuilt = this._buildTrace(trace.trace_id, trace.spans);
+        rebuilt.collapsed = trace.collapsed;
+        const idx = this.traces.indexOf(trace);
+        this.traces.splice(idx, 1, rebuilt);
+      },
+
+      // Trace total duration: from earliest start to latest end.
+      _traceWindow(trace) {
+        let start = Infinity, end = -Infinity;
+        for (const s of trace.spans) {
+          if (s.started_at < start) start = s.started_at;
+          if (s.ended_at > end) end = s.ended_at;
+        }
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+          return { start: trace.root.started_at, end: trace.root.ended_at, span: 1 };
+        }
+        return { start, end, span: end - start };
+      },
+
+      traceDurationMs(trace) {
+        const w = this._traceWindow(trace);
+        return Math.max(0, Math.round((w.end - w.start) * 1000));
+      },
+
+      // Bar offset = (span.start - trace.start) / trace.span * 100.
+      barOffsetPct(trace, span) {
+        const w = this._traceWindow(trace);
+        if (w.span <= 0) return 0;
+        return Math.max(0, Math.min(100, ((span.started_at - w.start) / w.span) * 100));
+      },
+
+      // Bar width = (span.end - span.start) / trace.span * 100.
+      barWidthPct(trace, span) {
+        const w = this._traceWindow(trace);
+        if (w.span <= 0) return 100;
+        const pct = ((span.ended_at - span.started_at) / w.span) * 100;
+        return Math.max(1, Math.min(100, pct));
+      },
+
+      // [start_ms—end_ms] relative to the trace start.
+      formatRel(trace, span, which) {
+        const w = this._traceWindow(trace);
+        const t = which === 'start' ? span.started_at : span.ended_at;
+        return `${Math.max(0, Math.round((t - w.start) * 1000))}ms`;
+      },
+
+      formatTime(epoch) {
+        if (!epoch) return '—';
+        try {
+          return new Date(epoch * 1000).toISOString().replace('T', ' ').slice(0, 19);
+        } catch (_) { return String(epoch); }
+      },
+
+      // ---- Active span helpers (preserved from v9.0.0a3) -----------------
+
+      _maxActiveMs() {
+        let max = 1;
         for (const s of this.active) {
           const elapsed = (this._now - s.started_at) * 1000;
           if (elapsed > max) max = elapsed;
@@ -172,14 +365,9 @@
         return max;
       },
 
-      barPct(span) {
-        const max = this._maxDurationMs();
-        return Math.max(2, Math.min(100, (span.duration_ms / max) * 100));
-      },
-
       liveBarPct(span) {
         const elapsed = Math.max(0, (this._now - span.started_at) * 1000);
-        const max = this._maxDurationMs();
+        const max = this._maxActiveMs();
         return Math.max(2, Math.min(100, (elapsed / max) * 100));
       },
 
