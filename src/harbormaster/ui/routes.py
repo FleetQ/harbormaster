@@ -165,6 +165,33 @@ def register_routes(
             "events": [e.as_dict() for e in events],
         }
 
+    @app.get("/api/network/stats")
+    async def network_stats(window: str = "24h") -> dict[str, object]:
+        """v11.0.0a6: aggregate metrics over the last 1h / 24h / 7d.
+
+        Query param `window` accepts: ``1h``, ``24h``, ``7d``, ``all``
+        (default ``24h``). Returns total_calls, by_tool counts, top
+        5 target projects by call count, and the error rate.
+        """
+        from harbormaster.ui.network_log import network_log
+
+        windows_ms: dict[str, int | None] = {
+            "1h": 60 * 60 * 1000,
+            "24h": 24 * 60 * 60 * 1000,
+            "7d": 7 * 24 * 60 * 60 * 1000,
+            "all": None,
+        }
+        if window not in windows_ms:
+            raise HTTPException(
+                400, "window must be one of: 1h, 24h, 7d, all",
+            )
+        delta = windows_ms[window]
+        since_ms: int | None = None
+        if delta is not None:
+            since_ms = int(time.time() * 1000) - delta
+        stats = network_log.stats(since_ms=since_ms)
+        return {"window": window, **stats}
+
     @app.get("/api/network/stream")
     async def stream_network_events() -> EventSourceResponse:
         """SSE stream of new MCPCallLog events as they're recorded.
@@ -852,6 +879,14 @@ def register_routes(
 
         return projects_cache.get(_build, _last_dirs)
 
+    # v11.0.0a6: 60s TTL memo for /api/ignored-projects. Two
+    # discovery passes per call is non-trivial work and the sidebar
+    # polls this on every page load; cache the diff for one minute.
+    _ignored_cache: dict[str, dict[str, object] | float | None] = {
+        "value": None, "cached_at": 0.0,
+    }
+    _ignored_ttl_s: float = 60.0
+
     @app.get("/api/ignored-projects")
     async def list_ignored_projects() -> dict[str, object]:
         """v10.0.0a4: surface the projects hidden by `[ignore].patterns`.
@@ -866,9 +901,20 @@ def register_routes(
 
         Computed by running discovery twice — once with
         `ignore_patterns=[]` and once with the live patterns — and
-        diffing. O(2 * discovery cost); acceptable because the UI
-        sidebar polls this lazily on expand.
+        diffing. O(2 * discovery cost); 60s TTL memo (v11.0.0a6).
         """
+        now_t = time.monotonic()
+        raw_cached_at = _ignored_cache.get("cached_at")
+        cached_at = (
+            float(raw_cached_at) if isinstance(raw_cached_at, int | float) else 0.0
+        )
+        cached_value = _ignored_cache.get("value")
+        if (
+            isinstance(cached_value, dict)
+            and (now_t - cached_at) < _ignored_ttl_s
+        ):
+            return cached_value
+
         all_names = {
             p.name for p in discover_projects(
                 config.projects, ignore_patterns=[],
@@ -880,11 +926,14 @@ def register_routes(
             )
         }
         ignored = sorted(all_names - visible_names)
-        return {
+        payload: dict[str, object] = {
             "patterns": list(config.ignore.patterns),
             "count": len(ignored),
             "names": ignored,
         }
+        _ignored_cache["value"] = payload
+        _ignored_cache["cached_at"] = now_t
+        return payload
 
     # ----- v10.0.0a5: per-project memories viewer (read-only) ----------
     # `GET /api/projects/{name}/memories` — list available memory files.
