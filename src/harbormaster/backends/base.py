@@ -12,7 +12,8 @@ exceptions back to user-visible 'Error: ...' strings at the MCP boundary.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -47,6 +48,90 @@ class BackendError(Exception):
 
     def __str__(self) -> str:
         return self.message
+
+
+@dataclass
+class StreamUsage:
+    """Backend-reported usage captured during streaming.
+
+    Originally introduced in v11.0.0a5 inside `claude.py`; lifted to
+    `backends/base.py` in v12.0.0a1 so non-Claude backends (codex) can
+    reuse the same shape and the SSE `usage` event emitter only has to
+    look for one duck-typed attribute (`.has_real_usage`).
+
+    Populated as the stream progresses. After the iterator is fully
+    drained, this object holds final values. Callers (the SSE `usage`
+    event emitter) read fields on completion; mid-stream reads return
+    whatever was reported up to that point.
+
+    `has_real_usage` distinguishes "backend gave no metadata"
+    (callers fall back to the chunk-count approximation) from
+    "backend reported zero".
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    model: str | None = None
+    has_real_usage: bool = field(default=False)
+
+    def merge_message_usage(self, msg: dict[str, object]) -> None:
+        """Pull usage fields from one parsed stream-json line.
+
+        The Claude `assistant` message shape carries usage in
+        `message.usage`; the `result` summary carries it at top level.
+        Both are absorbed by the same code path. Other backends (codex)
+        whose CLI doesn't expose comparable metadata simply never call
+        this and `has_real_usage` stays False.
+        """
+        message = msg.get("message")
+        if isinstance(message, dict):
+            usage = message.get("usage")
+            if isinstance(usage, dict):
+                self._absorb_usage_block(usage)
+            model = message.get("model")
+            if isinstance(model, str):
+                self.model = model
+        usage = msg.get("usage")
+        if isinstance(usage, dict):
+            self._absorb_usage_block(usage)
+
+    def _absorb_usage_block(self, usage: dict[str, object]) -> None:
+        for key in (
+            "input_tokens",
+            "output_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+        ):
+            v = usage.get(key)
+            if isinstance(v, int):
+                setattr(self, key, v)
+                self.has_real_usage = True
+
+
+class _StreamWithUsage(Iterator[str]):
+    """Wrap a text-delta iterator + a side-channel `StreamUsage`.
+
+    Iterating yields the underlying text deltas. Once the wrapped
+    iterator is exhausted, `self.usage` holds the final captured usage
+    (if the backend reported any). Callers who don't care about usage
+    iterate as if it were a plain `Iterator[str]`.
+
+    Lifted from `backends/claude.py` to `backends/base.py` in v12.0.0a1
+    so codex (and future backends) can wrap their own iterators with
+    the same shape.
+    """
+
+    def __init__(self, source: Iterator[str], usage: StreamUsage) -> None:
+        self._source = source
+        self.usage = usage
+
+    def __iter__(self) -> Iterator[str]:
+        return self
+
+    def __next__(self) -> str:
+        return next(self._source)
 
 
 class Backend(Protocol):
