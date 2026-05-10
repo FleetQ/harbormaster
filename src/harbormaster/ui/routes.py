@@ -223,6 +223,23 @@ def register_routes(
         stats = network_log.stats(since_ms=since_ms)
         return {"window": window, **stats}
 
+    @app.get("/api/network/sources")
+    async def network_sources(
+        scan_limit: int = 1000,
+    ) -> dict[str, list[str]]:
+        """v14.0.0a2: distinct caller (source) values from the most
+        recent ``scan_limit`` events. Replaces the previously-hardcoded
+        source dropdown options on the /network page so the operator
+        only ever sees real values.
+        """
+        from harbormaster.ui.network_log import network_log
+
+        if scan_limit <= 0 or scan_limit > 10_000:
+            raise HTTPException(
+                400, "scan_limit must be between 1 and 10000",
+            )
+        return {"sources": network_log.distinct_sources(scan_limit=scan_limit)}
+
     @app.get("/api/network/stream")
     async def stream_network_events() -> EventSourceResponse:
         """SSE stream of new MCPCallLog events as they're recorded.
