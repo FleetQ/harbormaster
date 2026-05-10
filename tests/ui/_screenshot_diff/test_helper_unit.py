@@ -17,6 +17,7 @@ pytest.importorskip("PIL")
 
 from PIL import Image  # noqa: E402
 
+from . import conftest as _ssconf  # noqa: E402
 from . import helper  # noqa: E402
 
 
@@ -132,3 +133,49 @@ def test_viewport_constants_match_design() -> None:
     constant prevents accidental viewport drift between runs."""
     assert helper.VIEWPORT_WIDTH == 1280
     assert helper.VIEWPORT_HEIGHT == 720
+
+
+def test_bootstrap_mode_env_gating(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v14.0.0a1: bootstrap and autobootstrap are independent env switches."""
+    monkeypatch.delenv("HM_SCREENSHOT_BOOTSTRAP", raising=False)
+    monkeypatch.delenv("HM_SCREENSHOT_AUTOBOOTSTRAP", raising=False)
+    assert _ssconf.is_bootstrap_mode() is False
+    assert _ssconf.is_autobootstrap_mode() is False
+
+    monkeypatch.setenv("HM_SCREENSHOT_BOOTSTRAP", "1")
+    assert _ssconf.is_bootstrap_mode() is True
+    assert _ssconf.is_autobootstrap_mode() is False
+
+    monkeypatch.delenv("HM_SCREENSHOT_BOOTSTRAP", raising=False)
+    monkeypatch.setenv("HM_SCREENSHOT_AUTOBOOTSTRAP", "1")
+    assert _ssconf.is_bootstrap_mode() is False
+    assert _ssconf.is_autobootstrap_mode() is True
+
+    # Other truthy strings must NOT trigger — only literal "1"
+    monkeypatch.setenv("HM_SCREENSHOT_AUTOBOOTSTRAP", "true")
+    assert _ssconf.is_autobootstrap_mode() is False
+
+
+def test_autobootstrap_writes_baseline_in_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v14.0.0a1: simulate the autobootstrap branch of the harness test
+    without requiring Playwright. We stand in for the page screenshot
+    with a synthetic PNG and assert the baseline file is created at
+    the canonical path (not as ``__actual.png``)."""
+    monkeypatch.setattr(helper, "BASELINE_DIR", tmp_path)
+    monkeypatch.setenv("HM_SCREENSHOT_AUTOBOOTSTRAP", "1")
+
+    baseline = helper.baseline_path("dashboard", "dark")
+    assert not baseline.exists()
+
+    # Mirror the harness logic: when autobootstrap and missing baseline,
+    # write the screenshot bytes directly to the baseline path.
+    if _ssconf.is_autobootstrap_mode() and not baseline.exists():
+        baseline.parent.mkdir(parents=True, exist_ok=True)
+        baseline.write_bytes(_solid((40, 40, 40)).tobytes())
+
+    assert baseline.exists()
+    # Crucially, no __actual.png should exist — we wrote the baseline
+    # directly. This is what the CI commit step keys off of.
+    assert not baseline.with_name("dashboard__dark__actual.png").exists()

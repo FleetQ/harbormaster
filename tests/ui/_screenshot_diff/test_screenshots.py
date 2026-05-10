@@ -34,7 +34,7 @@ pytest.importorskip("PIL")
 
 from playwright.sync_api import Page  # noqa: E402
 
-from .conftest import is_bootstrap_mode  # noqa: E402
+from .conftest import is_autobootstrap_mode, is_bootstrap_mode  # noqa: E402
 from .helper import (  # noqa: E402
     VIEWPORT_HEIGHT,
     VIEWPORT_WIDTH,
@@ -85,16 +85,24 @@ def test_surface_matches_baseline(
     # Allow a beat for any post-paint reflow (Alpine init, htmx swaps).
     page.wait_for_load_state("networkidle", timeout=5000)
 
-    if is_bootstrap_mode() or not baseline_path(surface, theme).exists():
+    baseline = baseline_path(surface, theme)
+    if is_autobootstrap_mode() and not baseline.exists():
+        # v14.0.0a1: write the baseline directly so the post-merge CI run
+        # auto-blesses freshly-shipped UI changes. The CI workflow then
+        # commits the new PNGs back to main. Subsequent PR runs assert
+        # against the new baseline normally.
+        baseline.parent.mkdir(parents=True, exist_ok=True)
+        baseline.write_bytes(page.screenshot(full_page=False, type="png"))
+        return
+
+    if is_bootstrap_mode() or not baseline.exists():
         # Persist actual.png next to the baseline so the operator can
         # bless it without re-running.
-        actual = baseline_path(surface, theme).with_name(
-            f"{surface}__{theme}__actual.png"
-        )
+        actual = baseline.with_name(f"{surface}__{theme}__actual.png")
         actual.write_bytes(page.screenshot(full_page=False, type="png"))
         pytest.skip(
             f"bootstrap: wrote {actual.name} — review and copy over "
-            f"{baseline_path(surface, theme).name} to bless."
+            f"{baseline.name} to bless."
         )
 
     assert_screenshot_matches(page, surface, theme)

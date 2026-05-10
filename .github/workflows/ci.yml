@@ -410,8 +410,19 @@ jobs:
     name: Headless browser tests (Playwright)
     runs-on: ubuntu-24.04
     needs: test
+    # v14.0.0a1: writes back screenshot baselines on main-push only.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Need full token + ref to push baseline commits back to main.
+          # PR runs use the default read-only token; the autobootstrap
+          # env var below is unset for PRs, so push-back only matters
+          # on main-push events. Only workflow-internal expansions are
+          # used here — no untrusted github.event.* fields.
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -425,7 +436,42 @@ jobs:
         run: uv run playwright install --with-deps chromium
 
       - name: Run browser-marked tests
+        env:
+          # Auto-bless missing screenshot baselines on main-push only.
+          # PR runs assert against committed baselines (or skip with
+          # bootstrap message if missing). See tests/ui/_screenshot_diff/
+          # conftest.py is_autobootstrap_mode() for the gate.
+          HM_SCREENSHOT_AUTOBOOTSTRAP: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && '1' || '' }}
         run: uv run pytest -m browser tests/ui/ -v
+
+      - name: Commit auto-blessed screenshot baselines
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # Inputs are workflow-internal only — no untrusted github.event.*
+        # is consumed in this run: block.
+        run: |
+          # Stage only baseline PNGs — never __actual.png / __diff.png
+          # debug artefacts. Stage by explicit pathspec, never git add -A.
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          shopt -s nullglob
+          changed=()
+          for f in tests/ui/_screenshot_diff/baseline/*.png; do
+            case "$(basename "$f")" in
+              *__actual.png|*__diff.png) continue ;;
+            esac
+            changed+=("$f")
+          done
+          if [ ${#changed[@]} -eq 0 ]; then
+            echo "No baseline PNGs in tree."
+            exit 0
+          fi
+          git add -- "${changed[@]}"
+          if git diff --cached --quiet; then
+            echo "No new or changed baselines to commit."
+            exit 0
+          fi
+          git commit -m 'ci: auto-bless screenshot baselines (v14.0.0a1 autobootstrap)'
+          git push origin HEAD:main
 
   build:
     name: Build sdist + wheel
