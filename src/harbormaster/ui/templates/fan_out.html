@@ -2,18 +2,18 @@
 {% block title %}Fan-out · Harbormaster{% endblock %}
 {% block content %}
 
-<nav class="mb-4 text-sm text-gray-400">
-  <a href="/" class="hover:text-cyan-400">← Dashboard</a>
-  <span class="mx-2 text-gray-700">/</span>
-  <span class="text-gray-300">Fan-out ask</span>
+<nav class="mb-4 text-sm text-foreground-muted">
+  <a href="/" class="hover:text-accent">← Dashboard</a>
+  <span class="mx-2 text-foreground-subtle">/</span>
+  <span class="text-foreground-muted">Fan-out ask</span>
 </nav>
 
 <header class="mb-6">
   <h2 class="text-xl font-bold">Fan-out ask</h2>
-  <p class="text-sm text-gray-400 mt-1">
+  <p class="text-sm text-foreground-muted mt-1">
     Ask the same question across multiple projects in parallel.
     Returns one section per target. Powered by
-    <code class="text-cyan-400">fan_out_ask</code> (v1.0.0a13+).
+    <code class="text-accent">fan_out_ask</code> (v1.0.0a13+).
   </p>
 </header>
 
@@ -22,47 +22,47 @@
            hosts: {{ host_labels | tojson }},
          })'
          x-init="restoreFromUrl()"
-         class="border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+         class="border border-border rounded-lg p-4 bg-gray-900/40">
   <form @submit.prevent="run()" class="space-y-3">
     <div>
-      <label class="text-sm text-gray-300 font-bold mb-1 block">Question</label>
+      <label class="text-sm text-foreground-muted font-bold mb-1 block">Question</label>
       <textarea x-model="question" rows="3" required minlength="3"
                 :disabled="loading"
                 placeholder="e.g. what testing strategy is in use?"
-                class="w-full bg-gray-950 border border-gray-800 rounded px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none resize-y"></textarea>
+                class="w-full bg-surface-1 border border-border rounded px-3 py-2 text-sm focus:border-accent-strong focus:outline-none resize-y"></textarea>
     </div>
-    <div class="flex flex-wrap gap-4 text-xs text-gray-400">
+    <div class="flex flex-wrap gap-4 text-xs text-foreground-muted">
       <label class="flex items-center gap-1.5">
         max_concurrency
         <input type="number" min="1" max="10" x-model.number="maxConcurrency"
-               class="w-14 bg-gray-950 border border-gray-800 rounded px-2 py-1 text-center">
+               class="w-14 bg-surface-1 border border-border rounded px-2 py-1 text-center">
       </label>
       <label class="flex items-center gap-1.5">
         max_turns
         <input type="number" min="1" max="10" x-model.number="maxTurns"
-               class="w-14 bg-gray-950 border border-gray-800 rounded px-2 py-1 text-center">
+               class="w-14 bg-surface-1 border border-border rounded px-2 py-1 text-center">
       </label>
       <label class="flex items-center gap-1.5">
         host
-        <select x-model="host" class="bg-gray-950 border border-gray-800 rounded px-2 py-1">
+        <select x-model="host" class="bg-surface-1 border border-border rounded px-2 py-1">
           <template x-for="h in hosts"><option :value="h" x-text="h"></option></template>
         </select>
       </label>
     </div>
     <div>
       <div class="flex items-baseline justify-between mb-1">
-        <label class="text-sm text-gray-300 font-bold">Targets</label>
-        <div class="text-xs text-gray-400 flex gap-3">
+        <label class="text-sm text-foreground-muted font-bold">Targets</label>
+        <div class="text-xs text-foreground-muted flex gap-3">
           <button type="button" @click="selectAll()"
                   aria-label="Select all projects"
-                  class="hover:text-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">all</button>
+                  class="hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">all</button>
           <button type="button" @click="selectNone()"
                   aria-label="Deselect all projects"
-                  class="hover:text-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">none</button>
+                  class="hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">none</button>
           <span x-text="`${selected.length} of ${projects.length} selected`" aria-live="polite"></span>
         </div>
       </div>
-      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1 max-h-48 overflow-y-auto border border-gray-800 rounded p-2">
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1 max-h-48 overflow-y-auto border border-border rounded p-2">
         <template x-for="p in projects" :key="p">
           <label class="flex items-center gap-1.5 text-xs hover:bg-gray-800/50 px-1 py-0.5 rounded cursor-pointer">
             <input type="checkbox" :value="p" x-model="selected" class="accent-cyan-500">
@@ -75,15 +75,15 @@
            :aria-hidden="selected.length !== 0"
            role="status"
            data-empty-state="fanout.no-selection"
-           class="mt-2 border border-gray-800 bg-gray-900/40 text-gray-400 px-3 py-3 rounded text-center">
-        <p class="text-xs font-bold text-gray-200 mb-1">Pick at least one project</p>
-        <p class="text-[11px] text-gray-400 mb-2">
-          Click <span class="text-cyan-400">all</span> above to select every visible project,
+           class="mt-2 border border-border bg-gray-900/40 text-foreground-muted px-3 py-3 rounded text-center">
+        <p class="text-xs font-bold text-foreground mb-1">Pick at least one project</p>
+        <p class="text-[11px] text-foreground-muted mb-2">
+          Click <span class="text-accent">all</span> above to select every visible project,
           or tick individual checkboxes.
         </p>
         <button type="button" @click="selectAll()"
                 aria-label="Select all projects"
-                class="text-[11px] px-2 py-0.5 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                class="text-[11px] px-2 py-0.5 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
           Select all
         </button>
       </div>
@@ -92,33 +92,33 @@
       <button type="submit"
               :disabled="loading || question.trim().length < 3 || selected.length === 0"
               :aria-busy="loading"
-              class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-400 text-white font-bold px-4 py-2 rounded transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+              class="bg-accent-strong hover:bg-accent disabled:bg-surface-3 disabled:text-foreground-muted text-white font-bold px-4 py-2 rounded transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
         <span x-show="!loading">Run fan-out</span>
         <span x-show="loading" aria-hidden="true">…</span>
       </button>
       <button type="button" x-show="loading" @click="abort()"
               aria-label="Stop fan-out"
               :aria-hidden="!loading"
-              class="text-amber-400 hover:text-amber-300 underline text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">stop</button>
+              class="text-warning hover:text-warning underline text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">stop</button>
       <!-- v4.0.0a2: copy share link. Persists URL first, then copies. -->
       <button type="button" @click="copyShareLink()"
               :disabled="question.trim().length < 3"
               aria-label="Copy shareable link to this fan-out configuration"
-              class="text-xs px-2 py-1 rounded border border-gray-800 hover:border-cyan-700 disabled:border-gray-900 disabled:text-gray-600 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+              class="text-xs px-2 py-1 rounded border border-border hover:border-accent-strong disabled:border-border-strong disabled:text-foreground-subtle transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
         <span x-show="!shareLinkCopied">copy link</span>
-        <span x-show="shareLinkCopied" class="text-emerald-400">copied ✓</span>
+        <span x-show="shareLinkCopied" class="text-success">copied ✓</span>
       </button>
-      <span class="text-xs text-gray-400 ml-auto" x-show="hasResult"
+      <span class="text-xs text-foreground-muted ml-auto" x-show="hasResult"
             x-text="`${(elapsedMs/1000).toFixed(1)}s`"></span>
     </div>
   </form>
-  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="mt-3 text-xs text-red-400" x-text="error"></div>
+  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="mt-3 text-xs text-danger" x-text="error"></div>
   <pre x-show="resultText"
        :aria-hidden="!resultText"
        aria-live="polite"
        aria-atomic="false"
        aria-label="Fan-out result"
-       class="mt-4 text-sm whitespace-pre-wrap break-words border border-gray-800 rounded p-3 bg-gray-950/50 text-gray-200 leading-relaxed"
+       class="mt-4 text-sm whitespace-pre-wrap break-words border border-border rounded p-3 bg-gray-950/50 text-foreground leading-relaxed"
        x-text="resultText"></pre>
 </section>
 

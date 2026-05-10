@@ -2,51 +2,51 @@
 {% block title %}{{ project_name }} · Harbormaster{% endblock %}
 {% block content %}
 
-<nav class="mb-4 text-sm text-gray-400">
-  <a href="/" class="hover:text-cyan-400">← Dashboard</a>
-  <span class="mx-2 text-gray-700">/</span>
-  <span class="text-gray-300">{{ project_name }}</span>
+<nav class="mb-4 text-sm text-foreground-muted">
+  <a href="/" class="hover:text-accent">← Dashboard</a>
+  <span class="mx-2 text-foreground-subtle">/</span>
+  <span class="text-foreground-muted">{{ project_name }}</span>
   {% if host != "local" %}
-    <span class="ml-2 text-xs px-2 py-0.5 bg-amber-900/40 text-amber-300 rounded">host: {{ host }}</span>
+    <span class="ml-2 text-xs px-2 py-0.5 bg-amber-900/40 text-warning rounded">host: {{ host }}</span>
   {% endif %}
 </nav>
 
-<header class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+<header class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40">
   <div class="flex items-baseline justify-between gap-4 flex-wrap">
-    <h2 class="text-xl font-bold text-cyan-400">{{ project_name }}</h2>
+    <h2 class="text-xl font-bold text-accent">{{ project_name }}</h2>
     {% if project %}
-      <span class="text-xs text-gray-500">
+      <span class="text-xs text-foreground-subtle">
         last commit:
         {% if project.last_commit %}
-          <code class="text-gray-300">{{ project.last_commit.hash }}</code>
+          <code class="text-foreground-muted">{{ project.last_commit.hash }}</code>
         {% else %}
-          <span class="text-gray-600">(no git)</span>
+          <span class="text-foreground-subtle">(no git)</span>
         {% endif %}
       </span>
     {% endif %}
   </div>
   {% if project %}
-    <p class="text-sm text-gray-300 mt-2">{{ project.brief or "(no description)" }}</p>
+    <p class="text-sm text-foreground-muted mt-2">{{ project.brief or "(no description)" }}</p>
     <footer class="mt-3 flex flex-wrap gap-2 text-xs items-center">
       {% if project.has_serena %}
-        <span class="bg-purple-900/50 text-purple-300 px-2 py-0.5 rounded">serena</span>
+        <span class="bg-purple-900/50 text-info px-2 py-0.5 rounded">serena</span>
       {% endif %}
       {% if project.has_claude_md %}
-        <span class="bg-cyan-900/50 text-cyan-300 px-2 py-0.5 rounded">claude.md</span>
+        <span class="bg-cyan-900/50 text-accent px-2 py-0.5 rounded">claude.md</span>
       {% endif %}
-      <span class="text-gray-500 truncate font-mono">{{ project.path }}</span>
+      <span class="text-foreground-subtle truncate font-mono">{{ project.path }}</span>
     </footer>
   {% endif %}
 </header>
 
 <section class="mb-6">
   <header class="mb-3 flex items-baseline justify-between">
-    <h3 class="text-base font-bold text-gray-300">Status</h3>
-    <span class="text-xs text-gray-500">
-      sourced from <code class="text-cyan-400">project_status</code>
+    <h3 class="text-base font-bold text-foreground-muted">Status</h3>
+    <span class="text-xs text-foreground-subtle">
+      sourced from <code class="text-accent">project_status</code>
     </span>
   </header>
-  <pre class="text-sm whitespace-pre-wrap break-words border border-gray-800 rounded-lg p-4 bg-gray-900/40 text-gray-300 leading-relaxed">{{ status_markdown }}</pre>
+  <pre class="text-sm whitespace-pre-wrap break-words border border-border rounded-lg p-4 bg-gray-900/40 text-foreground-muted leading-relaxed">{{ status_markdown }}</pre>
 </section>
 
 {% include "_partials/ask_form.html" %}
@@ -57,19 +57,19 @@
    file to render its markdown in-place. Uses vendored marked.min.js. #}
 <section x-data="memoriesPanel({ project: {{ project_name | tojson }} })"
          x-init="load()"
-         class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+         class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40">
   <header class="mb-3 flex items-baseline justify-between gap-2 flex-wrap">
-    <h3 class="text-base font-bold text-gray-300">Memories</h3>
-    <span class="text-xs text-gray-500"
+    <h3 class="text-base font-bold text-foreground-muted">Memories</h3>
+    <span class="text-xs text-foreground-subtle"
           x-text="files.length === 0 ? 'no memories' : `${files.length} file${files.length === 1 ? '' : 's'}`"></span>
   </header>
   <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive"
-     class="text-xs text-red-400" x-text="error"></p>
+     class="text-xs text-danger" x-text="error"></p>
   <div x-show="!error && files.length === 0" role="status"
        data-empty-state="memories.no-files"
-       class="border border-gray-800 bg-gray-900/40 text-gray-400 px-4 py-6 rounded text-center">
-    <p class="text-sm font-bold text-gray-200 mb-1">No memories found</p>
-    <p class="text-xs text-gray-400">
+       class="border border-border bg-gray-900/40 text-foreground-muted px-4 py-6 rounded text-center">
+    <p class="text-sm font-bold text-foreground mb-1">No memories found</p>
+    <p class="text-xs text-foreground-muted">
       This project doesn't yet have a <code>CLAUDE.md</code> or any
       <code>.serena/memories/*.md</code> files.
     </p>
@@ -83,46 +83,46 @@
                   :aria-current="selected && selected.name === f.name ? 'true' : 'false'"
                   :aria-label="`Open memory file ${f.name}`"
                   :class="selected && selected.name === f.name
-                          ? 'bg-cyan-900/40 text-cyan-200'
-                          : 'text-gray-300 hover:bg-gray-800/50 hover:text-cyan-300'"
+                          ? 'bg-cyan-900/40 text-accent'
+                          : 'text-foreground-muted hover:bg-gray-800/50 hover:text-accent'"
                   class="w-full text-left text-xs font-mono px-2 py-1.5 rounded truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
             <span x-text="f.name"></span>
-            <span class="text-[10px] text-gray-500 ml-1"
+            <span class="text-[10px] text-foreground-subtle ml-1"
                   x-text="`${(f.size/1024).toFixed(1)}KB`"></span>
           </button>
         </li>
       </template>
     </ul>
-    <article class="md:col-span-2 border border-gray-800 rounded p-3 bg-gray-950/60 min-h-[8rem]">
-      <p x-show="!selected" class="text-xs text-gray-500">Select a file to view.</p>
+    <article class="md:col-span-2 border border-border rounded p-3 bg-gray-950/60 min-h-[8rem]">
+      <p x-show="!selected" class="text-xs text-foreground-subtle">Select a file to view.</p>
       <!-- v10.0.0a6: edit toolbar -->
       <div x-show="selected" class="flex items-center justify-between gap-2 mb-2">
-        <span class="text-xs font-mono text-gray-500" x-text="selected ? selected.name : ''"></span>
+        <span class="text-xs font-mono text-foreground-subtle" x-text="selected ? selected.name : ''"></span>
         <div class="flex gap-1">
           <button type="button" x-show="!editing"
                   @click="startEdit()"
                   aria-label="Edit memory file"
-                  class="text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-cyan-700 text-gray-300 hover:text-cyan-300">
+                  class="text-xs px-2 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent">
             Edit
           </button>
           <button type="button" x-show="editing"
                   @click="cancelEdit()"
                   aria-label="Cancel edit"
-                  class="text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-rose-700 text-gray-300 hover:text-rose-300">
+                  class="text-xs px-2 py-0.5 rounded border border-border hover:border-rose-700 text-foreground-muted hover:text-danger">
             Cancel
           </button>
           <button type="button" x-show="editing"
                   @click="save()"
                   :disabled="saving"
                   aria-label="Save memory file"
-                  class="text-xs px-2 py-0.5 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 disabled:opacity-50">
+                  class="text-xs px-2 py-0.5 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent disabled:opacity-50">
             <span x-text="saving ? 'Saving…' : 'Save'"></span>
           </button>
           <!-- v11.0.0a2: revision history toggle -->
           <button type="button" x-show="selected"
                   @click="toggleHistory()"
                   aria-label="Toggle revision history"
-                  class="text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-amber-700 text-gray-300 hover:text-amber-300">
+                  class="text-xs px-2 py-0.5 rounded border border-border hover:border-warning text-foreground-muted hover:text-warning">
             <span x-text="showHistory ? 'Hide history' : 'History'"></span>
           </button>
           <!-- v12.0.0a4: diff against revision. Visible when the
@@ -133,7 +133,7 @@
                   x-model="diffFrom"
                   @change="loadDiff()"
                   aria-label="Diff against revision"
-                  class="text-xs px-1 py-0.5 rounded border border-gray-700 bg-gray-950 text-gray-300">
+                  class="text-xs px-1 py-0.5 rounded border border-border bg-surface-1 text-foreground-muted">
             <option value="">Diff against…</option>
             <template x-for="r in revisions" :key="r.id">
               <option :value="r.id" x-text="`#${r.id} (${new Date(r.saved_at * 1000).toLocaleDateString()})`"></option>
@@ -142,7 +142,7 @@
         </div>
       </div>
       <p x-show="saveError" :aria-hidden="!saveError" role="alert"
-         class="text-xs text-red-400 mb-2" x-text="saveError"></p>
+         class="text-xs text-danger mb-2" x-text="saveError"></p>
       <div x-show="selected && !editing" class="prose prose-invert prose-sm max-w-none"
            x-html="rendered"></div>
       <!-- v11.0.0a3: split-pane editor with live (debounced) preview.
@@ -151,55 +151,55 @@
         <textarea x-model="draft"
                   @input.debounce.300ms="updatePreview()"
                   aria-label="Memory file source"
-                  class="w-full min-h-[20rem] bg-gray-950 border border-gray-700 rounded p-2 text-xs font-mono text-gray-200"></textarea>
-        <div class="prose prose-invert prose-sm max-w-none border border-gray-800 rounded p-2 bg-gray-950/40 min-h-[20rem] overflow-auto"
+                  class="w-full min-h-[20rem] bg-surface-1 border border-border rounded p-2 text-xs font-mono text-foreground"></textarea>
+        <div class="prose prose-invert prose-sm max-w-none border border-border rounded p-2 bg-gray-950/40 min-h-[20rem] overflow-auto"
              aria-live="polite" aria-label="Live preview"
              x-html="previewHtml"></div>
       </div>
       <!-- v11.0.0a2: revision history panel -->
-      <aside x-show="showHistory" class="mt-3 border-t border-gray-800 pt-3">
-        <p class="text-xs text-gray-400 mb-2">Revision history (newest first)</p>
-        <p x-show="historyError" role="alert" class="text-xs text-red-400 mb-2"
+      <aside x-show="showHistory" class="mt-3 border-t border-border pt-3">
+        <p class="text-xs text-foreground-muted mb-2">Revision history (newest first)</p>
+        <p x-show="historyError" role="alert" class="text-xs text-danger mb-2"
            x-text="historyError"></p>
         <ul class="space-y-1 max-h-48 overflow-auto">
           <template x-for="r in revisions" :key="r.id">
             <li class="flex items-center gap-2 text-xs">
               <button type="button" @click="loadRevision(r.id)"
                       :aria-label="`Preview revision ${r.id}`"
-                      class="text-cyan-300 hover:text-cyan-100 underline-offset-2 hover:underline font-mono">
+                      class="text-accent hover:text-accent underline-offset-2 hover:underline font-mono">
                 #<span x-text="r.id"></span>
               </button>
-              <span class="text-gray-500"
+              <span class="text-foreground-subtle"
                     x-text="new Date(r.saved_at * 1000).toLocaleString()"></span>
               <span x-show="r.bytes_diff !== null && r.bytes_diff !== undefined"
-                    class="text-gray-600"
+                    class="text-foreground-subtle"
                     x-text="(r.bytes_diff >= 0 ? '+' : '') + r.bytes_diff + 'B'"></span>
             </li>
           </template>
           <li x-show="revisions.length === 0 && !historyError"
-              class="text-xs text-gray-600">No prior revisions on file.</li>
+              class="text-xs text-foreground-subtle">No prior revisions on file.</li>
         </ul>
-        <div x-show="revisionPreview" class="mt-3 border border-amber-900/40 rounded bg-gray-950 p-2">
+        <div x-show="revisionPreview" class="mt-3 border border-amber-900/40 rounded bg-surface-1 p-2">
           <div class="flex items-center justify-between mb-1">
-            <span class="text-xs text-amber-300">Revision <span x-text="revisionPreviewId"></span> (read-only)</span>
+            <span class="text-xs text-warning">Revision <span x-text="revisionPreviewId"></span> (read-only)</span>
             <button type="button" @click="copyRevisionToClipboard()"
-                    class="text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-cyan-700 text-gray-300 hover:text-cyan-300">
+                    class="text-xs px-2 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent">
               Copy
             </button>
           </div>
-          <pre class="text-xs whitespace-pre-wrap text-gray-200 max-h-64 overflow-auto"
+          <pre class="text-xs whitespace-pre-wrap text-foreground max-h-64 overflow-auto"
                x-text="revisionPreview"></pre>
         </div>
         <!-- v12.0.0a4: unified diff vs current. Shown when the
              "Diff against revision" dropdown has a selection. -->
-        <div x-show="diffOutput || diffError" class="mt-3 border border-cyan-900/40 rounded bg-gray-950 p-2">
+        <div x-show="diffOutput || diffError" class="mt-3 border border-cyan-900/40 rounded bg-surface-1 p-2">
           <div class="flex items-center justify-between mb-1">
-            <span class="text-xs text-cyan-300">Diff: revision <span x-text="diffFrom"></span> → current</span>
+            <span class="text-xs text-accent">Diff: revision <span x-text="diffFrom"></span> → current</span>
           </div>
-          <p x-show="diffError" role="alert" class="text-xs text-red-400 mb-2"
+          <p x-show="diffError" role="alert" class="text-xs text-danger mb-2"
              x-text="diffError"></p>
           <pre x-show="diffOutput && !diffError"
-               class="text-xs whitespace-pre text-gray-200 max-h-64 overflow-auto font-mono"
+               class="text-xs whitespace-pre text-foreground max-h-64 overflow-auto font-mono"
                x-text="diffOutput"></pre>
         </div>
       </aside>
@@ -207,31 +207,31 @@
   </div>
 
   <!-- v10.0.0a6: new-memory creation form -->
-  <details class="mt-3 border border-gray-800 rounded p-2 bg-gray-950/40">
-    <summary class="text-xs text-gray-400 cursor-pointer">Create new memory…</summary>
+  <details class="mt-3 border border-border rounded p-2 bg-gray-950/40">
+    <summary class="text-xs text-foreground-muted cursor-pointer">Create new memory…</summary>
     <form @submit.prevent="createNew()" class="mt-2 space-y-2">
-      <label class="block text-xs text-gray-400">
+      <label class="block text-xs text-foreground-muted">
         Filename
         <input type="text" x-model="newName"
                aria-label="New memory filename"
                placeholder="e.g. CLAUDE.md or .serena/memories/notes.md"
-               class="block w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs font-mono text-gray-200 mt-1">
+               class="block w-full bg-surface-1 border border-border rounded px-2 py-1 text-xs font-mono text-foreground mt-1">
       </label>
-      <label class="block text-xs text-gray-400">
+      <label class="block text-xs text-foreground-muted">
         Content
         <textarea x-model="newContent"
                   aria-label="New memory content"
-                  class="block w-full min-h-[8rem] bg-gray-950 border border-gray-700 rounded p-2 text-xs font-mono text-gray-200 mt-1"></textarea>
+                  class="block w-full min-h-[8rem] bg-surface-1 border border-border rounded p-2 text-xs font-mono text-foreground mt-1"></textarea>
       </label>
       <div class="flex items-center gap-2">
         <button type="submit"
                 :disabled="creating || !newName"
                 aria-label="Create new memory file"
-                class="text-xs px-3 py-1 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 disabled:opacity-50">
+                class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent disabled:opacity-50">
           <span x-text="creating ? 'Creating…' : 'Create'"></span>
         </button>
         <span x-show="createError" role="alert"
-              class="text-xs text-red-400" x-text="createError"></span>
+              class="text-xs text-danger" x-text="createError"></span>
       </div>
     </form>
   </details>
@@ -290,7 +290,7 @@
         this.selected = f;
         this.editing = false;
         this.saveError = '';
-        this.rendered = '<p class="text-xs text-gray-500">loading…</p>';
+        this.rendered = '<p class="text-xs text-foreground-subtle">loading…</p>';
         // v11.0.0a3: prefer server-side bleach-sanitised HTML via
         // ?render=html. Falls back to the v10 client-side marked.js
         // path when the endpoint is unavailable (older deploys).
@@ -319,7 +319,7 @@
               this.rendered = `<pre class="whitespace-pre-wrap text-xs">${escaped}</pre>`;
             }
           } catch (e2) {
-            this.rendered = `<p class="text-xs text-red-400">failed: ${e2.message}</p>`;
+            this.rendered = `<p class="text-xs text-danger">failed: ${e2.message}</p>`;
           }
         }
       },
@@ -522,36 +522,36 @@
          x-init="load()"
          x-on:hm:trajectory:dirty.window="if ($event.detail && $event.detail.project === project) load()"
          x-on:hm:trajectory:append.window="if ($event.detail && $event.detail.project === project) prepend($event.detail.entry)"
-         class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+         class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40">
   <header class="mb-3 flex items-baseline justify-between gap-2 flex-wrap">
-    <h3 class="text-base font-bold text-gray-300">Recent Q&amp;A</h3>
-    <div class="flex items-center gap-3 text-xs text-gray-500">
+    <h3 class="text-base font-bold text-foreground-muted">Recent Q&amp;A</h3>
+    <div class="flex items-center gap-3 text-xs text-foreground-subtle">
       <label class="flex items-center gap-1.5">
         limit
         <input type="number" min="1" max="200" x-model.number="limit" @change="load()"
-               class="w-16 bg-gray-950 border border-gray-800 rounded px-2 py-0.5">
+               class="w-16 bg-surface-1 border border-border rounded px-2 py-0.5">
       </label>
       <span x-show="trajectories.length > 0"
             x-text="`${trajectories.length} record${trajectories.length === 1 ? '' : 's'}`"></span>
     </div>
   </header>
-  <p x-show="message" :aria-hidden="!message" role="status" aria-live="polite" class="text-xs text-amber-400" x-text="message"></p>
-  <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="error"></p>
+  <p x-show="message" :aria-hidden="!message" role="status" aria-live="polite" class="text-xs text-warning" x-text="message"></p>
+  <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-danger" x-text="error"></p>
   <!-- v8.0.0a3: canonical 3-part empty state for trajectory list. -->
   <div x-show="!message && !error && trajectories.length === 0"
        :aria-hidden="!(!message && !error && trajectories.length === 0)"
        role="status"
        data-empty-state="trajectory.no-entries"
-       class="border border-gray-800 bg-gray-900/40 text-gray-400 px-4 py-6 rounded text-center">
-    <p class="text-sm font-bold text-gray-200 mb-1">No questions asked yet</p>
-    <p class="text-xs text-gray-400 mb-3">
-      Use the <span class="text-cyan-400">Ask</span> form above to query this project.
+       class="border border-border bg-gray-900/40 text-foreground-muted px-4 py-6 rounded text-center">
+    <p class="text-sm font-bold text-foreground mb-1">No questions asked yet</p>
+    <p class="text-xs text-foreground-muted mb-3">
+      Use the <span class="text-accent">Ask</span> form above to query this project.
       Each question + answer pair lands here as a trajectory.
     </p>
     <button type="button"
             @click="document.querySelector(`section[x-data^='askForm'] textarea`)?.focus()"
             aria-label="Focus the ask textarea"
-            class="text-xs px-3 py-1 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+            class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
       Focus ask form
     </button>
   </div>
@@ -568,8 +568,8 @@
                 :aria-expanded="open"
                 :aria-label="open ? 'Collapse trajectory details' : 'Expand trajectory details'"
                 class="w-full text-left px-3 py-2 hover:bg-gray-900/50 transition flex items-baseline justify-between gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
-          <span class="text-sm text-gray-200 truncate" x-text="t.question"></span>
-          <span class="text-xs text-gray-500 shrink-0 flex gap-2 items-center">
+          <span class="text-sm text-foreground truncate" x-text="t.question"></span>
+          <span class="text-xs text-foreground-subtle shrink-0 flex gap-2 items-center">
             <!-- v12.0.0a2: tier badges migrated to the shared
                  stateBadgeHtml helper. The "stale" tier remains a
                  pure-spinner element (intentionally label-less per
@@ -596,14 +596,14 @@
           </span>
         </button>
         <div x-show="open" class="px-3 pb-3">
-          <div class="text-xs text-gray-500 mb-1 flex gap-2">
+          <div class="text-xs text-foreground-subtle mb-1 flex gap-2">
             <span x-text="`host: ${t.host}`"></span>
             <span x-show="t.recall_count > 0" x-text="`recalled: ${t.recall_count}×`"></span>
           </div>
-          <p class="text-sm text-gray-300 mb-2 font-bold">Q:</p>
-          <p class="text-sm text-gray-200 whitespace-pre-wrap break-words mb-2" x-text="t.question"></p>
-          <p class="text-sm text-gray-300 mb-2 font-bold">A:</p>
-          <p class="text-sm text-gray-200 whitespace-pre-wrap break-words" x-text="t.answer"></p>
+          <p class="text-sm text-foreground-muted mb-2 font-bold">Q:</p>
+          <p class="text-sm text-foreground whitespace-pre-wrap break-words mb-2" x-text="t.question"></p>
+          <p class="text-sm text-foreground-muted mb-2 font-bold">A:</p>
+          <p class="text-sm text-foreground whitespace-pre-wrap break-words" x-text="t.answer"></p>
         </div>
       </li>
     </template>
@@ -665,7 +665,7 @@
           case 'stuck':
             return 'border-rose-700/50 bg-rose-950/30';
           default:
-            return 'border-gray-800 bg-gray-950/50';
+            return 'border-border bg-gray-950/50';
         }
       },
 

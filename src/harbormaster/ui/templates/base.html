@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="bg-gray-950 text-gray-100">
+<html lang="en" class="bg-surface-1 text-foreground">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -133,9 +133,9 @@
      surface-1 (gray-950) sits above WCAG AA (4.5:1). */
   :root {
     /* Surfaces — graduated grays, darkest = canvas */
-    --hm-surface-1: oklch(0.20 0 0);    /* matches bg-gray-950 */
-    --hm-surface-2: oklch(0.26 0 0);    /* matches bg-gray-900 */
-    --hm-surface-3: oklch(0.32 0 0);    /* matches bg-gray-800 */
+    --hm-surface-1: oklch(0.20 0 0);    /* matches bg-surface-1 */
+    --hm-surface-2: oklch(0.26 0 0);    /* matches bg-surface-2 */
+    --hm-surface-3: oklch(0.32 0 0);    /* matches bg-surface-3 */
 
     /* Foreground — text & icons */
     --hm-foreground:        oklch(0.96 0 0);   /* near-white body text */
@@ -179,29 +179,29 @@
      how long the page content is. Footer collapses into a slim
      bottom-bar that's part of the shell, not the scroll context. -->
 <header id="hm-topbar"
-        class="fixed top-0 inset-x-0 z-40 h-12 bg-gray-950 border-b border-gray-800 px-4 flex items-center justify-between">
+        class="fixed top-0 inset-x-0 z-40 h-12 bg-surface-1 border-b border-border px-4 flex items-center justify-between">
   <div class="flex items-center gap-3 min-w-0">
     <!-- Hamburger toggle for the sidebar (mobile only). -->
     <button type="button"
             x-data
             @click="$dispatch('hm:sidebar:toggle')"
             aria-label="Toggle navigation sidebar"
-            class="md:hidden text-gray-300 hover:text-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950 px-1">
+            class="md:hidden text-foreground-muted hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950 px-1">
       <span aria-hidden="true">☰</span>
     </button>
-    <a href="/" class="flex items-baseline gap-2 hover:text-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+    <a href="/" class="flex items-baseline gap-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
       <span class="text-xl" aria-hidden="true">⚓</span>
       <span class="text-base font-bold tracking-tight">Harbormaster</span>
-      <span class="text-gray-500 text-xs">v{{ version }}</span>
+      <span class="text-foreground-subtle text-xs">v{{ version }}</span>
     </a>
   </div>
   <nav class="flex gap-3 text-sm" aria-label="Primary navigation">
     <!-- v10.0.0a3: removed /api/projects + /api/health (operator
          flagged useless). KEEP Dashboard / Fan-out / Dispatcher. -->
-    <a href="/" class="text-gray-300 hover:text-cyan-400">Dashboard</a>
-    <a href="/tools/fan-out" class="text-gray-300 hover:text-cyan-400">Fan-out</a>
-    <a href="/dispatcher" class="text-gray-300 hover:text-cyan-400">Dispatcher</a>
-    <a href="https://github.com/FleetQ/harbormaster" class="text-gray-300 hover:text-cyan-400">GitHub</a>
+    <a href="/" class="text-foreground-muted hover:text-accent">Dashboard</a>
+    <a href="/tools/fan-out" class="text-foreground-muted hover:text-accent">Fan-out</a>
+    <a href="/dispatcher" class="text-foreground-muted hover:text-accent">Dispatcher</a>
+    <a href="https://github.com/FleetQ/harbormaster" class="text-foreground-muted hover:text-accent">GitHub</a>
     <!-- v12.0.0a7: theme toggle. Cycles auto → light → dark → auto.
          Persisted to localStorage so preference survives reloads.
          The actual class on <html> is applied by an early IIFE in
@@ -211,11 +211,11 @@
             @click="cycle()"
             :aria-label="`Theme: ${mode}. Click to cycle.`"
             :title="`Theme: ${mode} (click to cycle: auto → light → dark)`"
-            class="text-gray-300 hover:text-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 px-1">
+            class="text-foreground-muted hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 px-1">
       <span aria-hidden="true" x-text="icon()"></span>
     </button>
     {% if auth_token %}
-    <span class="text-gray-500 text-xs hidden md:inline" title="Authenticated session">🔒</span>
+    <span class="text-foreground-subtle text-xs hidden md:inline" title="Authenticated session">🔒</span>
     {% endif %}
   </nav>
 </header>
@@ -242,7 +242,7 @@
                   mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
                   railCollapsed ? 'md:w-12' : 'md:w-60',
                 ]"
-         class="fixed top-12 bottom-7 left-0 z-30 w-60 bg-gray-950 border-r border-gray-800 transform transition-all overflow-y-auto"
+         class="fixed top-12 bottom-7 left-0 z-30 w-60 bg-surface-1 border-r border-border transform transition-all overflow-y-auto"
          role="navigation"
          aria-label="Project navigation">
     <div :class="railCollapsed ? 'p-2' : 'p-3'">
@@ -252,7 +252,7 @@
         <select x-show="!railCollapsed"
                 x-model="hostFilter"
                 aria-label="Filter projects by host"
-                class="text-[11px] bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-gray-300 focus:outline-none">
+                class="text-[11px] bg-surface-2 border border-border rounded px-1 py-0.5 text-foreground-muted focus:outline-none">
           <template x-for="h in availableHosts" :key="'host:' + h">
             <option :value="h" x-text="h === '__all__' ? 'all hosts' : h"></option>
           </template>
@@ -261,7 +261,7 @@
                 @click="toggleRail()"
                 :aria-label="railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
                 :aria-expanded="!railCollapsed"
-                class="text-gray-500 hover:text-cyan-400 text-xs px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                class="text-foreground-subtle hover:text-accent text-xs px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
           <span aria-hidden="true" x-text="railCollapsed ? '»' : '«'"></span>
         </button>
       </div>
@@ -269,15 +269,15 @@
       <!-- Rail-collapsed mode: just icons. Click an icon to expand. -->
       <div x-show="railCollapsed" class="flex flex-col items-center gap-3 mt-2">
         <button type="button" @click="expandRail()" aria-label="Pinned projects"
-                class="text-amber-400 hover:text-amber-300">
+                class="text-warning hover:text-warning">
           <span aria-hidden="true">★</span>
         </button>
         <button type="button" @click="expandRail()" aria-label="Recently asked projects"
-                class="text-gray-400 hover:text-cyan-400">
+                class="text-foreground-muted hover:text-accent">
           <span aria-hidden="true">🕒</span>
         </button>
         <button type="button" @click="expandRail()" aria-label="Archived projects"
-                class="text-gray-500 hover:text-gray-300">
+                class="text-foreground-subtle hover:text-foreground-muted">
           <span aria-hidden="true">📦</span>
         </button>
       </div>
@@ -287,19 +287,19 @@
              x-model="filter"
              aria-label="Filter projects in sidebar"
              placeholder="Filter projects…"
-             class="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:border-cyan-700 focus:outline-none mb-3">
+             class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-xs text-foreground placeholder-gray-500 focus:border-accent-strong focus:outline-none mb-3">
 
       <!-- Pinned. -->
       <section x-show="!railCollapsed && visiblePinned().length > 0"
                data-sidebar-group="pinned"
                class="mb-3">
-        <h3 class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Pinned</h3>
+        <h3 class="text-[10px] uppercase tracking-wide text-foreground-subtle mb-1">Pinned</h3>
         <ul class="space-y-0.5">
           <template x-for="p in visiblePinned()" :key="'pin:' + p.name">
             <li>
               <a :href="`/projects/${encodeURIComponent(p.name)}`"
-                 class="flex items-center gap-1.5 text-xs text-gray-300 hover:bg-gray-800/50 hover:text-cyan-300 px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
-                <span aria-hidden="true" class="text-amber-400">★</span>
+                 class="flex items-center gap-1.5 text-xs text-foreground-muted hover:bg-gray-800/50 hover:text-accent px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                <span aria-hidden="true" class="text-warning">★</span>
                 <span class="truncate" x-text="p.name"></span>
               </a>
             </li>
@@ -311,12 +311,12 @@
       <section x-show="!railCollapsed && visibleRecent().length > 0"
                data-sidebar-group="recent"
                class="mb-3">
-        <h3 class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Recently asked</h3>
+        <h3 class="text-[10px] uppercase tracking-wide text-foreground-subtle mb-1">Recently asked</h3>
         <ul class="space-y-0.5">
           <template x-for="p in visibleRecent()" :key="'recent:' + p.name">
             <li>
               <a :href="`/projects/${encodeURIComponent(p.name)}`"
-                 class="flex items-center gap-1.5 text-xs text-gray-300 hover:bg-gray-800/50 hover:text-cyan-300 px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                 class="flex items-center gap-1.5 text-xs text-foreground-muted hover:bg-gray-800/50 hover:text-accent px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
                 <span class="truncate" x-text="p.name"></span>
               </a>
             </li>
@@ -332,7 +332,7 @@
                     @click="toggleLanguage(lang)"
                     :aria-expanded="!languageCollapsed[lang]"
                     :aria-label="`Toggle ${lang} group`"
-                    class="text-[10px] uppercase tracking-wide text-gray-500 hover:text-gray-300 mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                    class="text-[10px] uppercase tracking-wide text-foreground-subtle hover:text-foreground-muted mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
               <span aria-hidden="true" x-text="languageCollapsed[lang] ? '▸' : '▾'"></span>
               <span x-text="lang + ' (' + projectsByLanguage()[lang].length + ')'"></span>
             </button>
@@ -340,12 +340,12 @@
               <template x-for="p in visibleProjectsForLanguage(lang)" :key="lang + ':' + p.name">
                 <li class="flex items-center group">
                   <a :href="`/projects/${encodeURIComponent(p.name)}`"
-                     class="flex-1 text-xs text-gray-300 hover:bg-gray-800/50 hover:text-cyan-300 px-2 py-1 rounded truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+                     class="flex-1 text-xs text-foreground-muted hover:bg-gray-800/50 hover:text-accent px-2 py-1 rounded truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
                      x-text="p.name"></a>
                   <button type="button" @click="togglePin(p.name)"
                           :aria-label="`${isPinned(p.name) ? 'Unpin' : 'Pin'} ${p.name}`"
-                          :class="isPinned(p.name) ? 'text-amber-400' : 'text-gray-700 group-hover:text-gray-500'"
-                          class="text-xs px-1 hover:text-amber-300 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                          :class="isPinned(p.name) ? 'text-warning' : 'text-foreground-subtle group-hover:text-foreground-subtle'"
+                          class="text-xs px-1 hover:text-warning transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
                     <span aria-hidden="true">★</span>
                   </button>
                 </li>
@@ -364,7 +364,7 @@
                 @click="archivedCollapsed = !archivedCollapsed"
                 :aria-expanded="!archivedCollapsed"
                 aria-label="Toggle archived projects group"
-                class="text-[10px] uppercase tracking-wide text-gray-500 hover:text-gray-300 mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                class="text-[10px] uppercase tracking-wide text-foreground-subtle hover:text-foreground-muted mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
           <span aria-hidden="true" x-text="archivedCollapsed ? '▸' : '▾'"></span>
           <span x-text="`Archived (${visibleArchived().length})`"></span>
         </button>
@@ -372,7 +372,7 @@
           <template x-for="p in visibleArchived()" :key="'archived:' + p.name">
             <li>
               <a :href="`/projects/${encodeURIComponent(p.name)}`"
-                 class="flex items-center gap-1.5 text-xs text-gray-500 hover:bg-gray-800/50 hover:text-cyan-300 px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+                 class="flex items-center gap-1.5 text-xs text-foreground-subtle hover:bg-gray-800/50 hover:text-accent px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
                  :title="`Last commit: ${p.last_commit_age_days} days ago`">
                 <span aria-hidden="true">📦</span>
                 <span class="truncate" x-text="p.name"></span>
@@ -382,8 +382,8 @@
         </ul>
       </section>
 
-      <p x-show="loading" :aria-hidden="!loading" class="text-xs text-gray-400">loading…</p>
-      <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="error"></p>
+      <p x-show="loading" :aria-hidden="!loading" class="text-xs text-foreground-muted">loading…</p>
+      <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-danger" x-text="error"></p>
 
       <!-- v10.0.0a4: ignored-projects indicator. Lazy-loads the count
            on mount; expand to view the names. Read-only — operators
@@ -395,18 +395,18 @@
                 @click="ignoredOpen = !ignoredOpen"
                 :aria-expanded="ignoredOpen"
                 aria-label="Toggle ignored projects list"
-                class="text-[10px] uppercase tracking-wide text-gray-500 hover:text-gray-300 mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                class="text-[10px] uppercase tracking-wide text-foreground-subtle hover:text-foreground-muted mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
           <span aria-hidden="true" x-text="ignoredOpen ? '▾' : '▸'"></span>
           <span x-text="`Ignored (${ignored.count})`"></span>
         </button>
         <ul x-show="ignoredOpen" class="space-y-0.5">
           <template x-for="name in ignored.names" :key="'ign:' + name">
-            <li class="text-[11px] text-gray-600 px-2 py-0.5 truncate"
+            <li class="text-[11px] text-foreground-subtle px-2 py-0.5 truncate"
                 :title="name"
                 x-text="name"></li>
           </template>
           <li x-show="ignored.patterns.length > 0"
-              class="text-[10px] text-gray-700 px-2 pt-1 italic"
+              class="text-[10px] text-foreground-subtle px-2 pt-1 italic"
               :title="`patterns: ${ignored.patterns.join(', ')}`">
             via <span x-text="ignored.patterns.length"></span> pattern(s)
           </li>
@@ -663,10 +663,10 @@
        role="dialog" aria-modal="true" aria-label="Command palette"
        class="fixed inset-0 z-40 bg-gray-950/80 backdrop-blur-sm flex items-start justify-center pt-24"
        @keydown.escape.window="if (open) close()">
-    <div class="w-full max-w-xl mx-4 bg-gray-900 border border-gray-700 rounded-lg shadow-2xl overflow-hidden"
+    <div class="w-full max-w-xl mx-4 bg-surface-2 border border-border rounded-lg shadow-2xl overflow-hidden"
          @click.stop>
-      <header class="flex items-center gap-2 border-b border-gray-800 px-3 py-2">
-        <span class="text-cyan-400" aria-hidden="true">⌘</span>
+      <header class="flex items-center gap-2 border-b border-border px-3 py-2">
+        <span class="text-accent" aria-hidden="true">⌘</span>
         <input x-ref="cmdkInput"
                type="text"
                x-model="query"
@@ -676,8 +676,8 @@
                @keydown.enter.prevent="activate()"
                aria-label="Search projects, tools, and shortcuts"
                placeholder="Type to search projects, tools, shortcuts…"
-               class="flex-1 bg-transparent text-sm text-gray-100 placeholder-gray-500 focus:outline-none">
-        <kbd class="bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-cyan-300 font-mono text-[10px]">Esc</kbd>
+               class="flex-1 bg-transparent text-sm text-foreground placeholder-gray-500 focus:outline-none">
+        <kbd class="bg-surface-3 border border-border rounded px-1.5 py-0.5 text-accent font-mono text-[10px]">Esc</kbd>
       </header>
       <ul x-show="results.length > 0"
           role="listbox"
@@ -688,27 +688,27 @@
               :aria-selected="i === selectedIndex"
               @mouseenter="selectedIndex = i"
               @click="activate()"
-              :class="i === selectedIndex ? 'bg-cyan-900/40 text-cyan-100' : 'text-gray-200 hover:bg-gray-800/60'"
+              :class="i === selectedIndex ? 'bg-cyan-900/40 text-accent' : 'text-foreground hover:bg-gray-800/60'"
               class="px-3 py-1.5 text-sm flex items-center gap-2 cursor-pointer">
-            <span class="text-[10px] uppercase tracking-wide text-gray-500 w-16 shrink-0"
+            <span class="text-[10px] uppercase tracking-wide text-foreground-subtle w-16 shrink-0"
                   x-text="r.category"></span>
             <span class="flex-1 truncate" x-text="r.label"></span>
             <span x-show="r.shortcut"
-                  class="text-[10px] text-gray-500 font-mono shrink-0"
+                  class="text-[10px] text-foreground-subtle font-mono shrink-0"
                   x-text="r.shortcut"></span>
           </li>
         </template>
       </ul>
       <div x-show="results.length === 0 && query"
            role="status"
-           class="px-3 py-6 text-center text-xs text-gray-400">
-        No results for <code class="text-cyan-400" x-text="query"></code>
+           class="px-3 py-6 text-center text-xs text-foreground-muted">
+        No results for <code class="text-accent" x-text="query"></code>
       </div>
-      <footer class="border-t border-gray-800 px-3 py-1.5 text-[10px] text-gray-500 flex justify-between">
+      <footer class="border-t border-border px-3 py-1.5 text-[10px] text-foreground-subtle flex justify-between">
         <span>
-          <kbd class="bg-gray-800 border border-gray-700 rounded px-1 font-mono">↑↓</kbd>
+          <kbd class="bg-surface-3 border border-border rounded px-1 font-mono">↑↓</kbd>
           to navigate ·
-          <kbd class="bg-gray-800 border border-gray-700 rounded px-1 font-mono">Enter</kbd>
+          <kbd class="bg-surface-3 border border-border rounded px-1 font-mono">Enter</kbd>
           to select
         </span>
         <span x-text="`${results.length} result${results.length === 1 ? '' : 's'}`"></span>
@@ -920,8 +920,8 @@
 <!-- v10.0.0a3: slim fixed footer-bar. Sits below the scrollable
      main; reserved space via `bottom-7` on sidebar + main. -->
 <footer id="hm-footer"
-        class="fixed bottom-0 inset-x-0 z-40 h-7 border-t border-gray-800 px-4 text-[11px] text-gray-500 flex items-center bg-gray-950">
-  Part of the <a href="https://fleetq.net" class="text-cyan-500 hover:text-cyan-400 ml-1">FleetQ</a> ecosystem · MIT
+        class="fixed bottom-0 inset-x-0 z-40 h-7 border-t border-border px-4 text-[11px] text-foreground-subtle flex items-center bg-surface-1">
+  Part of the <a href="https://fleetq.net" class="text-accent-strong hover:text-accent ml-1">FleetQ</a> ecosystem · MIT
 </footer>
 </body>
 </html>

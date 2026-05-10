@@ -58,7 +58,8 @@ def test_plugins_enabled_badge_has_icon_and_aria_label() -> None:
     """v12.0.0a2: plugins enabled badge migrated to shared helper.
     Icon (✓ vs ⊘) and aria-label live in `pluginsBadgeProps()`."""
     src = _read("dashboard.html")
-    idx = src.find('"text-sm font-bold text-gray-300">Plugins')
+    # v13.0.0a2: text-gray-300 → text-foreground-muted (semantic-token migration).
+    idx = src.find('"text-sm font-bold text-foreground-muted">Plugins')
     assert idx != -1
     block = src[idx : idx + 800]
     assert "stateBadgeHtml(pluginsBadgeProps())" in block

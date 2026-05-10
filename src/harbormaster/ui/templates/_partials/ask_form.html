@@ -13,49 +13,49 @@
            project: {{ project_name | tojson }},
            host: {{ host | tojson }},
          })"
-         class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+         class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40">
   <header class="mb-3 flex items-baseline justify-between gap-2 flex-wrap">
-    <h3 class="text-base font-bold text-gray-300">
-      Ask <span class="text-cyan-400" x-text="project"></span>
+    <h3 class="text-base font-bold text-foreground-muted">
+      Ask <span class="text-accent" x-text="project"></span>
     </h3>
-    <span class="text-xs text-gray-500">
-      streams via <code class="text-cyan-400">ask_project</code> SSE
+    <span class="text-xs text-foreground-subtle">
+      streams via <code class="text-accent">ask_project</code> SSE
     </span>
   </header>
   <form @submit.prevent="ask()">
     <textarea x-model="question" rows="3" required minlength="3"
               :disabled="loading"
               placeholder="e.g. summarize the v2 changes; what does the auth flow look like?"
-              class="w-full bg-gray-950 border border-gray-800 rounded px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none resize-y"></textarea>
-    <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-400">
+              class="w-full bg-surface-1 border border-border rounded px-3 py-2 text-sm focus:border-accent-strong focus:outline-none resize-y"></textarea>
+    <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-foreground-muted">
       <label class="flex items-center gap-1.5">
         max_turns
         <input type="number" min="1" max="10" x-model.number="maxTurns"
-               class="w-14 bg-gray-950 border border-gray-800 rounded px-2 py-1 text-center">
+               class="w-14 bg-surface-1 border border-border rounded px-2 py-1 text-center">
       </label>
-      <span class="text-gray-400" x-show="loading">streaming…</span>
-      <span class="text-gray-400 ml-auto" x-show="!loading && hasResult"
+      <span class="text-foreground-muted" x-show="loading">streaming…</span>
+      <span class="text-foreground-muted ml-auto" x-show="!loading && hasResult"
             x-text="`${chunks} chunks · ${(elapsedMs/1000).toFixed(1)}s`"></span>
       <button type="submit"
               :disabled="loading || question.trim().length < 3"
               :aria-busy="loading"
-              class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-400 text-white font-bold px-4 py-1.5 rounded transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+              class="bg-accent-strong hover:bg-accent disabled:bg-surface-3 disabled:text-foreground-muted text-white font-bold px-4 py-1.5 rounded transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
         <span x-show="!loading">Ask</span>
         <span x-show="loading" aria-hidden="true">…</span>
       </button>
       <button type="button" x-show="loading" @click="abort()"
               aria-label="Stop streaming"
               :aria-hidden="!loading"
-              class="text-amber-400 hover:text-amber-300 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">stop</button>
+              class="text-warning hover:text-warning underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">stop</button>
     </div>
   </form>
-  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="mt-3 text-xs text-red-400" x-text="error"></div>
+  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="mt-3 text-xs text-danger" x-text="error"></div>
   <pre x-show="streamText"
        :aria-hidden="!streamText"
        aria-live="polite"
        aria-atomic="false"
        aria-label="Streaming answer"
-       class="mt-3 text-sm whitespace-pre-wrap break-words border border-gray-800 rounded p-3 bg-gray-950/50 text-gray-200 leading-relaxed"
+       class="mt-3 text-sm whitespace-pre-wrap break-words border border-border rounded p-3 bg-gray-950/50 text-foreground leading-relaxed"
        x-text="streamText"></pre>
 </section>
 

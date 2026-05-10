@@ -10,7 +10,7 @@
 <div x-data="helpPopover()"
      @keydown.window="onKeyDown($event)">
   <button type="button" @click="open = !open"
-          class="fixed bottom-4 right-4 z-30 bg-gray-900/80 hover:bg-gray-800 border border-gray-700 text-cyan-400 w-9 h-9 rounded-full text-base font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+          class="fixed bottom-4 right-4 z-30 bg-gray-900/80 hover:bg-surface-3 border border-border text-accent w-9 h-9 rounded-full text-base font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
           :title="open ? 'close help (Esc)' : 'keyboard shortcuts (?)'"
           :aria-label="open ? 'Close keyboard shortcuts help' : 'Open keyboard shortcuts help'"
           :aria-expanded="open"
@@ -23,31 +23,31 @@
        aria-label="Keyboard shortcuts"
        :aria-hidden="!open"
        @click.away="open = false"
-       class="fixed bottom-16 right-4 z-30 w-80 max-h-[70vh] overflow-y-auto bg-gray-950 border border-gray-700 rounded-lg shadow-xl p-4">
+       class="fixed bottom-16 right-4 z-30 w-80 max-h-[70vh] overflow-y-auto bg-surface-1 border border-border rounded-lg shadow-xl p-4">
     <header class="flex items-baseline justify-between mb-3">
-      <h3 class="text-sm font-bold text-gray-200">Keyboard shortcuts</h3>
+      <h3 class="text-sm font-bold text-foreground">Keyboard shortcuts</h3>
       <button type="button" @click="open = false"
               aria-label="Close keyboard shortcuts help"
-              class="text-gray-400 hover:text-gray-200 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">close</button>
+              class="text-foreground-muted hover:text-foreground text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">close</button>
     </header>
     <template x-for="section in shortcuts" :key="section.scope">
       <div class="mb-3">
-        <h4 class="text-[11px] uppercase tracking-wide text-gray-500 mb-1.5"
+        <h4 class="text-[11px] uppercase tracking-wide text-foreground-subtle mb-1.5"
             x-text="section.scope"></h4>
         <ul class="space-y-1 text-xs">
           <template x-for="row in section.rows" :key="row.keys">
             <li class="flex items-baseline gap-2">
-              <kbd class="bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-cyan-300 font-mono text-[10px] shrink-0"
+              <kbd class="bg-surface-3 border border-border rounded px-1.5 py-0.5 text-accent font-mono text-[10px] shrink-0"
                    x-text="row.keys"></kbd>
-              <span class="text-gray-300" x-text="row.action"></span>
+              <span class="text-foreground-muted" x-text="row.action"></span>
             </li>
           </template>
         </ul>
       </div>
     </template>
-    <p class="mt-3 pt-3 border-t border-gray-800 text-[11px] text-gray-500">
-      Press <kbd class="bg-gray-800 border border-gray-700 rounded px-1 py-0 text-cyan-300 font-mono">Esc</kbd>
-      or <kbd class="bg-gray-800 border border-gray-700 rounded px-1 py-0 text-cyan-300 font-mono">?</kbd>
+    <p class="mt-3 pt-3 border-t border-border text-[11px] text-foreground-subtle">
+      Press <kbd class="bg-surface-3 border border-border rounded px-1 py-0 text-accent font-mono">Esc</kbd>
+      or <kbd class="bg-surface-3 border border-border rounded px-1 py-0 text-accent font-mono">?</kbd>
       to dismiss.
     </p>
   </div>
@@ -61,40 +61,40 @@
 <section x-data="kpiStrip()" x-init="loadKpi(); startPolling()"
          aria-label="Dashboard at-a-glance metrics"
          class="mb-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-  <div class="border border-gray-800 rounded-lg p-3 bg-gray-900/40"
+  <div class="border border-border rounded-lg p-3 bg-gray-900/40"
        data-kpi-cell="projects">
-    <p class="text-[10px] uppercase tracking-wide text-gray-400">Projects</p>
-    <p class="text-2xl font-bold text-gray-100"
+    <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Projects</p>
+    <p class="text-2xl font-bold text-foreground"
        x-text="kpi.projects ?? '—'"
        :aria-label="`${kpi.projects ?? 0} projects discovered`"></p>
   </div>
-  <div class="border border-gray-800 rounded-lg p-3 bg-gray-900/40"
+  <div class="border border-border rounded-lg p-3 bg-gray-900/40"
        data-kpi-cell="active-embeds">
-    <p class="text-[10px] uppercase tracking-wide text-gray-400">Active embeds</p>
+    <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Active embeds</p>
     <p class="text-2xl font-bold"
        :class="activeEmbedsClass()"
        x-text="activeEmbedsLabel()"
        :aria-label="`Reembed phase ${kpi.active_embeds?.phase || 'unknown'}`"></p>
   </div>
-  <div class="border border-gray-800 rounded-lg p-3 bg-gray-900/40"
+  <div class="border border-border rounded-lg p-3 bg-gray-900/40"
        data-kpi-cell="recent-queries">
-    <p class="text-[10px] uppercase tracking-wide text-gray-400">Recent queries (1h)</p>
-    <p class="text-2xl font-bold text-gray-100"
+    <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Recent queries (1h)</p>
+    <p class="text-2xl font-bold text-foreground"
        x-text="kpi.recent_queries ?? '—'"
        :aria-label="`${kpi.recent_queries ?? 0} queries in the last hour`"></p>
   </div>
-  <div class="border border-gray-800 rounded-lg p-3 bg-gray-900/40"
+  <div class="border border-border rounded-lg p-3 bg-gray-900/40"
        data-kpi-cell="bridge">
-    <p class="text-[10px] uppercase tracking-wide text-gray-400">Bridge</p>
+    <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Bridge</p>
     <p class="text-sm font-bold pt-1.5"
        :class="bridgeClass()"
        x-text="kpi.bridge ?? '—'"
        :aria-label="`Bridge ${kpi.bridge || 'unknown'}`"></p>
   </div>
-  <div class="border border-gray-800 rounded-lg p-3 bg-gray-900/40"
+  <div class="border border-border rounded-lg p-3 bg-gray-900/40"
        data-kpi-cell="dispatcher">
-    <p class="text-[10px] uppercase tracking-wide text-gray-400">Dispatcher</p>
-    <p class="text-sm font-bold pt-1.5 text-emerald-400"
+    <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Dispatcher</p>
+    <p class="text-sm font-bold pt-1.5 text-success"
        x-text="kpi.dispatcher ?? '—'"
        :aria-label="`Dispatcher ${kpi.dispatcher || 'unknown'}`"></p>
   </div>
@@ -104,51 +104,51 @@
      collapsible on mobile. Loads async, doesn't block project grid. -->
 <section x-data="statusStrip()" x-init="loadAll()"
          class="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-  <article class="border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+  <article class="border border-border rounded-lg p-4 bg-gray-900/40">
     <header class="flex items-center justify-between mb-2">
-      <h3 class="text-sm font-bold text-gray-300">FleetQ Bridge</h3>
+      <h3 class="text-sm font-bold text-foreground-muted">FleetQ Bridge</h3>
       <!-- v12.0.0a2: migrated from inline color/icon spans to the
            shared `stateBadgeHtml` helper. Visual output identical;
            `bridgeBadgeProps()` consolidates state, icon, color, and
            tooltip selection in one place. -->
       <span x-html="window.harbormaster.stateBadgeHtml(bridgeBadgeProps())"></span>
     </header>
-    <dl class="text-xs space-y-1 text-gray-400" x-show="!bridgeError">
-      <div><dt class="inline text-gray-500">enabled:</dt>
+    <dl class="text-xs space-y-1 text-foreground-muted" x-show="!bridgeError">
+      <div><dt class="inline text-foreground-subtle">enabled:</dt>
         <dd class="inline ml-1" x-text="bridge.fleetq_enabled"></dd></div>
-      <div><dt class="inline text-gray-500">register_as_bridge:</dt>
+      <div><dt class="inline text-foreground-subtle">register_as_bridge:</dt>
         <dd class="inline ml-1" x-text="bridge.register_as_bridge"></dd></div>
-      <div><dt class="inline text-gray-500">base_url:</dt>
-        <dd class="inline ml-1 text-cyan-400" x-text="bridge.base_url"></dd></div>
-      <div><dt class="inline text-gray-500">token (env var):</dt>
+      <div><dt class="inline text-foreground-subtle">base_url:</dt>
+        <dd class="inline ml-1 text-accent" x-text="bridge.base_url"></dd></div>
+      <div><dt class="inline text-foreground-subtle">token (env var):</dt>
         <dd class="inline ml-1"
-            :class="bridge.api_token_present ? 'text-emerald-400' : 'text-amber-400'"
+            :class="bridge.api_token_present ? 'text-success' : 'text-warning'"
             x-text="bridge.api_token_present ? `${bridge.api_token_env} ✓` : `${bridge.api_token_env} (empty)`"></dd></div>
-      <div><dt class="inline text-gray-500">writeback:</dt>
+      <div><dt class="inline text-foreground-subtle">writeback:</dt>
         <dd class="inline ml-1"
             x-text="`trajectories=${bridge.write_trajectories}, kg=${bridge.write_kg} (${bridge.kg_extractor})`"></dd></div>
       <div x-show="bridge.runtime && bridge.runtime.available && bridge.runtime.state_file_present">
-        <dt class="inline text-gray-500">runtime:</dt>
+        <dt class="inline text-foreground-subtle">runtime:</dt>
         <dd class="inline ml-1"
             x-text="runtimeSummary()"
             :class="runtimeColorClass()"></dd>
       </div>
-      <div x-show="bridge.runtime && bridge.runtime.last_error" class="text-rose-400">
-        <dt class="inline text-gray-500">last_error:</dt>
+      <div x-show="bridge.runtime && bridge.runtime.last_error" class="text-danger">
+        <dt class="inline text-foreground-subtle">last_error:</dt>
         <dd class="inline ml-1" x-text="bridge.runtime && bridge.runtime.last_error"></dd>
       </div>
     </dl>
-    <p x-show="bridgeError" :aria-hidden="!bridgeError" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="bridgeError"></p>
+    <p x-show="bridgeError" :aria-hidden="!bridgeError" role="alert" aria-live="assertive" class="text-xs text-danger" x-text="bridgeError"></p>
   </article>
 
-  <article class="border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+  <article class="border border-border rounded-lg p-4 bg-gray-900/40">
     <header class="flex items-center justify-between mb-2">
-      <h3 class="text-sm font-bold text-gray-300">Plugins</h3>
+      <h3 class="text-sm font-bold text-foreground-muted">Plugins</h3>
       <!-- v12.0.0a2: migrated to shared stateBadgeHtml helper. -->
       <span x-html="window.harbormaster.stateBadgeHtml(pluginsBadgeProps())"></span>
     </header>
     <div x-show="!pluginsError" class="text-xs space-y-1">
-      <p class="text-gray-500" x-show="(plugins.plugins || []).length === 0">
+      <p class="text-foreground-subtle" x-show="(plugins.plugins || []).length === 0">
         No entry points discovered.
       </p>
       <template x-for="row in (plugins.plugins || [])" :key="row.entry_point + ':' + row.dist_name">
@@ -156,29 +156,29 @@
           <!-- v12.0.0a2: per-plugin status badge migrated to shared
                stateBadgeHtml helper. -->
           <span x-html="window.harbormaster.stateBadgeHtml(pluginRowBadgeProps(row))"></span>
-          <span class="text-gray-300 truncate" x-text="row.dist_name || '<unknown>'"></span>
-          <span class="text-gray-500 text-[10px]" x-show="row.entry_point" x-text="`(${row.entry_point})`"></span>
+          <span class="text-foreground-muted truncate" x-text="row.dist_name || '<unknown>'"></span>
+          <span class="text-foreground-subtle text-[10px]" x-show="row.entry_point" x-text="`(${row.entry_point})`"></span>
         </div>
       </template>
     </div>
-    <p x-show="pluginsError" :aria-hidden="!pluginsError" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="pluginsError"></p>
+    <p x-show="pluginsError" :aria-hidden="!pluginsError" role="alert" aria-live="assertive" class="text-xs text-danger" x-text="pluginsError"></p>
   </article>
 </section>
 
 <!-- v5.0.0a1: auto-reembed runner status. Polls /api/history/state
      every 3s while phase is "running"; idles otherwise. -->
 <section x-data="reembedPanel()" x-init="loadOnce()"
-         class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40"
+         class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40"
          x-show="state.available && (state.phase !== 'idle' || state.auto_reembed_enabled)">
   <header class="flex items-center justify-between mb-2 gap-2 flex-wrap">
-    <h3 class="text-sm font-bold text-gray-300">Auto-reembed</h3>
+    <h3 class="text-sm font-bold text-foreground-muted">Auto-reembed</h3>
     <div class="flex items-center gap-2">
       <!-- v6.0.0a1: manual trigger button. Disabled while running. -->
       <button type="button" @click="triggerManual()"
               :disabled="state.phase === 'running' || triggering || cancelling"
               :aria-busy="triggering"
               aria-label="Run reembed now"
-              class="text-xs px-2 py-0.5 rounded border border-gray-700 bg-gray-900/60 hover:bg-gray-800 disabled:bg-gray-900 disabled:text-gray-500 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+              class="text-xs px-2 py-0.5 rounded border border-border bg-gray-900/60 hover:bg-surface-3 disabled:bg-surface-2 disabled:text-foreground-subtle transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
               title="run reembed now (skips the auto_reembed_on_drift gate)">
         <span x-show="!triggering">run now</span>
         <span x-show="triggering">starting…</span>
@@ -190,7 +190,7 @@
               :disabled="cancelling"
               :aria-busy="cancelling"
               aria-label="Cancel running reembed"
-              class="text-xs px-2 py-0.5 rounded border border-amber-700 bg-amber-900/30 hover:bg-amber-900/50 text-amber-200 disabled:opacity-50 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+              class="text-xs px-2 py-0.5 rounded border border-warning bg-amber-900/30 hover:bg-amber-900/50 text-amber-200 disabled:opacity-50 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
               title="signal the running reembed to stop after current host">
         <span x-show="!cancelling">cancel</span>
         <span x-show="cancelling">cancelling…</span>
@@ -201,96 +201,96 @@
       <span x-html="window.harbormaster.stateBadgeHtml(phaseBadgeProps())"></span>
     </div>
   </header>
-  <div x-show="state.phase === 'running'" class="text-xs text-gray-400">
+  <div x-show="state.phase === 'running'" class="text-xs text-foreground-muted">
     <div class="flex items-baseline justify-between gap-2 mb-1">
       <span x-text="state.current_host ? `processing host: ${state.current_host}` : 'preparing…'"></span>
-      <span class="text-gray-500" x-text="progressLabel()"></span>
+      <span class="text-foreground-subtle" x-text="progressLabel()"></span>
     </div>
-    <div class="h-1.5 bg-gray-800 rounded overflow-hidden">
-      <div class="h-full bg-cyan-600 transition-all"
+    <div class="h-1.5 bg-surface-3 rounded overflow-hidden">
+      <div class="h-full bg-accent transition-all"
            :style="`width: ${state.total ? (state.processed / state.total * 100) : 0}%`"></div>
     </div>
   </div>
-  <div x-show="state.phase === 'done'" class="text-xs text-emerald-400">
+  <div x-show="state.phase === 'done'" class="text-xs text-success">
     <span x-text="state.total ? `Completed ${state.total} host${state.total === 1 ? '' : 's'}` : 'Done'"></span>
-    <span x-show="state.finished_at" class="text-gray-500"
+    <span x-show="state.finished_at" class="text-foreground-subtle"
           x-text="` · ${formatDuration(state.started_at, state.finished_at)}`"></span>
   </div>
   <div x-show="state.phase === 'failed'" :aria-hidden="state.phase !== 'failed'" role="alert" aria-live="assertive" class="text-xs">
-    <p class="text-rose-400 mb-1">Auto-reembed failed.</p>
-    <p class="text-gray-400 break-words" x-text="state.error"></p>
+    <p class="text-danger mb-1">Auto-reembed failed.</p>
+    <p class="text-foreground-muted break-words" x-text="state.error"></p>
   </div>
   <!-- v7.0.0a3: cancelled phase. Worker stopped between hosts. -->
-  <div x-show="state.phase === 'cancelled'" class="text-xs text-amber-300">
+  <div x-show="state.phase === 'cancelled'" class="text-xs text-warning">
     <span x-text="`Cancelled after ${state.processed} of ${state.total} host${state.total === 1 ? '' : 's'}`"></span>
-    <span x-show="state.finished_at" class="text-gray-500"
+    <span x-show="state.finished_at" class="text-foreground-subtle"
           x-text="` · ${formatDuration(state.started_at, state.finished_at)}`"></span>
   </div>
   <div x-show="state.phase === 'idle' && state.auto_reembed_enabled"
-       class="text-xs text-gray-500">
+       class="text-xs text-foreground-subtle">
     Idle — no embedding drift detected. Auto-reembed runs on next startup
     if the configured embedding model changes.
   </div>
-  <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="error"></p>
+  <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-danger" x-text="error"></p>
 
   <!-- v7.0.0a4: collapsible last-5-runs history table.
        Lazy-loads via fetchRuns() the first time the user opens it. -->
   <details class="mt-3 text-xs" x-show="state.available"
            @toggle="if ($event.target.open) loadRuns()">
-    <summary class="cursor-pointer text-gray-500 hover:text-gray-300">
+    <summary class="cursor-pointer text-foreground-subtle hover:text-foreground-muted">
       <span>recent runs</span>
-      <span class="text-gray-600" x-show="runs.length"
+      <span class="text-foreground-subtle" x-show="runs.length"
             x-text="`(${runs.length})`"></span>
     </summary>
     <div class="mt-2">
-      <p x-show="runsLoading" :aria-hidden="!runsLoading" class="text-gray-400">loading…</p>
+      <p x-show="runsLoading" :aria-hidden="!runsLoading" class="text-foreground-muted">loading…</p>
       <!-- v8.0.0a3: canonical 3-part empty state for reembed history. -->
       <div x-show="!runsLoading && runs.length === 0"
            :aria-hidden="!(!runsLoading && runs.length === 0)"
            role="status"
            data-empty-state="reembed.no-runs"
-           class="border border-gray-800 bg-gray-900/40 text-gray-400 px-3 py-4 rounded text-center">
-        <p class="text-xs font-bold text-gray-200 mb-1">No reembed runs yet</p>
-        <p class="text-[11px] text-gray-400 mb-2">
-          Click <span class="text-cyan-400">run now</span> above to trigger a manual run,
+           class="border border-border bg-gray-900/40 text-foreground-muted px-3 py-4 rounded text-center">
+        <p class="text-xs font-bold text-foreground mb-1">No reembed runs yet</p>
+        <p class="text-[11px] text-foreground-muted mb-2">
+          Click <span class="text-accent">run now</span> above to trigger a manual run,
           or wait for an embedding-model drift to fire it automatically.
         </p>
         <button type="button" @click="triggerManual()"
                 :disabled="state.phase === 'running' || triggering || cancelling"
                 aria-label="Trigger reembed run now"
-                class="text-[11px] px-2 py-0.5 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 transition disabled:bg-gray-900 disabled:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                class="text-[11px] px-2 py-0.5 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent transition disabled:bg-surface-2 disabled:text-foreground-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
           Run now
         </button>
       </div>
       <table x-show="!runsLoading && runs.length > 0"
              class="w-full text-left border-collapse">
-        <thead class="text-gray-500">
+        <thead class="text-foreground-subtle">
           <tr>
             <th class="pr-2 py-0.5 font-normal">finished</th>
             <th class="pr-2 py-0.5 font-normal">duration</th>
-            <th class="pr-2 py-0.5 font-normal text-emerald-400">ok</th>
-            <th class="pr-2 py-0.5 font-normal text-rose-400">fail</th>
-            <th class="pr-2 py-0.5 font-normal text-amber-400">cancel</th>
+            <th class="pr-2 py-0.5 font-normal text-success">ok</th>
+            <th class="pr-2 py-0.5 font-normal text-danger">fail</th>
+            <th class="pr-2 py-0.5 font-normal text-warning">cancel</th>
             <th class="py-0.5 font-normal">model</th>
           </tr>
         </thead>
         <tbody>
           <template x-for="r in runs.slice(-5).reverse()"
                     :key="r.started_at">
-            <tr class="border-t border-gray-800">
-              <td class="pr-2 py-0.5 text-gray-400"
+            <tr class="border-t border-border">
+              <td class="pr-2 py-0.5 text-foreground-muted"
                   x-text="formatRelative(r.finished_at)"></td>
-              <td class="pr-2 py-0.5 text-gray-400"
+              <td class="pr-2 py-0.5 text-foreground-muted"
                   x-text="formatDuration(r.started_at, r.finished_at)"></td>
-              <td class="pr-2 py-0.5 text-emerald-300"
+              <td class="pr-2 py-0.5 text-success"
                   x-text="r.succeeded"></td>
               <td class="pr-2 py-0.5"
-                  :class="r.failed ? 'text-rose-300' : 'text-gray-600'"
+                  :class="r.failed ? 'text-danger' : 'text-foreground-subtle'"
                   x-text="r.failed"></td>
               <td class="pr-2 py-0.5"
-                  :class="r.cancelled ? 'text-amber-300' : 'text-gray-600'"
+                  :class="r.cancelled ? 'text-warning' : 'text-foreground-subtle'"
                   x-text="r.cancelled"></td>
-              <td class="py-0.5 text-gray-500 text-[10px]"
+              <td class="py-0.5 text-foreground-subtle text-[10px]"
                   x-text="r.model || ''"></td>
             </tr>
           </template>
@@ -303,52 +303,52 @@
 <!-- v2.1.0a3: recall search. Hits /api/recall (which wraps the
      recall_qa MCP tool) and renders match cards inline. -->
 <section x-data="recallPanel()" x-init="restoreFromUrl()"
-         class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+         class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40">
   <header class="mb-3 flex items-center justify-between gap-2 flex-wrap">
     <h2 class="text-lg font-bold">Recall Q&amp;A history</h2>
-    <span class="text-xs text-gray-500">
-      semantic search over <code class="text-cyan-400">recall_qa</code> store
+    <span class="text-xs text-foreground-subtle">
+      semantic search over <code class="text-accent">recall_qa</code> store
     </span>
   </header>
   <form @submit.prevent="search()" class="flex flex-col md:flex-row gap-2 mb-3">
     <input type="text" x-model="question" required minlength="2"
            placeholder="e.g. how does authentication work?"
-           class="flex-1 bg-gray-950 border border-gray-800 rounded px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none">
+           class="flex-1 bg-surface-1 border border-border rounded px-3 py-2 text-sm focus:border-accent-strong focus:outline-none">
     <input type="text" x-model="project"
            placeholder="project filter (optional)"
-           class="md:w-48 bg-gray-950 border border-gray-800 rounded px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none">
+           class="md:w-48 bg-surface-1 border border-border rounded px-3 py-2 text-sm focus:border-accent-strong focus:outline-none">
     <select x-model="host"
-            class="md:w-32 bg-gray-950 border border-gray-800 rounded px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none">
+            class="md:w-32 bg-surface-1 border border-border rounded px-3 py-2 text-sm focus:border-accent-strong focus:outline-none">
       <option value="local">local</option>
       <option value="all">all hosts</option>
     </select>
     <button type="submit"
             :disabled="loading || question.trim().length < 2"
             :aria-busy="loading"
-            class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-400 text-white font-bold px-4 py-2 rounded text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+            class="bg-accent-strong hover:bg-accent disabled:bg-surface-3 disabled:text-foreground-muted text-white font-bold px-4 py-2 rounded text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
       <span x-show="!loading">Search</span>
       <span x-show="loading" aria-hidden="true">…</span>
     </button>
   </form>
-  <div x-show="message" :aria-hidden="!message" role="status" aria-live="polite" class="text-xs text-amber-400 mb-2" x-text="message"></div>
-  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-red-400 mb-2" x-text="error"></div>
+  <div x-show="message" :aria-hidden="!message" role="status" aria-live="polite" class="text-xs text-warning mb-2" x-text="message"></div>
+  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-danger mb-2" x-text="error"></div>
   <div x-show="hasResults">
-    <p class="text-xs text-gray-500 mb-2"
+    <p class="text-xs text-foreground-subtle mb-2"
        x-text="`${matches.length} match${matches.length === 1 ? '' : 'es'} (backend: ${backend})`"></p>
     <ul class="space-y-2">
       <template x-for="m in matches" :key="m.id + ':' + m.host">
-        <li class="border border-gray-800 rounded p-3 bg-gray-950/50">
+        <li class="border border-border rounded p-3 bg-gray-950/50">
           <div class="flex items-baseline justify-between gap-2 flex-wrap text-xs">
             <a :href="`/projects/${encodeURIComponent(m.project)}${m.host && m.host !== 'local' ? '?host=' + encodeURIComponent(m.host) : ''}`"
-               class="font-bold text-cyan-400 hover:underline" x-text="m.project"></a>
-            <div class="flex items-center gap-2 text-gray-500">
+               class="font-bold text-accent hover:underline" x-text="m.project"></a>
+            <div class="flex items-center gap-2 text-foreground-subtle">
               <span x-text="`host: ${m.host}`"></span>
               <span x-text="`tool: ${m.tool}`"></span>
               <span x-text="`score: ${m.score.toFixed(3)}`"></span>
             </div>
           </div>
-          <p class="text-sm text-gray-200 mt-1" x-text="m.question"></p>
-          <p class="text-xs text-gray-400 mt-1 line-clamp-3" x-text="m.answer"></p>
+          <p class="text-sm text-foreground mt-1" x-text="m.question"></p>
+          <p class="text-xs text-foreground-muted mt-1 line-clamp-3" x-text="m.answer"></p>
         </li>
       </template>
     </ul>
@@ -358,16 +358,16 @@
        :aria-hidden="!(searched && matches.length === 0 && !error && !message)"
        role="status"
        data-empty-state="recall.no-matches"
-       class="border border-gray-800 bg-gray-900/40 text-gray-400 px-4 py-6 rounded text-center">
-    <p class="text-sm font-bold text-gray-200 mb-1">No matches found</p>
-    <p class="text-xs text-gray-400 mb-3">
+       class="border border-border bg-gray-900/40 text-foreground-muted px-4 py-6 rounded text-center">
+    <p class="text-sm font-bold text-foreground mb-1">No matches found</p>
+    <p class="text-xs text-foreground-muted mb-3">
       Try broadening the question, removing the project filter,
-      or selecting <code class="text-cyan-400">all hosts</code>.
+      or selecting <code class="text-accent">all hosts</code>.
     </p>
     <button type="button"
             @click="question = ''; project = ''; host = 'local'; searched = false; persistToUrl()"
             aria-label="Clear recall filters"
-            class="text-xs px-3 py-1 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+            class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
       Clear filters
     </button>
   </div>
@@ -377,10 +377,10 @@
      /api/graph; we re-render with mermaid.run() after the DOM has the
      fresh markup so the layout adapts to includeDevDeps / transitive. -->
 <section x-data="graphPanel()" x-init="loadGraph()"
-         class="mb-6 border border-gray-800 rounded-lg p-4 bg-gray-900/40">
+         class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40">
   <header class="flex items-center justify-between mb-3 gap-2 flex-wrap">
     <h2 class="text-lg font-bold">Project graph</h2>
-    <div class="flex items-center gap-3 text-xs text-gray-400">
+    <div class="flex items-center gap-3 text-xs text-foreground-muted">
       <label class="flex items-center gap-1.5">
         <input type="checkbox" x-model="includeDevDeps" @change="loadGraph()" class="accent-cyan-500">
         dev deps
@@ -393,12 +393,12 @@
             x-text="`${graph.projects_discovered} projects · ${(graph.graph?.edges?.length ?? 0)} edges${graph.projects_with_lockfile !== undefined ? ' · ' + graph.projects_with_lockfile + ' with lockfile' : ''}`"></span>
     </div>
   </header>
-  <div x-show="graphError" :aria-hidden="!graphError" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="graphError"></div>
-  <div x-show="graphLoading" class="text-xs text-gray-500">Rendering…</div>
+  <div x-show="graphError" :aria-hidden="!graphError" role="alert" aria-live="assertive" class="text-xs text-danger" x-text="graphError"></div>
+  <div x-show="graphLoading" class="text-xs text-foreground-subtle">Rendering…</div>
   <div x-show="!graphLoading && (graph.graph?.edges?.length ?? 0) === 0"
-       class="text-xs text-gray-500">
+       class="text-xs text-foreground-subtle">
     No edges yet — graph edges only appear when one project's dep matches
-    another project's manifest name. Try enabling <code class="text-cyan-400">transitive</code>
+    another project's manifest name. Try enabling <code class="text-accent">transitive</code>
     to also consider lockfile-resolved deps.
   </div>
   <!-- v3.0.0a9: mobile-friendly graph viewport.
@@ -414,12 +414,12 @@
     <div class="absolute top-2 right-2 z-10 flex gap-1">
       <button type="button" @click="reset()"
               aria-label="Reset graph zoom"
-              class="text-xs bg-gray-900/80 hover:bg-gray-800 border border-gray-700 px-2 py-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+              class="text-xs bg-gray-900/80 hover:bg-surface-3 border border-border px-2 py-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
               :title="`reset zoom (current: ${scale.toFixed(2)}×) — press Esc or double-tap`">
         reset
       </button>
     </div>
-    <div class="overflow-hidden max-h-[60vh] border border-gray-900 rounded bg-gray-950/40 p-2 select-none"
+    <div class="overflow-hidden max-h-[60vh] border border-border-strong rounded bg-gray-950/40 p-2 select-none"
          @wheel.prevent="onWheel($event)"
          @touchstart="onTouchStart($event)"
          @touchmove.prevent="onTouchMove($event)"
@@ -443,29 +443,29 @@
     <h2 class="text-lg font-bold">Projects</h2>
     <div class="flex items-baseline gap-3 ml-auto flex-wrap">
       <select x-model="sort" @change="persistToUrl()"
-              class="bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs focus:border-cyan-700 focus:outline-none">
+              class="bg-surface-1 border border-border rounded px-2 py-1.5 text-xs focus:border-accent-strong focus:outline-none">
         <option value="last_commit">sort: recent</option>
         <option value="alpha">sort: alphabetical</option>
         <option value="language">sort: by language</option>
       </select>
       <select x-model="group" @change="persistToUrl()"
-              class="bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs focus:border-cyan-700 focus:outline-none">
+              class="bg-surface-1 border border-border rounded px-2 py-1.5 text-xs focus:border-accent-strong focus:outline-none">
         <option value="flat">group: flat</option>
         <option value="language">group: by language</option>
       </select>
       <input type="text" x-model="filter" @input.debounce.150ms="persistToUrl()"
              placeholder="filter by name / path / brief…"
-             class="bg-gray-950 border border-gray-800 rounded px-3 py-1.5 text-sm focus:border-cyan-700 focus:outline-none w-56">
-      <span class="text-sm text-gray-400" x-show="!loading"
+             class="bg-surface-1 border border-border rounded px-3 py-1.5 text-sm focus:border-accent-strong focus:outline-none w-56">
+      <span class="text-sm text-foreground-muted" x-show="!loading"
             x-text="filter
               ? `${visibleProjects().length} of ${projects.length} match`
               : `${projects.length} discovered`"></span>
     </div>
   </header>
 
-  <div x-show="loading" class="text-gray-400">Loading projects…</div>
+  <div x-show="loading" class="text-foreground-muted">Loading projects…</div>
 
-  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="border border-red-800 bg-red-950/40 text-red-300 px-4 py-3 rounded">
+  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="border border-red-800 bg-red-950/40 text-danger px-4 py-3 rounded">
     Error loading projects: <span x-text="error"></span>
   </div>
 
@@ -474,15 +474,15 @@
        :aria-hidden="!(!loading && !error && projects.length === 0)"
        role="status"
        data-empty-state="dashboard.no-projects"
-       class="border border-gray-800 bg-gray-900/40 text-gray-400 px-4 py-6 rounded text-center">
-    <p class="text-sm font-bold text-gray-200 mb-1">No projects discovered</p>
-    <p class="text-xs text-gray-400 mb-3">
-      Harbormaster scans <code class="text-cyan-400">~/htdocs/*</code> by default.
-      Add <code class="text-cyan-400">[projects] glob</code> or <code class="text-cyan-400">[hosts.*]</code>
-      entries to <code class="text-cyan-400">~/.config/harbormaster/config.toml</code>.
+       class="border border-border bg-gray-900/40 text-foreground-muted px-4 py-6 rounded text-center">
+    <p class="text-sm font-bold text-foreground mb-1">No projects discovered</p>
+    <p class="text-xs text-foreground-muted mb-3">
+      Harbormaster scans <code class="text-accent">~/htdocs/*</code> by default.
+      Add <code class="text-accent">[projects] glob</code> or <code class="text-accent">[hosts.*]</code>
+      entries to <code class="text-accent">~/.config/harbormaster/config.toml</code>.
     </p>
     <a href="https://github.com/FleetQ/harbormaster/blob/main/docs/operator-guide.md"
-       class="text-xs px-3 py-1 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 transition inline-block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+       class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent transition inline-block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
       Read the operator guide
     </a>
   </div>
@@ -490,11 +490,11 @@
   <div x-show="!loading && !error && filter && visibleProjects().length === 0"
        :aria-hidden="!(filter && visibleProjects().length === 0)"
        role="status"
-       class="border border-gray-800 bg-gray-900/40 text-gray-400 px-4 py-6 rounded">
-    No projects match <code class="text-cyan-400" x-text="filter"></code>.
+       class="border border-border bg-gray-900/40 text-foreground-muted px-4 py-6 rounded">
+    No projects match <code class="text-accent" x-text="filter"></code>.
     <button type="button" @click="filter = ''; persistToUrl()"
             aria-label="Clear project filter"
-            class="ml-2 text-cyan-400 hover:text-cyan-300 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">clear</button>
+            class="ml-2 text-accent hover:text-accent underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">clear</button>
   </div>
 
   <!-- v6.0.0a3: groupedProjects() returns one entry for flat mode
@@ -505,21 +505,21 @@
     <template x-for="g in groupedProjects()" :key="g.label || '__flat__'">
       <div class="mb-4">
         <h3 x-show="g.label"
-            class="text-sm font-bold text-gray-400 uppercase tracking-wide mb-2 mt-2 border-b border-gray-800 pb-1"
+            class="text-sm font-bold text-foreground-muted uppercase tracking-wide mb-2 mt-2 border-b border-border pb-1"
             x-text="g.label"></h3>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <template x-for="p in g.items" :key="p.path">
       <article x-data="{ askExpanded: false }"
-               class="border border-gray-800 rounded-lg p-4 hover:border-cyan-700 transition bg-gray-900/40">
+               class="border border-border rounded-lg p-4 hover:border-accent-strong transition bg-gray-900/40">
         <header class="flex items-baseline justify-between mb-2 gap-2">
-          <h3 class="font-bold text-cyan-400 truncate">
+          <h3 class="font-bold text-accent truncate">
             <a :href="`/projects/${encodeURIComponent(p.name)}`"
-               class="hover:text-cyan-300 no-underline" x-text="p.name"></a>
+               class="hover:text-accent no-underline" x-text="p.name"></a>
           </h3>
-          <span class="text-xs text-gray-500 shrink-0"
+          <span class="text-xs text-foreground-subtle shrink-0"
                 x-text="p.last_commit ? p.last_commit.hash : '(no git)'"></span>
         </header>
-        <p class="text-sm text-gray-300 mb-3 line-clamp-2"
+        <p class="text-sm text-foreground-muted mb-3 line-clamp-2"
            x-text="p.brief || '(no description)'"></p>
         <footer class="flex flex-wrap gap-2 text-xs items-center">
           <!-- v7.0.0a6: language badge. Hidden when p.language is
@@ -531,13 +531,13 @@
                 x-text="p.language"
                 :title="`detected language: ${p.language}`"></span>
           <span x-show="p.has_serena"
-                class="bg-purple-900/50 text-purple-300 px-2 py-0.5 rounded">serena</span>
+                class="bg-purple-900/50 text-info px-2 py-0.5 rounded">serena</span>
           <span x-show="p.has_claude_md"
-                class="bg-cyan-900/50 text-cyan-300 px-2 py-0.5 rounded">claude.md</span>
-          <span class="text-gray-500 truncate font-mono flex-1" x-text="p.path"></span>
+                class="bg-cyan-900/50 text-accent px-2 py-0.5 rounded">claude.md</span>
+          <span class="text-foreground-subtle truncate font-mono flex-1" x-text="p.path"></span>
           <!-- v3.0.0a7: per-card inline ask form trigger -->
           <button type="button" @click="askExpanded = !askExpanded"
-                  class="ml-auto bg-cyan-900/50 text-cyan-300 px-2 py-0.5 rounded hover:bg-cyan-800/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+                  class="ml-auto bg-cyan-900/50 text-accent px-2 py-0.5 rounded hover:bg-cyan-800/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
                   :aria-expanded="askExpanded"
                   :aria-label="askExpanded ? 'Close inline ask form for ' + p.name : 'Open inline ask form for ' + p.name"
                   :title="askExpanded ? 'collapse ask form' : 'inline ask without leaving the dashboard'"
@@ -548,41 +548,41 @@
              is identical between the two surfaces (v3.0.0a7). -->
         <section x-show="askExpanded" x-cloak
                  x-data="askForm({ project: p.name, host: 'local' })"
-                 class="mt-3 border-t border-gray-800 pt-3">
+                 class="mt-3 border-t border-border pt-3">
           <form @submit.prevent="ask()">
             <textarea x-model="question" rows="2" required minlength="3"
                       :disabled="loading"
                       placeholder="Ask this project a question…"
-                      class="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1.5 text-xs focus:border-cyan-700 focus:outline-none resize-y"></textarea>
-            <div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                      class="w-full bg-surface-1 border border-border rounded px-2 py-1.5 text-xs focus:border-accent-strong focus:outline-none resize-y"></textarea>
+            <div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-foreground-muted">
               <label class="flex items-center gap-1">
                 turns
                 <input type="number" min="1" max="10" x-model.number="maxTurns"
-                       class="w-12 bg-gray-950 border border-gray-800 rounded px-1 py-0.5 text-center">
+                       class="w-12 bg-surface-1 border border-border rounded px-1 py-0.5 text-center">
               </label>
-              <span class="text-gray-400" x-show="loading">streaming…</span>
-              <span class="text-gray-400 ml-auto" x-show="!loading && hasResult"
+              <span class="text-foreground-muted" x-show="loading">streaming…</span>
+              <span class="text-foreground-muted ml-auto" x-show="!loading && hasResult"
                     x-text="`${chunks} chunks · ${(elapsedMs/1000).toFixed(1)}s`"></span>
               <button type="submit"
                       :disabled="loading || question.trim().length < 3"
                       :aria-busy="loading"
-                      class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-400 text-white font-bold px-2 py-0.5 rounded text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                      class="bg-accent-strong hover:bg-accent disabled:bg-surface-3 disabled:text-foreground-muted text-white font-bold px-2 py-0.5 rounded text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
                 <span x-show="!loading">Ask</span>
                 <span x-show="loading" aria-hidden="true">…</span>
               </button>
               <button type="button" x-show="loading" @click="abort()"
                       aria-label="Stop streaming"
                       :aria-hidden="!loading"
-                      class="text-amber-400 hover:text-amber-300 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">stop</button>
+                      class="text-warning hover:text-warning underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">stop</button>
             </div>
           </form>
-          <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="mt-2 text-xs text-red-400" x-text="error"></div>
+          <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="mt-2 text-xs text-danger" x-text="error"></div>
           <pre x-show="streamText"
                :aria-hidden="!streamText"
                aria-live="polite"
                aria-atomic="false"
                aria-label="Streaming answer"
-               class="mt-2 text-xs whitespace-pre-wrap break-words border border-gray-800 rounded p-2 bg-gray-950/50 text-gray-200 leading-relaxed max-h-48 overflow-y-auto"
+               class="mt-2 text-xs whitespace-pre-wrap break-words border border-border rounded p-2 bg-gray-950/50 text-foreground leading-relaxed max-h-48 overflow-y-auto"
                x-text="streamText"></pre>
         </section>
       </article>
@@ -636,26 +636,26 @@
       activeEmbedsClass() {
         const phase = (this.kpi.active_embeds || {}).phase || 'idle';
         const map = {
-          running: 'text-cyan-300',
-          done: 'text-emerald-300',
-          failed: 'text-rose-300',
-          cancelled: 'text-amber-300',
-          idle: 'text-gray-400',
+          running: 'text-accent',
+          done: 'text-success',
+          failed: 'text-danger',
+          cancelled: 'text-warning',
+          idle: 'text-foreground-muted',
         };
-        return map[phase] || 'text-gray-400';
+        return map[phase] || 'text-foreground-muted';
       },
 
       bridgeClass() {
         const state = this.kpi.bridge;
         const map = {
-          configured: 'text-emerald-300',
-          'token missing': 'text-amber-300',
-          disabled: 'text-gray-400',
-          connected: 'text-emerald-300',
-          stale: 'text-amber-300',
-          disconnected: 'text-rose-300',
+          configured: 'text-success',
+          'token missing': 'text-warning',
+          disabled: 'text-foreground-muted',
+          connected: 'text-success',
+          stale: 'text-warning',
+          disconnected: 'text-danger',
         };
-        return map[state] || 'text-gray-400';
+        return map[state] || 'text-foreground-muted';
       },
     };
   }
@@ -695,16 +695,16 @@
         return 'configured';
       },
       bridgeBadgeClass() {
-        if (!this.bridge.fleetq_enabled) return 'bg-gray-800 text-gray-400';
-        if (!this.bridge.api_token_present) return 'bg-amber-900/50 text-amber-300';
+        if (!this.bridge.fleetq_enabled) return 'bg-surface-3 text-foreground-muted';
+        if (!this.bridge.api_token_present) return 'bg-amber-900/50 text-warning';
         const rt = this.bridge.runtime;
         if (rt && rt.available && rt.state_file_present) {
-          if (rt.connected && !rt.stale && rt.subscribed) return 'bg-emerald-900/50 text-emerald-300';
-          if (rt.connected && rt.stale) return 'bg-amber-900/50 text-amber-300';
-          if (rt.connected) return 'bg-cyan-900/50 text-cyan-300';
-          return 'bg-rose-900/50 text-rose-300';
+          if (rt.connected && !rt.stale && rt.subscribed) return 'bg-emerald-900/50 text-success';
+          if (rt.connected && rt.stale) return 'bg-amber-900/50 text-warning';
+          if (rt.connected) return 'bg-cyan-900/50 text-accent';
+          return 'bg-rose-900/50 text-danger';
         }
-        return 'bg-emerald-900/50 text-emerald-300';
+        return 'bg-emerald-900/50 text-success';
       },
       // v8.0.0a2: glyph per state. Icons reinforce color (color-blind
       // operators get the same affordance as colored badges).
@@ -811,9 +811,9 @@
       },
       runtimeColorClass() {
         const rt = this.bridge.runtime || {};
-        if (rt.connected && !rt.stale) return 'text-emerald-400';
-        if (rt.stale) return 'text-amber-400';
-        return 'text-rose-400';
+        if (rt.connected && !rt.stale) return 'text-success';
+        if (rt.stale) return 'text-warning';
+        return 'text-danger';
       },
       pluginCounts() {
         const rows = this.plugins.plugins || [];
@@ -938,9 +938,9 @@
     javascript: 'bg-yellow-900/40 text-yellow-200 border-yellow-800',
     php: 'bg-purple-900/40 text-purple-200 border-purple-800',
     rust: 'bg-orange-900/40 text-orange-200 border-orange-800',
-    go: 'bg-cyan-900/40 text-cyan-200 border-cyan-800',
+    go: 'bg-cyan-900/40 text-accent border-accent-strong',
     ruby: 'bg-rose-900/40 text-rose-200 border-rose-800',
-    unknown: 'bg-gray-800 text-gray-500 border-gray-700',
+    unknown: 'bg-surface-3 text-foreground-subtle border-border',
   };
   function languageBadgeClass(lang) {
     const key = (lang || 'unknown').toLowerCase();
@@ -1212,11 +1212,11 @@
 
       phaseBadgeClass() {
         const map = {
-          running: 'bg-cyan-900/50 text-cyan-300',
-          done: 'bg-emerald-900/50 text-emerald-300',
-          failed: 'bg-rose-900/50 text-rose-300',
-          idle: 'bg-gray-800 text-gray-400',
-          cancelled: 'bg-amber-900/50 text-amber-300',
+          running: 'bg-cyan-900/50 text-accent',
+          done: 'bg-emerald-900/50 text-success',
+          failed: 'bg-rose-900/50 text-danger',
+          idle: 'bg-surface-3 text-foreground-muted',
+          cancelled: 'bg-amber-900/50 text-warning',
         };
         // Same override as phaseLabel — show the amber badge while
         // the cancel is still in flight.

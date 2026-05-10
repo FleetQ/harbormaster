@@ -19,18 +19,18 @@
      markup directly. The partial-include pattern works best when
      the empty state is reused across templates.
 #}
-<div class="border border-gray-800 bg-gray-900/40 text-gray-400 px-4 py-6 rounded text-center"
+<div class="border border-border bg-gray-900/40 text-foreground-muted px-4 py-6 rounded text-center"
      role="status">
-  <p class="text-sm font-bold text-gray-200 mb-1">{{ es_headline }}</p>
-  <p class="text-xs text-gray-400 mb-3">{{ es_body }}</p>
+  <p class="text-sm font-bold text-foreground mb-1">{{ es_headline }}</p>
+  <p class="text-xs text-foreground-muted mb-3">{{ es_body }}</p>
   {% if es_cta_action %}
     <button type="button" @click="{{ es_cta_action }}"
-            class="text-xs px-3 py-1 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+            class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
       {{ es_cta_label }}
     </button>
   {% elif es_cta_href %}
     <a href="{{ es_cta_href }}"
-       class="text-xs px-3 py-1 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 transition inline-block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+       class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent transition inline-block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
       {{ es_cta_label }}
     </a>
   {% endif %}
