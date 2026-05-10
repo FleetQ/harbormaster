@@ -37,6 +37,122 @@ from harbormaster.backends.base import (
 from harbormaster.config import BackendConfig
 from harbormaster.ssh import SshTimeoutError, diagnose_ssh_failure, run_ssh
 
+# v17.0.0a2: per-process registry mapping a codex `call_id` (or
+# `tool_use.id`) to the running span we opened for it. Mirrors the
+# claude.py pattern (see `_TOOL_USE_SPANS` there). Best-effort: if a
+# tool_use lands without a matching result (cancel / parse miss),
+# the entry just stays pinned until the process restarts.
+_TOOL_USE_SPANS: dict[str, object] = {}
+
+
+def _maybe_emit_tool_use_span(block: dict[str, object]) -> None:
+    """v17.0.0a2: open a child span for a codex tool-call event, if a
+    parent dispatch is currently active. Failures are swallowed.
+
+    Mirrors `harbormaster.backends.claude._maybe_emit_tool_use_span`
+    so the dispatcher trace surface gets the same parent/child shape
+    regardless of which backend served the dispatch. The span tool
+    name is prefixed ``codex.tool:`` so operators can tell the two
+    backends apart in the waterfall view.
+
+    Codex's CLI doesn't have a single canonical tool-call shape —
+    `--json` mode emits OpenAI-style ``{"type": "function_call",
+    "name": ..., "call_id": ...}`` while some wrappers emit Claude-
+    style ``{"type": "tool_use", "id": ..., "name": ...}``. We
+    accept both: ``id`` is taken from ``call_id`` first, falling
+    back to ``id``; the tool name is taken from ``name``.
+    """
+    try:
+        from harbormaster.fleetq import (
+            current_span_id,
+            current_trace_id,
+            get_dispatcher_stats,
+        )
+    except Exception:  # noqa: BLE001  — instrumentation must never raise
+        return
+    parent = current_span_id()
+    if parent is None:
+        return  # outside a dispatch → no span to attribute against.
+    # Codex `--json` shape uses `call_id`; some wrappers use `id`.
+    use_id = block.get("call_id") or block.get("id")
+    name = block.get("name")
+    if not isinstance(use_id, str) or not isinstance(name, str):
+        return
+    try:
+        span = get_dispatcher_stats().record_start(
+            tool=f"codex.tool:{name}",
+            parent_span_id=parent,
+            trace_id=current_trace_id(),
+        )
+    except Exception:  # noqa: BLE001
+        return
+    _TOOL_USE_SPANS[use_id] = span
+
+
+def _maybe_close_tool_result_span(block: dict[str, object]) -> None:
+    """v17.0.0a2: close the child span previously opened for the
+    matching tool-call id. Mirrors the claude.py helper.
+
+    Codex `--json` mode emits ``{"type": "function_call_output",
+    "call_id": ...}``; Claude-style wrappers emit
+    ``{"type": "tool_result", "tool_use_id": ...}``. We accept
+    both correlations.
+    """
+    try:
+        from harbormaster.fleetq import get_dispatcher_stats
+    except Exception:  # noqa: BLE001
+        return
+    use_id = block.get("call_id") or block.get("tool_use_id")
+    if not isinstance(use_id, str):
+        return
+    span = _TOOL_USE_SPANS.pop(use_id, None)
+    if span is None:
+        return
+    # Codex function_call_output has no boolean error flag — instead
+    # the output text may carry `is_error: true` or an error envelope.
+    # Honor `is_error` if present; otherwise default to ok=True.
+    is_error = bool(block.get("is_error"))
+    try:
+        get_dispatcher_stats().record_end(span, ok=not is_error)  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _maybe_observe_codex_line(line: str) -> None:
+    """v17.0.0a2: best-effort line-level instrumentation hook.
+
+    Called for every codex stdout line during streaming. If the line
+    parses as JSON and matches a known tool-call / tool-result shape,
+    open or close the matching child span via the helpers above.
+
+    Recognised event shapes (any one of):
+      * ``{"type": "tool_use", "id": ..., "name": ...}`` — Claude-style.
+      * ``{"type": "function_call", "call_id": ..., "name": ...}`` —
+        codex `--json` mode; OpenAI Responses API shape.
+      * ``{"type": "tool_result", "tool_use_id": ..., "is_error": ...}``
+        — Claude-style result.
+      * ``{"type": "function_call_output", "call_id": ...}`` — codex
+        `--json` mode; OpenAI Responses API shape.
+
+    Anything else (including non-JSON lines, JSON without a `type`
+    key, or `type` values we don't recognise) is a silent no-op.
+    Failures inside the helpers are already swallowed.
+    """
+    stripped = line.strip()
+    if not stripped or stripped[0] not in "{":
+        return
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        return
+    if not isinstance(parsed, dict):
+        return
+    block_type = parsed.get("type")
+    if block_type in ("tool_use", "function_call"):
+        _maybe_emit_tool_use_span(parsed)
+    elif block_type in ("tool_result", "function_call_output"):
+        _maybe_close_tool_result_span(parsed)
+
 
 class CodexBackend:
     """Spawns OpenAI Codex (`codex`) locally or over SSH.
@@ -213,7 +329,14 @@ class CodexBackend:
                         )
                     if not line:
                         continue
+                    # v17.0.0a2: best-effort tool_use child-span emit;
+                    # never blocks text yield.
+                    _maybe_observe_codex_line(line)
                     if self._absorb_optional_usage_line(line, usage):
+                        continue
+                    if self._is_tool_event_line(line):
+                        # Don't surface tool_use / tool_result JSON
+                        # records as visible text — they're metadata.
                         continue
                     yield line
             finally:
@@ -280,7 +403,14 @@ class CodexBackend:
                         )
                     if not line:
                         continue
+                    # v17.0.0a2: best-effort tool_use child-span emit;
+                    # never blocks text yield.
+                    _maybe_observe_codex_line(line)
                     if self._absorb_optional_usage_line(line, usage):
+                        continue
+                    if self._is_tool_event_line(line):
+                        # Don't surface tool_use / tool_result JSON
+                        # records as visible text — they're metadata.
                         continue
                     yield line
             finally:
@@ -307,6 +437,33 @@ class CodexBackend:
                     )
 
         return _StreamWithUsage(_gen(), usage)
+
+    @staticmethod
+    def _is_tool_event_line(line: str) -> bool:
+        """v17.0.0a2: True if the line parses as a JSON object whose
+        ``type`` is one of the recognised tool-call / tool-result
+        shapes consumed by `_maybe_observe_codex_line`. Used by the
+        streaming path to suppress those lines from the visible
+        text output (they're observability metadata, not user text).
+
+        Tolerates malformed input — anything that isn't a clean JSON
+        object with a known ``type`` is treated as text.
+        """
+        stripped = line.strip()
+        if not stripped or stripped[0] not in "{":
+            return False
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(parsed, dict):
+            return False
+        return parsed.get("type") in (
+            "tool_use",
+            "tool_result",
+            "function_call",
+            "function_call_output",
+        )
 
     @staticmethod
     def _absorb_optional_usage_line(line: str, usage: StreamUsage) -> bool:
