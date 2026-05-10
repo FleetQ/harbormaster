@@ -1,17 +1,16 @@
-"""v9.0.0a6: sidebar polish + palette dynamic-action.
+"""v9.0.0a6 sidebar polish — preserved through the v19.0.0a1 shell rewrite.
 
-Three v8-deferred items consolidated into one phase:
+The v19 3-column workspace shell extracted the sidebar into
+`_partials/_sidebar.html`. The v9 features that survived the rewrite:
 
 * Sidebar Archived group (last_commit_age_days >= 90).
-* Sidebar rail-collapse with localStorage persistence.
 * Sidebar per-host filter dropdown.
-* Palette dynamic-action: typing `Ask <project> <question>` composes
-  a navigate-to-project-with-prefilled-question action without
-  leaving the palette.
+* Palette dynamic-action: typing `Ask <project> <question>` composes a
+  navigate-to-project-with-prefilled-question action.
 
-The `stateBadge(state)` helper unification listed in the v9 plan is
-deferred to v10 — pure refactoring with no observable user value,
-documented in the v9.0.0a6 retro.
+The v9 rail-collapse / mobile-hamburger features were intentionally
+retired in v19 in favor of the fixed 240px sidebar + collapsible
+inspector — see test_app_shell_layout.py for the new contract.
 """
 from __future__ import annotations
 
@@ -22,6 +21,11 @@ from harbormaster.projects import _commit_age_days
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 BASE_HTML = REPO_ROOT / "src" / "harbormaster" / "ui" / "templates" / "base.html"
+SIDEBAR_PARTIAL = (
+    REPO_ROOT
+    / "src" / "harbormaster" / "ui" / "templates"
+    / "_partials" / "_sidebar.html"
+)
 
 
 # -- ProjectInfo.last_commit_age_days ------------------------------------
@@ -57,11 +61,11 @@ def test_commit_age_days_handles_naive_datetime() -> None:
     assert 99 <= age <= 101
 
 
-# -- Sidebar template assertions ----------------------------------------
+# -- Sidebar template assertions (now read from the partial) -------------
 
 
 def test_archived_section_present_in_template() -> None:
-    src = BASE_HTML.read_text()
+    src = SIDEBAR_PARTIAL.read_text()
     assert 'data-sidebar-group="archived"' in src
     assert "visibleArchived()" in src
     assert "_isArchived" in src
@@ -70,32 +74,15 @@ def test_archived_section_present_in_template() -> None:
 def test_archived_threshold_pinned_at_90() -> None:
     """The 90-day threshold is the v9 spec; pin it so future tweaks
     surface in code review."""
-    src = BASE_HTML.read_text()
+    src = SIDEBAR_PARTIAL.read_text()
     assert ">= 90" in src, (
         "archived threshold (90 days) must remain explicit in the "
         "template script — operators referencing the spec depend on it"
     )
 
 
-def test_rail_collapse_state_present() -> None:
-    src = BASE_HTML.read_text()
-    assert "railCollapsed" in src
-    assert "toggleRail()" in src
-    assert "expandRail()" in src
-    assert "hm:sidebar:rail-collapsed" in src  # localStorage key
-
-
-def test_rail_collapsed_offset_main_content() -> None:
-    """When the rail is collapsed the main content's left offset
-    must shrink from 60 to 12 (Tailwind units = 240px → 48px).
-    v10.0.0a3: `ml-` → `left-` (main is now position:fixed)."""
-    src = BASE_HTML.read_text()
-    # Main content has both classes bound conditionally on railCollapsed.
-    assert "railCollapsed ? 'md:left-12' : 'md:left-60'" in src
-
-
 def test_host_filter_dropdown_present() -> None:
-    src = BASE_HTML.read_text()
+    src = SIDEBAR_PARTIAL.read_text()
     assert 'x-model="hostFilter"' in src
     assert "availableHosts" in src
     assert "hm:sidebar:host-filter" in src  # localStorage key
@@ -104,12 +91,12 @@ def test_host_filter_dropdown_present() -> None:
 def test_host_filter_default_all_hosts() -> None:
     """`__all__` is the canonical no-filter sentinel; the dropdown
     default must be that."""
-    src = BASE_HTML.read_text()
+    src = SIDEBAR_PARTIAL.read_text()
     assert "hostFilter: '__all__'" in src
     assert "all hosts" in src  # display label
 
 
-# -- Palette dynamic-action ---------------------------------------------
+# -- Palette dynamic-action (still in base.html) -------------------------
 
 
 def test_palette_dynamic_action_pattern_present() -> None:

@@ -1,0 +1,346 @@
+{# v19.0.0a1: project-navigation sidebar, extracted from base.html.
+
+   Contents (Alpine `projectSidebar()` factory):
+   - host filter dropdown
+   - in-sidebar text filter
+   - Pinned section
+   - Recently asked section
+   - By-language groups
+   - Archived (>= 90d since last commit) section
+   - Ignored projects diagnostic section
+
+   The 3-column workspace shell in base.html owns layout (width, scroll,
+   sticky positioning); this partial only renders the sidebar's interior. #}
+<div x-data="projectSidebar()" x-init="init()" class="p-3">
+  <!-- Host filter dropdown. -->
+  <div class="flex items-center justify-between mb-2">
+    <select x-model="hostFilter"
+            aria-label="Filter projects by host"
+            class="text-[11px] bg-surface-3 border border-border rounded px-1 py-0.5 text-foreground-muted focus:outline-none">
+      <template x-for="h in availableHosts" :key="'host:' + h">
+        <option :value="h" x-text="h === '__all__' ? 'all hosts' : h"></option>
+      </template>
+    </select>
+  </div>
+
+  <!-- Search-within-sidebar. -->
+  <input type="text"
+         x-model="filter"
+         aria-label="Filter projects in sidebar"
+         placeholder="Filter projects…"
+         class="w-full bg-surface-3 border border-border rounded px-2 py-1 text-xs text-foreground placeholder-gray-500 focus:border-accent-strong focus:outline-none mb-3">
+
+  <!-- Pinned. -->
+  <section x-show="visiblePinned().length > 0"
+           data-sidebar-group="pinned"
+           class="mb-3">
+    <h3 class="text-[10px] uppercase tracking-wide text-foreground-subtle mb-1">Pinned</h3>
+    <ul class="space-y-0.5">
+      <template x-for="p in visiblePinned()" :key="'pin:' + p.name">
+        <li>
+          <a :href="`/projects/${encodeURIComponent(p.name)}`"
+             class="flex items-center gap-1.5 text-xs text-foreground-muted hover:bg-gray-800/50 hover:text-accent px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+            <span aria-hidden="true" class="text-warning">★</span>
+            <span class="truncate" x-text="p.name"></span>
+          </a>
+        </li>
+      </template>
+    </ul>
+  </section>
+
+  <!-- Recently asked. -->
+  <section x-show="visibleRecent().length > 0"
+           data-sidebar-group="recent"
+           class="mb-3">
+    <h3 class="text-[10px] uppercase tracking-wide text-foreground-subtle mb-1">Recently asked</h3>
+    <ul class="space-y-0.5">
+      <template x-for="p in visibleRecent()" :key="'recent:' + p.name">
+        <li>
+          <a :href="`/projects/${encodeURIComponent(p.name)}`"
+             class="flex items-center gap-1.5 text-xs text-foreground-muted hover:bg-gray-800/50 hover:text-accent px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+            <span class="truncate" x-text="p.name"></span>
+          </a>
+        </li>
+      </template>
+    </ul>
+  </section>
+
+  <!-- By language. -->
+  <section data-sidebar-group="by-language">
+    <template x-for="lang in sortedLanguages()" :key="'lang:' + lang">
+      <div class="mb-3">
+        <button type="button"
+                @click="toggleLanguage(lang)"
+                :aria-expanded="!languageCollapsed[lang]"
+                :aria-label="`Toggle ${lang} group`"
+                class="text-[10px] uppercase tracking-wide text-foreground-subtle hover:text-foreground-muted mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+          <span aria-hidden="true" x-text="languageCollapsed[lang] ? '▸' : '▾'"></span>
+          <span x-text="lang + ' (' + projectsByLanguage()[lang].length + ')'"></span>
+        </button>
+        <ul x-show="!languageCollapsed[lang]" class="space-y-0.5">
+          <template x-for="p in visibleProjectsForLanguage(lang)" :key="lang + ':' + p.name">
+            <li class="flex items-center group">
+              <a :href="`/projects/${encodeURIComponent(p.name)}`"
+                 class="flex-1 text-xs text-foreground-muted hover:bg-gray-800/50 hover:text-accent px-2 py-1 rounded truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+                 x-text="p.name"></a>
+              <button type="button" @click="togglePin(p.name)"
+                      :aria-label="`${isPinned(p.name) ? 'Unpin' : 'Pin'} ${p.name}`"
+                      :class="isPinned(p.name) ? 'text-warning' : 'text-foreground-subtle group-hover:text-foreground-subtle'"
+                      class="text-xs px-1 hover:text-warning transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                <span aria-hidden="true">★</span>
+              </button>
+            </li>
+          </template>
+        </ul>
+      </div>
+    </template>
+  </section>
+
+  <!-- Archived. -->
+  <section x-show="visibleArchived().length > 0"
+           data-sidebar-group="archived"
+           class="mt-3 mb-3">
+    <button type="button"
+            @click="archivedCollapsed = !archivedCollapsed"
+            :aria-expanded="!archivedCollapsed"
+            aria-label="Toggle archived projects group"
+            class="text-[10px] uppercase tracking-wide text-foreground-subtle hover:text-foreground-muted mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+      <span aria-hidden="true" x-text="archivedCollapsed ? '▸' : '▾'"></span>
+      <span x-text="`Archived (${visibleArchived().length})`"></span>
+    </button>
+    <ul x-show="!archivedCollapsed" class="space-y-0.5">
+      <template x-for="p in visibleArchived()" :key="'archived:' + p.name">
+        <li>
+          <a :href="`/projects/${encodeURIComponent(p.name)}`"
+             class="flex items-center gap-1.5 text-xs text-foreground-subtle hover:bg-gray-800/50 hover:text-accent px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+             :title="`Last commit: ${p.last_commit_age_days} days ago`">
+            <span aria-hidden="true">📦</span>
+            <span class="truncate" x-text="p.name"></span>
+          </a>
+        </li>
+      </template>
+    </ul>
+  </section>
+
+  <p x-show="loading" :aria-hidden="!loading" class="text-xs text-foreground-muted">loading…</p>
+  <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-danger" x-text="error"></p>
+
+  <!-- Ignored projects indicator. -->
+  <section x-show="ignored.count > 0"
+           data-sidebar-group="ignored"
+           class="mt-3 pt-3 border-t border-gray-800/60">
+    <button type="button"
+            @click="ignoredOpen = !ignoredOpen"
+            :aria-expanded="ignoredOpen"
+            aria-label="Toggle ignored projects list"
+            class="text-[10px] uppercase tracking-wide text-foreground-subtle hover:text-foreground-muted mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+      <span aria-hidden="true" x-text="ignoredOpen ? '▾' : '▸'"></span>
+      <span x-text="`Ignored (${ignored.count})`"></span>
+    </button>
+    <ul x-show="ignoredOpen" class="space-y-0.5">
+      <template x-for="name in ignored.names" :key="'ign:' + name">
+        <li class="text-[11px] text-foreground-subtle px-2 py-0.5 truncate"
+            :title="name"
+            x-text="name"></li>
+      </template>
+      <li x-show="ignored.patterns.length > 0"
+          class="text-[10px] text-foreground-subtle px-2 pt-1 italic"
+          :title="`patterns: ${ignored.patterns.join(', ')}`">
+        via <span x-text="ignored.patterns.length"></span> pattern(s)
+      </li>
+    </ul>
+  </section>
+</div>
+
+<script>
+  // v19.0.0a1: projectSidebar() Alpine factory — moved verbatim from
+  // base.html (was v8.0.0a6). The 3-column workspace shell removed
+  // the rail-collapse / mobile-overlay state; that's owned by the
+  // appShell() factory in base.html now.
+  function projectSidebar() {
+    return {
+      projects: [],
+      recentProjects: [],
+      pinned: [],
+      languageCollapsed: {},
+      filter: '',
+      loading: true,
+      error: '',
+      archivedCollapsed: true,
+      hostFilter: '__all__',
+      availableHosts: ['__all__', 'local'],
+      ignored: { patterns: [], count: 0, names: [] },
+      ignoredOpen: false,
+
+      async init() {
+        this._loadPersisted();
+        this.$watch('hostFilter', () => this._persistHost());
+        await Promise.all([
+          this._loadProjects(),
+          this._loadRecent(),
+          this._loadIgnored(),
+        ]);
+      },
+
+      _loadPersisted() {
+        try {
+          const raw = localStorage.getItem('hm:sidebar:pinned');
+          this.pinned = raw ? JSON.parse(raw) : [];
+        } catch (_) { this.pinned = []; }
+        try {
+          const raw = localStorage.getItem('hm:sidebar:lang-collapsed');
+          this.languageCollapsed = raw ? JSON.parse(raw) : {};
+        } catch (_) { this.languageCollapsed = {}; }
+        try {
+          const h = localStorage.getItem('hm:sidebar:host-filter');
+          if (h) this.hostFilter = h;
+        } catch (_) { /* default __all__ */ }
+      },
+
+      _persistPinned() {
+        try { localStorage.setItem('hm:sidebar:pinned', JSON.stringify(this.pinned)); } catch (_) {}
+      },
+
+      _persistCollapsed() {
+        try { localStorage.setItem('hm:sidebar:lang-collapsed', JSON.stringify(this.languageCollapsed)); } catch (_) {}
+      },
+
+      _persistHost() {
+        try { localStorage.setItem('hm:sidebar:host-filter', this.hostFilter); } catch (_) {}
+      },
+
+      async _loadProjects() {
+        try {
+          const r = await hmFetch('/api/projects');
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          this.projects = await r.json();
+          const hosts = new Set(['__all__', 'local']);
+          for (const p of this.projects) {
+            if (typeof p.host === 'string' && p.host) hosts.add(p.host);
+          }
+          this.availableHosts = Array.from(hosts);
+        } catch (e) { this.error = e.message; }
+        finally { this.loading = false; }
+      },
+
+      async _loadIgnored() {
+        try {
+          const r = await hmFetch('/api/ignored-projects');
+          if (!r.ok) return;
+          const data = await r.json();
+          if (data && typeof data.count === 'number') {
+            this.ignored = {
+              patterns: Array.isArray(data.patterns) ? data.patterns : [],
+              count: data.count,
+              names: Array.isArray(data.names) ? data.names : [],
+            };
+          }
+        } catch (_) { /* silent */ }
+      },
+
+      async _loadRecent() {
+        try {
+          const r = await hmFetch('/api/trajectories?limit=20');
+          if (!r.ok) return;
+          const data = await r.json();
+          const seen = new Set();
+          const names = [];
+          for (const t of (data.trajectories || [])) {
+            if (seen.has(t.project)) continue;
+            seen.add(t.project);
+            names.push(t.project);
+            if (names.length >= 5) break;
+          }
+          this.recentProjects = names;
+        } catch (_) { /* silent */ }
+      },
+
+      isPinned(name) { return this.pinned.includes(name); },
+
+      togglePin(name) {
+        if (this.isPinned(name)) {
+          this.pinned = this.pinned.filter(n => n !== name);
+        } else {
+          this.pinned = [...this.pinned, name];
+        }
+        this._persistPinned();
+      },
+
+      toggleLanguage(lang) {
+        this.languageCollapsed = {
+          ...this.languageCollapsed,
+          [lang]: !this.languageCollapsed[lang],
+        };
+        this._persistCollapsed();
+      },
+
+      _matchesFilter(p) {
+        const q = (this.filter || '').trim().toLowerCase();
+        if (!q) return true;
+        return p.name.toLowerCase().includes(q);
+      },
+
+      _matchesHost(p) {
+        if (this.hostFilter === '__all__') return true;
+        const host = p.host || 'local';
+        return host === this.hostFilter;
+      },
+
+      _isArchived(p) {
+        return typeof p.last_commit_age_days === 'number'
+          && p.last_commit_age_days >= 90;
+      },
+
+      visiblePinned() {
+        return this.projects
+          .filter(p => this.isPinned(p.name))
+          .filter(p => this._matchesFilter(p))
+          .filter(p => this._matchesHost(p))
+          .filter(p => !this._isArchived(p));
+      },
+
+      visibleRecent() {
+        const pinnedSet = new Set(this.pinned);
+        return this.recentProjects
+          .filter(name => !pinnedSet.has(name))
+          .map(name => this.projects.find(p => p.name === name))
+          .filter(p => p && this._matchesFilter(p) && this._matchesHost(p)
+                       && !this._isArchived(p));
+      },
+
+      visibleArchived() {
+        const pinnedSet = new Set(this.pinned);
+        return this.projects
+          .filter(p => this._isArchived(p))
+          .filter(p => !pinnedSet.has(p.name))
+          .filter(p => this._matchesFilter(p))
+          .filter(p => this._matchesHost(p));
+      },
+
+      projectsByLanguage() {
+        const groups = {};
+        const pinnedSet = new Set(this.pinned);
+        for (const p of this.projects) {
+          if (pinnedSet.has(p.name)) continue;
+          if (this._isArchived(p)) continue;
+          if (!this._matchesHost(p)) continue;
+          const lang = p.language || 'unknown';
+          (groups[lang] = groups[lang] || []).push(p);
+        }
+        return groups;
+      },
+
+      sortedLanguages() {
+        const groups = this.projectsByLanguage();
+        const keys = Object.keys(groups);
+        const known = keys.filter(k => k !== 'unknown').sort();
+        if (groups['unknown']) known.push('unknown');
+        return known;
+      },
+
+      visibleProjectsForLanguage(lang) {
+        return (this.projectsByLanguage()[lang] || []).filter(p => this._matchesFilter(p));
+      },
+    };
+  }
+</script>
