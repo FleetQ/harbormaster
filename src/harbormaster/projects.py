@@ -61,6 +61,11 @@ class ProjectInfo:
     # no recognised manifest is present. Drives the dashboard "group by
     # language" toggle.
     language: str = "unknown"
+    # v9.0.0a6: integer days since `last_commit['date']`. Drives the
+    # sidebar "Archived" group (>= 90 days). None when last_commit is
+    # absent (no git history). Computed once at discovery time so the
+    # frontend doesn't need to reparse the ISO date.
+    last_commit_age_days: int | None = None
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -177,6 +182,32 @@ def _git_last_commit(path: Path) -> dict[str, str] | None:
         return None
 
 
+def _commit_age_days(last_commit: dict[str, str] | None) -> int | None:
+    """v9.0.0a6: integer days since the last commit's ISO date.
+
+    Returns None when last_commit is missing or its `date` field is
+    malformed. Pure stdlib (datetime.fromisoformat handles `%cI`'s
+    `2026-05-10T14:23:45+00:00` shape on Python 3.11+).
+    """
+    if not last_commit:
+        return None
+    iso = last_commit.get("date")
+    if not iso:
+        return None
+    from datetime import UTC, datetime
+
+    try:
+        commit_dt = datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+    now = datetime.now(tz=UTC)
+    if commit_dt.tzinfo is None:
+        # Naive datetimes from %cI are unusual but defend anyway.
+        commit_dt = commit_dt.replace(tzinfo=UTC)
+    delta = now - commit_dt
+    return max(0, delta.days)
+
+
 def _project_brief(path: Path) -> str:
     for fname in ("CLAUDE.md", "README.md", "README.txt"):
         f = path / fname
@@ -271,14 +302,16 @@ def discover_projects(config: ProjectsConfig) -> list[ProjectInfo]:
                     and not (resolved / ".serena").is_dir():
                 continue
             seen.add(resolved)
+            last_commit = _git_last_commit(resolved)
             projects.append(ProjectInfo(
                 name=resolved.name,
                 path=str(resolved),
-                last_commit=_git_last_commit(resolved),
+                last_commit=last_commit,
                 has_serena=(resolved / ".serena").is_dir(),
                 has_claude_md=(resolved / "CLAUDE.md").is_file(),
                 brief=_project_brief(resolved),
                 language=_detect_language(resolved),
+                last_commit_age_days=_commit_age_days(last_commit),
             ))
 
     projects.sort(
