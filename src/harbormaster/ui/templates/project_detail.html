@@ -104,14 +104,25 @@
             <!-- v6.0.0a2: three escalation tiers driven by tier(t):
                    "fresh" → cyan "● new" badge
                    "stale" → amber spinner ("writing back…")
-                   "stuck" → red badge ("writeback stuck?") -->
+                   "stuck" → red badge ("writeback stuck?")
+                 v8.0.0a2: each tier carries an explicit aria-label so
+                 screen readers announce the writeback state clearly. -->
             <span x-show="tier(t) === 'stale'"
+                  :aria-hidden="tier(t) !== 'stale'"
+                  role="status"
+                  aria-label="Writing back to FleetQ"
                   class="inline-block w-2 h-2 border border-amber-400 border-t-transparent rounded-full animate-spin"
                   title="writing back…"></span>
             <span x-show="tier(t) === 'stuck'"
+                  :aria-hidden="tier(t) !== 'stuck'"
+                  role="alert"
+                  aria-label="Trajectory writeback stuck"
                   class="text-rose-400 font-bold"
-                  title="server hasn't confirmed this entry — writeback may be stuck">⚠&nbsp;stuck?</span>
-            <span x-show="tier(t) === 'fresh'" class="text-cyan-400 font-bold">●&nbsp;new</span>
+                  title="server hasn't confirmed this entry — writeback may be stuck"><span aria-hidden="true">⚠</span>&nbsp;stuck?</span>
+            <span x-show="tier(t) === 'fresh'"
+                  :aria-hidden="tier(t) !== 'fresh'"
+                  aria-label="New trajectory"
+                  class="text-cyan-400 font-bold"><span aria-hidden="true">●</span>&nbsp;new</span>
             <span x-text="t.tool"></span>
             <span x-text="formatDate(t.created_at || t.timestamp_s)"></span>
             <span x-text="open ? '▾' : '▸'"></span>
