@@ -118,6 +118,13 @@
                   class="text-xs px-2 py-0.5 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 disabled:opacity-50">
             <span x-text="saving ? 'Saving…' : 'Save'"></span>
           </button>
+          <!-- v11.0.0a2: revision history toggle -->
+          <button type="button" x-show="selected"
+                  @click="toggleHistory()"
+                  aria-label="Toggle revision history"
+                  class="text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-amber-700 text-gray-300 hover:text-amber-300">
+            <span x-text="showHistory ? 'Hide history' : 'History'"></span>
+          </button>
         </div>
       </div>
       <p x-show="saveError" :aria-hidden="!saveError" role="alert"
@@ -127,6 +134,41 @@
       <textarea x-show="editing" x-model="draft"
                 aria-label="Memory file source"
                 class="w-full min-h-[20rem] bg-gray-950 border border-gray-700 rounded p-2 text-xs font-mono text-gray-200"></textarea>
+      <!-- v11.0.0a2: revision history panel -->
+      <aside x-show="showHistory" class="mt-3 border-t border-gray-800 pt-3">
+        <p class="text-xs text-gray-400 mb-2">Revision history (newest first)</p>
+        <p x-show="historyError" role="alert" class="text-xs text-red-400 mb-2"
+           x-text="historyError"></p>
+        <ul class="space-y-1 max-h-48 overflow-auto">
+          <template x-for="r in revisions" :key="r.id">
+            <li class="flex items-center gap-2 text-xs">
+              <button type="button" @click="loadRevision(r.id)"
+                      :aria-label="`Preview revision ${r.id}`"
+                      class="text-cyan-300 hover:text-cyan-100 underline-offset-2 hover:underline font-mono">
+                #<span x-text="r.id"></span>
+              </button>
+              <span class="text-gray-500"
+                    x-text="new Date(r.saved_at * 1000).toLocaleString()"></span>
+              <span x-show="r.bytes_diff !== null && r.bytes_diff !== undefined"
+                    class="text-gray-600"
+                    x-text="(r.bytes_diff >= 0 ? '+' : '') + r.bytes_diff + 'B'"></span>
+            </li>
+          </template>
+          <li x-show="revisions.length === 0 && !historyError"
+              class="text-xs text-gray-600">No prior revisions on file.</li>
+        </ul>
+        <div x-show="revisionPreview" class="mt-3 border border-amber-900/40 rounded bg-gray-950 p-2">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs text-amber-300">Revision <span x-text="revisionPreviewId"></span> (read-only)</span>
+            <button type="button" @click="copyRevisionToClipboard()"
+                    class="text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-cyan-700 text-gray-300 hover:text-cyan-300">
+              Copy
+            </button>
+          </div>
+          <pre class="text-xs whitespace-pre-wrap text-gray-200 max-h-64 overflow-auto"
+               x-text="revisionPreview"></pre>
+        </div>
+      </aside>
     </article>
   </div>
 
@@ -179,6 +221,12 @@
       newContent: '',
       creating: false,
       createError: '',
+      // v11.0.0a2: revision history state
+      showHistory: false,
+      revisions: [],
+      historyError: '',
+      revisionPreview: '',
+      revisionPreviewId: null,
 
       _fileUrl(filename) {
         return `/api/projects/${encodeURIComponent(this.project)}/memories/`
@@ -293,6 +341,57 @@
           this.createError = 'create failed: ' + e.message;
         } finally {
           this.creating = false;
+        }
+      },
+
+      // v11.0.0a2: revision-history helpers.
+      async toggleHistory() {
+        this.showHistory = !this.showHistory;
+        this.revisionPreview = '';
+        this.revisionPreviewId = null;
+        if (!this.showHistory || !this.selected) return;
+        await this.loadHistory();
+      },
+
+      async loadHistory() {
+        this.historyError = '';
+        this.revisions = [];
+        if (!this.selected) return;
+        try {
+          const url = `/api/projects/${encodeURIComponent(this.project)}`
+                      + `/memory-history?file=`
+                      + encodeURIComponent(this.selected.name);
+          const r = await hmFetch(url);
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const data = await r.json();
+          this.revisions = Array.isArray(data.revisions) ? data.revisions : [];
+        } catch (e) {
+          this.historyError = 'failed to load history: ' + e.message;
+        }
+      },
+
+      async loadRevision(revId) {
+        if (!this.selected) return;
+        try {
+          const url = `/api/projects/${encodeURIComponent(this.project)}`
+                      + `/memory-revisions/${encodeURIComponent(revId)}`
+                      + `?file=` + encodeURIComponent(this.selected.name);
+          const r = await hmFetch(url);
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const text = await r.text();
+          this.revisionPreview = text;
+          this.revisionPreviewId = revId;
+        } catch (e) {
+          this.historyError = 'failed to load revision: ' + e.message;
+        }
+      },
+
+      async copyRevisionToClipboard() {
+        if (!this.revisionPreview) return;
+        try {
+          await navigator.clipboard.writeText(this.revisionPreview);
+        } catch (e) {
+          this.historyError = 'clipboard error: ' + (e && e.message ? e.message : e);
         }
       },
     };

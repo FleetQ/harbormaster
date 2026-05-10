@@ -1039,6 +1039,16 @@ def register_routes(
             raise HTTPException(500, "write failed") from exc
 
         st = target.stat()
+        # v11.0.0a2: append revision row. Best-effort: never block the
+        # write response if the revisions DB is misconfigured.
+        try:
+            from harbormaster.ui.memory_revisions import memory_revisions
+            memory_revisions.record(
+                project=name, file=file_token,
+                content=body.content, saved_at=int(st.st_mtime),
+            )
+        except Exception:  # noqa: BLE001
+            pass
         return {
             "project": name,
             "file": file_token,
@@ -1086,6 +1096,15 @@ def register_routes(
             raise HTTPException(500, "write failed") from exc
 
         st = target.stat()
+        # v11.0.0a2: append revision row. Best-effort.
+        try:
+            from harbormaster.ui.memory_revisions import memory_revisions
+            memory_revisions.record(
+                project=name, file=body.filename,
+                content=body.content, saved_at=int(st.st_mtime),
+            )
+        except Exception:  # noqa: BLE001
+            pass
         return {
             "project": name,
             "file": body.filename,
@@ -1134,6 +1153,73 @@ def register_routes(
             raise HTTPException(500, "read failed") from exc
 
         return Response(content=text, media_type="text/markdown; charset=utf-8")
+
+    # ----- v11.0.0a2: per-file memory revision history -----------------
+    # `GET /api/projects/{name}/memory-history?file=<token>` — returns
+    # metadata for each saved revision (id + saved_at + bytes_diff,
+    # newest first). Content is NOT included; fetch via the per-rev
+    # endpoint below.
+    # `GET /api/projects/{name}/memory-revisions/{rev_id}?file=<token>`
+    # — returns the persisted content of a specific revision.
+    # The `?file=` query design avoids path-token collisions with the
+    # existing `{file_token:path}` catch-all on the memory viewer.
+
+    @app.get("/api/projects/{name}/memory-history")
+    async def get_memory_history(
+        name: str, file: str,
+    ) -> dict[str, object]:
+        from harbormaster.projects import (
+            validate_project_name as _validate_project_name,
+        )
+        from harbormaster.ui.memory_revisions import memory_revisions
+
+        try:
+            _validate_project_name(name)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        if not file:
+            raise HTTPException(400, "?file= is required")
+
+        revs = memory_revisions.history(project=name, file=file)
+        return {
+            "project": name,
+            "file": file,
+            "count": len(revs),
+            "revisions": [
+                {
+                    "id": r.id,
+                    "saved_at": r.saved_at,
+                    "bytes_diff": r.bytes_diff,
+                }
+                for r in revs
+            ],
+        }
+
+    @app.get("/api/projects/{name}/memory-revisions/{rev_id}")
+    async def get_memory_revision(
+        name: str, rev_id: int, file: str,
+    ) -> Response:
+        from harbormaster.projects import (
+            validate_project_name as _validate_project_name,
+        )
+        from harbormaster.ui.memory_revisions import memory_revisions
+
+        try:
+            _validate_project_name(name)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        if not file:
+            raise HTTPException(400, "?file= is required")
+
+        rev = memory_revisions.get_revision(
+            project=name, file=file, rev_id=rev_id,
+        )
+        if rev is None or rev.content is None:
+            raise HTTPException(404, "revision not found")
+        return Response(
+            content=rev.content,
+            media_type="text/markdown; charset=utf-8",
+        )
 
     # One ManifestCache per UI process — first hit warm-loads, subsequent
     # /api/graph polls hit the cache and stat the manifest file only.

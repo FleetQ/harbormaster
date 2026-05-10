@@ -18,3 +18,9 @@ _NETWORK_LOG_TMPDIR = tempfile.mkdtemp(prefix="hm-tests-network-log-")
 os.environ["HARBORMASTER_NETWORK_LOG_DB"] = str(
     Path(_NETWORK_LOG_TMPDIR) / "network_log.db"
 )
+
+# v11.0.0a2: same isolation for the memory-revisions DB.
+_MEMORY_REVISIONS_TMPDIR = tempfile.mkdtemp(prefix="hm-tests-memory-revisions-")
+os.environ["HARBORMASTER_MEMORY_REVISIONS_DB"] = str(
+    Path(_MEMORY_REVISIONS_TMPDIR) / "memory_revisions.db"
+)
