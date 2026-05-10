@@ -331,6 +331,64 @@ def register_routes(
     async def api_health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
+    @app.post("/api/auth/cookie")
+    async def set_auth_cookie(request: Request) -> Response:
+        """v12.0.0a6: bridge bearer-header auth to a cookie that
+        browser EventSource can carry.
+
+        Browsers can't set custom headers on EventSource connections,
+        so SSE streams previously needed a query-param token (less
+        secure — the token sat in URLs and access logs). This endpoint
+        is itself bearer-protected by the global middleware: hitting
+        it with a valid `Authorization: Bearer ...` header sets the
+        `hm-auth` cookie carrying the same value, so all subsequent
+        SSE / fetch calls authenticate via the cookie WITHOUT needing
+        to be in the URL.
+
+        Cookie attributes:
+          - HttpOnly:  not readable by JS (defence against XSS).
+          - SameSite=Strict: never sent cross-origin.
+          - Secure:    set when the request scheme is https.
+          - Max-Age:   12 hours (operator session lifetime).
+          - Path=/:    valid for every endpoint under the UI.
+
+        Auth shape: the middleware accepts EITHER the Bearer header
+        OR the `hm-auth` cookie, so this endpoint can be called the
+        first time with a header, then ignored thereafter.
+        """
+        from harbormaster.transport import HM_AUTH_COOKIE_NAME
+
+        # Extract the token the middleware just validated. The header
+        # is "Bearer <token>"; we strip the prefix to get the raw
+        # value for the cookie. A request reaching this handler
+        # already passed middleware so we know one of {header, cookie}
+        # is present and valid.
+        authz = request.headers.get("Authorization", "")
+        if authz.startswith("Bearer "):
+            token = authz[len("Bearer "):]
+        else:
+            # Already authenticated via cookie — re-set it to refresh
+            # the Max-Age window. (Idempotent: same value, same path.)
+            token = request.cookies.get(HM_AUTH_COOKIE_NAME, "")
+        if not token:
+            raise HTTPException(401, "no token to bind to cookie")
+        is_https = request.url.scheme == "https"
+        resp = Response(
+            content='{"ok": true}',
+            media_type="application/json",
+            status_code=200,
+        )
+        resp.set_cookie(
+            key=HM_AUTH_COOKIE_NAME,
+            value=token,
+            max_age=12 * 60 * 60,  # 12h
+            httponly=True,
+            samesite="strict",
+            secure=is_https,
+            path="/",
+        )
+        return resp
+
     @app.get("/dispatcher", response_class=HTMLResponse)
     async def dispatcher_page(request: Request) -> HTMLResponse:
         """v9.0.0a3: trace waterfall surface.

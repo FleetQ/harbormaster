@@ -49,8 +49,18 @@ def require_auth_token_or_exit(env_var: str, transport: str) -> str:
     return token
 
 
+HM_AUTH_COOKIE_NAME = "hm-auth"
+
+
 def build_bearer_middleware(expected_token: str) -> Any:
     """Return a Starlette BaseHTTPMiddleware subclass enforcing bearer auth.
+
+    Accepted auth shapes (v12.0.0a6 — cookie path added):
+      - `Authorization: Bearer <token>` header (existing — works for
+        every HTTP client + the dashboard's hmFetch helper).
+      - `hm-auth` cookie carrying the same token (NEW — required for
+        browser EventSource which can't set headers; previously the
+        dashboard depended on a query-param token, less secure).
 
     Returned class is curried with the expected token, so callers do:
         app.add_middleware(build_bearer_middleware(token))
@@ -62,16 +72,31 @@ def build_bearer_middleware(expected_token: str) -> Any:
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.responses import Response
 
-    expected = f"Bearer {expected_token}"
+    expected_header = f"Bearer {expected_token}"
 
     class BearerAuthMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):  # type: ignore[no-untyped-def]
             authz = request.headers.get("Authorization", "")
-            if not authz:
-                return Response("missing Authorization header", status_code=401)
-            if authz != expected:
-                return Response("invalid bearer token", status_code=401)
-            return await call_next(request)
+            if authz:
+                if authz != expected_header:
+                    return Response(
+                        "invalid bearer token", status_code=401,
+                    )
+                return await call_next(request)
+            # v12.0.0a6: cookie fallback for browser EventSource which
+            # cannot send custom headers. The cookie value carries the
+            # raw token (no "Bearer " prefix).
+            cookie_token = request.cookies.get(HM_AUTH_COOKIE_NAME, "")
+            if cookie_token:
+                if cookie_token != expected_token:
+                    return Response(
+                        "invalid bearer cookie", status_code=401,
+                    )
+                return await call_next(request)
+            return Response(
+                "missing Authorization header or hm-auth cookie",
+                status_code=401,
+            )
 
     return BearerAuthMiddleware
 
