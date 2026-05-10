@@ -956,6 +956,11 @@ def test_mcp_proxy_streams_emits_heartbeat_for_slow_tool(
     from harbormaster.ui import routes as routes_module
 
     monkeypatch.setattr(routes_module, "_HEARTBEAT_INTERVAL_S", 0.05)
+    # v11.0.0a7: streaming-surface heartbeat is now configurable via
+    # config.server.heartbeat_interval_streaming_s. Override on the
+    # populated_config fixture so the test still drives the cadence
+    # down to 50ms.
+    populated_config.server.heartbeat_interval_streaming_s = 0.05
 
     mcp = FastMCP("harbormaster-test")
 
