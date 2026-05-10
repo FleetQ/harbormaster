@@ -61,7 +61,9 @@ def test_plugins_enabled_badge_has_icon_and_aria_label() -> None:
     # v13.0.0a2: text-gray-300 → text-foreground-muted (semantic-token migration).
     idx = src.find('"text-sm font-bold text-foreground-muted">Plugins')
     assert idx != -1
-    block = src[idx : idx + 800]
+    # v14.0.0a6: window grew to 1600 to clear the new host-filter dropdown
+    # markup before the badge call.
+    block = src[idx : idx + 1600]
     assert "stateBadgeHtml(pluginsBadgeProps())" in block
     # Props builder retains the same icon + aria-label semantics.
     assert "pluginsBadgeProps()" in src
