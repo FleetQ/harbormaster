@@ -58,6 +58,20 @@ class ServerConfig(BaseModel):
     log_level: LogLevel = "info"
     trajectory_retention_days: int = Field(default=90, gt=0)
 
+    # v11.0.0a7: per-surface SSE heartbeat tuning. Each value is the
+    # idle-second budget before a heartbeat frame is emitted. Different
+    # surfaces have different needs:
+    #   - streaming (ask/delegate/fan-out) — keep 5s; proxy-keepalive
+    #     critical for long claude-p invocations.
+    #   - network feed — 30s; events are infrequent, frequent
+    #     heartbeats are pure noise.
+    #   - dispatcher trace — 10s; mid-frequency.
+    # Override via [server] heartbeat_interval_<surface>_s = <float>
+    # in harbormaster.toml.
+    heartbeat_interval_streaming_s: float = Field(default=5.0, gt=0)
+    heartbeat_interval_network_s: float = Field(default=30.0, gt=0)
+    heartbeat_interval_trace_s: float = Field(default=10.0, gt=0)
+
 
 class StorageConfig(BaseModel):
     model_config = _FORBID_EXTRA

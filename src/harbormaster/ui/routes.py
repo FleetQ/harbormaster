@@ -199,8 +199,14 @@ def register_routes(
         Subscribers receive an `event: event` frame per new entry
         plus a periodic heartbeat so intermediate proxies don't
         idle-time-out the connection.
+
+        v11.0.0a7: heartbeat cadence configurable via
+        ``[server] heartbeat_interval_network_s``. Default 30s
+        (events are infrequent, frequent heartbeats are pure noise).
         """
         from harbormaster.ui.network_log import network_log
+
+        heartbeat_s = config.server.heartbeat_interval_network_s
 
         async def gen() -> AsyncIterator[dict[str, str]]:
             queue = network_log.subscribe()
@@ -209,7 +215,7 @@ def register_routes(
                     try:
                         ev = await asyncio.wait_for(
                             queue.get(),
-                            timeout=_HEARTBEAT_INTERVAL_S,
+                            timeout=heartbeat_s,
                         )
                     except TimeoutError:
                         yield {"event": "heartbeat", "data": "{}"}
@@ -431,7 +437,10 @@ def register_routes(
                         }
                     if events:
                         last_heartbeat = time.time()
-                    elif time.time() - last_heartbeat >= _HEARTBEAT_INTERVAL_S:
+                    elif (
+                        time.time() - last_heartbeat
+                        >= config.server.heartbeat_interval_trace_s
+                    ):
                         yield {
                             "event": "heartbeat",
                             "data": json.dumps({"ts": time.time()}),
@@ -1694,9 +1703,19 @@ async def _stream_dispatch(
     # field is part of the protocol contract for typed events.
     next_id = _StreamIdSeq()
 
+    # v11.0.0a7: per-surface heartbeat tuning. Streaming defaults to
+    # 5s (proxy-keepalive critical) but can be overridden via
+    # [server] heartbeat_interval_streaming_s.
+    streaming_heartbeat = (
+        config.server.heartbeat_interval_streaming_s
+        if config is not None
+        else _HEARTBEAT_INTERVAL_S
+    )
     while not task.done():
         try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=_HEARTBEAT_INTERVAL_S)
+            await asyncio.wait_for(
+                asyncio.shield(task), timeout=streaming_heartbeat,
+            )
         except TimeoutError:
             elapsed_ms = int((time.monotonic() - start) * 1000)
             yield {
