@@ -125,6 +125,20 @@
                   class="text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-amber-700 text-gray-300 hover:text-amber-300">
             <span x-text="showHistory ? 'Hide history' : 'History'"></span>
           </button>
+          <!-- v12.0.0a4: diff against revision. Visible when the
+               history panel is open AND there's at least one revision
+               on file. Picks revision `from_` from the dropdown and
+               diffs against current. -->
+          <select x-show="showHistory && revisions.length > 0"
+                  x-model="diffFrom"
+                  @change="loadDiff()"
+                  aria-label="Diff against revision"
+                  class="text-xs px-1 py-0.5 rounded border border-gray-700 bg-gray-950 text-gray-300">
+            <option value="">Diff against…</option>
+            <template x-for="r in revisions" :key="r.id">
+              <option :value="r.id" x-text="`#${r.id} (${new Date(r.saved_at * 1000).toLocaleDateString()})`"></option>
+            </template>
+          </select>
         </div>
       </div>
       <p x-show="saveError" :aria-hidden="!saveError" role="alert"
@@ -175,6 +189,18 @@
           </div>
           <pre class="text-xs whitespace-pre-wrap text-gray-200 max-h-64 overflow-auto"
                x-text="revisionPreview"></pre>
+        </div>
+        <!-- v12.0.0a4: unified diff vs current. Shown when the
+             "Diff against revision" dropdown has a selection. -->
+        <div x-show="diffOutput || diffError" class="mt-3 border border-cyan-900/40 rounded bg-gray-950 p-2">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs text-cyan-300">Diff: revision <span x-text="diffFrom"></span> → current</span>
+          </div>
+          <p x-show="diffError" role="alert" class="text-xs text-red-400 mb-2"
+             x-text="diffError"></p>
+          <pre x-show="diffOutput && !diffError"
+               class="text-xs whitespace-pre text-gray-200 max-h-64 overflow-auto font-mono"
+               x-text="diffOutput"></pre>
         </div>
       </aside>
     </article>
@@ -232,6 +258,12 @@
       // v11.0.0a2: revision history state
       showHistory: false,
       revisions: [],
+      // v12.0.0a4: diff-against-revision state. `diffFrom` is the
+      // revision id selected in the dropdown; `diffOutput` holds the
+      // unified-diff text returned by the server.
+      diffFrom: '',
+      diffOutput: '',
+      diffError: '',
       historyError: '',
       revisionPreview: '',
       revisionPreviewId: null,
@@ -398,6 +430,10 @@
         this.showHistory = !this.showHistory;
         this.revisionPreview = '';
         this.revisionPreviewId = null;
+        // v12.0.0a4: clear the diff dropdown + output when closing.
+        this.diffFrom = '';
+        this.diffOutput = '';
+        this.diffError = '';
         if (!this.showHistory || !this.selected) return;
         await this.loadHistory();
       },
@@ -441,6 +477,31 @@
           await navigator.clipboard.writeText(this.revisionPreview);
         } catch (e) {
           this.historyError = 'clipboard error: ' + (e && e.message ? e.message : e);
+        }
+      },
+
+      // v12.0.0a4: diff against revision. `diffFrom` carries the
+      // selected revision id from the dropdown; the diff is computed
+      // server-side via difflib.unified_diff against the current
+      // on-disk content.
+      async loadDiff() {
+        this.diffOutput = '';
+        this.diffError = '';
+        if (!this.diffFrom || !this.selected) return;
+        try {
+          const url = `/api/projects/${encodeURIComponent(this.project)}`
+                      + `/memory-revisions/diff?from=${encodeURIComponent(this.diffFrom)}`
+                      + `&file=` + encodeURIComponent(this.selected.name);
+          const r = await hmFetch(url);
+          if (!r.ok) {
+            let detail = 'HTTP ' + r.status;
+            try { const j = await r.json(); detail = j.detail || detail; } catch (_) {}
+            throw new Error(detail);
+          }
+          this.diffOutput = await r.text();
+          if (!this.diffOutput) this.diffOutput = '(no differences)';
+        } catch (e) {
+          this.diffError = 'failed to load diff: ' + e.message;
         }
       },
     };

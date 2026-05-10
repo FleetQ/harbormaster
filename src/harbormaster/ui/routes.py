@@ -28,7 +28,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -1282,6 +1282,89 @@ def register_routes(
                 for r in revs
             ],
         }
+
+    @app.get("/api/projects/{name}/memory-revisions/diff")
+    async def get_memory_revision_diff(
+        name: str, file: str,
+        from_: int = Query(..., alias="from"),
+        to: int | None = None,
+    ) -> Response:
+        """v12.0.0a4: unified-diff endpoint for memory revisions.
+
+        - `?from=<rev_id_a>&to=<rev_id_b>` diffs revision A → revision B
+          (both must exist on file).
+        - `?from=<rev_id_a>` (no `to`) diffs revision A → the current
+          on-disk file content. This is the common operator action:
+          "what changed between this revision and now?".
+
+        Output is a `text/plain; charset=utf-8` unified diff string
+        produced by `difflib.unified_diff`. The fromfile / tofile
+        labels carry the revision ids so the diff is self-describing.
+        """
+        import difflib
+
+        from harbormaster.projects import (
+            resolve_project,
+        )
+        from harbormaster.projects import (
+            validate_project_name as _validate_project_name,
+        )
+        from harbormaster.ui.memory_revisions import memory_revisions
+
+        try:
+            _validate_project_name(name)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        if not file:
+            raise HTTPException(400, "?file= is required")
+
+        rev_from = memory_revisions.get_revision(
+            project=name, file=file, rev_id=from_,
+        )
+        if rev_from is None or rev_from.content is None:
+            raise HTTPException(404, "from revision not found")
+
+        if to is not None:
+            rev_to = memory_revisions.get_revision(
+                project=name, file=file, rev_id=to,
+            )
+            if rev_to is None or rev_to.content is None:
+                raise HTTPException(404, "to revision not found")
+            to_content = rev_to.content
+            to_label = f"revision {to}"
+        else:
+            # Diff against current on-disk content.
+            try:
+                cwd = resolve_project(
+                    name, config.projects,
+                    ignore_patterns=config.ignore.patterns,
+                )
+            except ValueError as e:
+                raise HTTPException(404, str(e)) from e
+            target = (cwd / file).resolve()
+            # Stay within the project root (defence against `?file=../`).
+            try:
+                target.relative_to(cwd.resolve())
+            except ValueError as e:
+                raise HTTPException(400, "file path escapes project") from e
+            try:
+                to_content = target.read_text(encoding="utf-8")
+            except FileNotFoundError as e:
+                raise HTTPException(404, "current file not found") from e
+            to_label = "current"
+
+        diff_lines = difflib.unified_diff(
+            rev_from.content.splitlines(keepends=True),
+            to_content.splitlines(keepends=True),
+            fromfile=f"revision {from_}",
+            tofile=to_label,
+            lineterm="",
+        )
+        body = "".join(diff_lines)
+        return Response(
+            content=body,
+            media_type="text/plain; charset=utf-8",
+        )
 
     @app.get("/api/projects/{name}/memory-revisions/{rev_id}")
     async def get_memory_revision(
