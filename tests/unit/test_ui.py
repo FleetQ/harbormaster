@@ -1100,11 +1100,19 @@ async def test_stream_ask_project_local_yields_chunk_events_and_final_result(
         events.append(evt)
 
     types = [e["event"] for e in events]
-    assert types == ["chunk", "chunk", "result"]
+    # v9.0.0a5: typed events ship alongside legacy `chunk` for one
+    # full version. Order: chunk, token, chunk, token, usage, result.
+    assert types == ["chunk", "token", "chunk", "token", "usage", "result"]
 
-    assert _json.loads(events[0]["data"])["text"] == "Hello, "
-    assert _json.loads(events[1]["data"])["text"] == "world."
-    final = _json.loads(events[2]["data"])
+    # Legacy `chunk` event keeps `text` field — backwards-compat.
+    chunk_events = [e for e in events if e["event"] == "chunk"]
+    assert _json.loads(chunk_events[0]["data"])["text"] == "Hello, "
+    assert _json.loads(chunk_events[1]["data"])["text"] == "world."
+    # New `token` event uses `delta`.
+    token_events = [e for e in events if e["event"] == "token"]
+    assert _json.loads(token_events[0]["data"])["delta"] == "Hello, "
+    assert _json.loads(token_events[1]["data"])["delta"] == "world."
+    final = _json.loads(events[-1]["data"])
     assert final["result"]["content"][0]["text"] == "Hello, world."
 
 
@@ -1329,7 +1337,8 @@ async def test_stream_local_tool_delegate_task_yields_chunks(
         events.append(evt)
 
     types = [e["event"] for e in events]
-    assert types == ["chunk", "chunk", "result"]
+    # v9.0.0a5: typed events ship alongside legacy `chunk`.
+    assert types == ["chunk", "token", "chunk", "token", "usage", "result"]
 
     final = _json.loads(events[-1]["data"])
     assert final["result"]["content"][0]["text"] == "Plan: 1) read files"
