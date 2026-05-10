@@ -95,7 +95,11 @@ def test_root_returns_dashboard_html(populated_config):
     # Stack tags (CDN-loaded — important for the markup contract)
     assert "tailwindcss" in body
     assert "alpinejs" in body
-    assert "htmx" in body
+    # v8.0.0a7: HTMX dropped — no `hx-*` attributes were ever in the
+    # templates (audit confirmed in Phase 1) so the script tag was
+    # pure download cost. Audit lives in
+    # tests/ui/test_phase7_distribution.py.
+    assert "htmx" not in body
 
 
 def test_root_links_to_api_endpoints(populated_config):
