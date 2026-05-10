@@ -26,12 +26,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DOC_PATH = REPO_ROOT / "docs" / "operator-config-reference.md"
 
 
-def find_undocumented(doc_path: Path) -> list[str]:
-    """Return a list of `<Model>.<field>` strings that are missing
-    from the doc."""
+def find_undocumented(doc_path: Path) -> list[tuple[str, str, object, object]]:
+    """Return a list of ``(model_name, field_name, type_repr, default)``
+    tuples for fields missing from the doc.
+
+    v16.0.0a2: full ``FieldInfo`` extracted per offender so the
+    suggested-edit emitter has type + default to render.
+    """
     # Importing here so a missing dependency at install time still
     # leaves --help working.
     from pydantic import BaseModel
+    from pydantic_core import PydanticUndefined
 
     from harbormaster.config import HarbormasterConfig
 
@@ -39,7 +44,7 @@ def find_undocumented(doc_path: Path) -> list[str]:
 
     seen: set[type[BaseModel]] = set()
     todo: list[type[BaseModel]] = [HarbormasterConfig]
-    missing: list[str] = []
+    missing: list[tuple[str, str, object, object]] = []
 
     while todo:
         cls = todo.pop()
@@ -57,8 +62,59 @@ def find_undocumented(doc_path: Path) -> list[str]:
                     if isinstance(a, type) and issubclass(a, BaseModel):
                         todo.append(a)
             if f"`{field_name}`" not in text and field_name not in text:
-                missing.append(f"{cls.__name__}.{field_name}")
+                # Format the type annotation (drop module prefix when present).
+                if hasattr(ann, "__name__"):
+                    type_repr: object = ann.__name__
+                else:
+                    type_repr = repr(ann).replace("typing.", "")
+                # Default — `PydanticUndefined` means the field is required.
+                if field_info.default is not PydanticUndefined:
+                    default: object = field_info.default
+                elif field_info.default_factory is not None:
+                    try:
+                        default = field_info.default_factory()  # type: ignore[call-arg]
+                    except Exception:
+                        default = "<factory>"
+                else:
+                    default = "<required>"
+                missing.append((cls.__name__, field_name, type_repr, default))
     return missing
+
+
+def render_suggested_edit(
+    missing: list[tuple[str, str, object, object]],
+) -> str:
+    """v16.0.0a2: emit a copy-paste markdown block listing each
+    undocumented field with its model, type, and default. Operators
+    paste the block verbatim into ``operator-config-reference.md``
+    under the right ``[section]`` heading.
+    """
+    if not missing:
+        return ""
+    lines: list[str] = [
+        "",
+        "# --- copy-paste into docs/operator-config-reference.md ---",
+        "",
+    ]
+    # Group by model so the operator can put each block under the
+    # right `[section]` heading.
+    by_model: dict[str, list[tuple[str, object, object]]] = {}
+    for model_name, field_name, type_repr, default in missing:
+        by_model.setdefault(model_name, []).append(
+            (field_name, type_repr, default),
+        )
+    for model_name in sorted(by_model.keys()):
+        lines.append(f"### {model_name}")
+        lines.append("")
+        for field_name, type_repr, default in by_model[model_name]:
+            default_repr = repr(default) if not isinstance(default, str) else default
+            lines.append(
+                f"- `{field_name}` (`{type_repr}`, default `{default_repr}`) — "
+                "DESCRIBE behaviour and operator impact here.",
+            )
+        lines.append("")
+    lines.append("# --- end paste block ---")
+    return "\n".join(lines) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -82,10 +138,17 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         sys.stderr.write(
             "check_config_doc_parity: undocumented config fields:\n"
-            + "".join(f"  - {m}\n" for m in missing)
+            + "".join(
+                f"  - {model}.{field}\n" for model, field, _t, _d in missing
+            )
             + f"\nFix: add the field to {args.doc} (any backtick or "
             "bare mention counts).\n",
         )
+        # v16.0.0a2: emit a copy-paste-ready markdown stanza on stderr
+        # so the operator doesn't have to look up types + defaults by
+        # hand. The block is delimited by `# ---` markers so it's
+        # trivially greppable in CI logs.
+        sys.stderr.write(render_suggested_edit(missing))
         return 1
     sys.stdout.write(
         f"check_config_doc_parity: OK ({args.doc.name})\n",

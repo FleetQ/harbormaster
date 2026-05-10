@@ -232,11 +232,22 @@ Two repo-local hooks ship in [`.pre-commit-config.yaml`](.pre-commit-config.yaml
 Install once:
 
 ```sh
-pipx install pre-commit
-pre-commit install
+# v16.0.0a2: pre-commit ships in the [dev] extra, so the second
+# command just wires the hook into .git/hooks/pre-commit.
+uv sync --extra dev
+bash scripts/post_sync_install_hooks.sh
 ```
 
+(Or, if you'd rather use a system / pipx pre-commit:
+`pipx install pre-commit && pre-commit install`.)
+
 Both hooks then run on every `git commit`.
+
+If `harbormaster-config-doc-parity` flags an undocumented field, it
+also emits a copy-paste-ready markdown stanza naming the field, type
+and default — paste verbatim into
+[`docs/operator-config-reference.md`](docs/operator-config-reference.md)
+and re-stage to satisfy the hook.
 
 ## License
 

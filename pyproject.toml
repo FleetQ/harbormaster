@@ -71,6 +71,11 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.8",
     "hypothesis>=6.100",
+    # v16.0.0a2: pre-commit ships in the dev extra so
+    # `uv sync --extra dev` is the single bootstrap command.
+    # Operators still need to run `pre-commit install` once at clone
+    # time (or `bash scripts/post_sync_install_hooks.sh`).
+    "pre-commit>=3",
     # UI + fleetq + history extras pulled in for the test suite — keeps
     # a single `uv sync --extra dev` command working for contributors
     # who don't want to enumerate every optional extra.
