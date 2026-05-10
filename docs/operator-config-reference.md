@@ -34,6 +34,7 @@ the offending key. There is no silent-drop path.
 - [`[history]`](#history)
 - [`[plugins]`](#plugins)
 - [`[retention]`](#retention)
+- [`[budget]`](#budget)
 - [Top-level keys](#top-level-keys)
 - [Worked example](#worked-example)
 
@@ -229,6 +230,18 @@ stores. Defaults preserve v11 behavior byte-for-byte.
 | `memory_revisions_per_file`  | `int`     | `20`    | > 0. Cap on revisions per (project, file) pair. |
 | `qa_log_recent_k`            | `int`     | `null`  | When set, overrides `[history].retain_recent_k` for QAStore.prune. |
 | `qa_log_top_recalled_r`      | `int`     | `null`  | When set, overrides `[history].retain_top_recalled_r`. |
+
+## `[budget]`
+
+v15.0.0a4. Per-tool soft call budgets — operator-side warning surface,
+not enforcement. Counterpart to `[hosts.<label>].daily_call_budget`
+which tracks per-host call volume; `[budget]` tracks per-tool volume.
+Surfaced via `GET /api/tools/budget` and on the dashboard host-budget
+KPI cell (hover expands to show the per-tool breakdown).
+
+| Key                              | Type            | Default | Notes |
+|----------------------------------|-----------------|---------|-------|
+| `daily_call_budget_per_tool`     | `dict[str,int]` | `{}`    | Map of `tool_name → budget` (calls per 24h). All values must be > 0. Tools NOT listed have no budget tracked. Empty (default) means no per-tool budgets. Example: `daily_call_budget_per_tool = { ask_project = 1000, fan_out_ask = 100 }`. |
 
 ## Top-level keys
 

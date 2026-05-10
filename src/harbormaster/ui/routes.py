@@ -268,6 +268,57 @@ def register_routes(
             })
         return {"window_hours": 24, "hosts": items}
 
+
+    @app.get("/api/tools/budget")
+    async def api_tools_budget() -> dict[str, object]:
+        """v15.0.0a4: per-tool call counts (last 24h) vs configured
+        ``daily_call_budget_per_tool`` from ``[budget]`` config.
+
+        Response shape mirrors ``/api/hosts/budget``::
+
+            {
+                "window_hours": 24,
+                "tools": [
+                    {"tool": "ask_project", "calls_24h": 12,
+                     "budget": 1000, "usage_pct": 1.2},
+                    {"tool": "fan_out_ask", "calls_24h": 0,
+                     "budget": 100, "usage_pct": 0.0},
+                    {"tool": "list_projects", "calls_24h": 5,
+                     "budget": null, "usage_pct": null}
+                ]
+            }
+
+        Tools with no budget set still appear (with ``budget = null``)
+        when they've been called in the window — operator can see
+        all activity in one place. Tools NEVER called AND with no
+        budget set are NOT reported.
+        """
+        from harbormaster.ui.network_log import network_log
+
+        window_ms = 24 * 60 * 60 * 1000
+        since_ms = int(time.time() * 1000) - window_ms
+        counts = network_log.count_by_tool(since_ms=since_ms)
+
+        tool_budgets = config.budget.daily_call_budget_per_tool
+        # Union: every tool in budget config + every tool seen in
+        # the window (so we report both "configured but never called"
+        # and "called but unbudgeted").
+        all_tools = sorted(set(tool_budgets.keys()) | set(counts.keys()))
+        items: list[dict[str, object]] = []
+        for tool_name in all_tools:
+            calls = counts.get(tool_name, 0)
+            budget: int | None = tool_budgets.get(tool_name)
+            usage_pct: float | None = (
+                None if budget is None else round(calls / budget * 100, 1)
+            )
+            items.append({
+                "tool": tool_name,
+                "calls_24h": calls,
+                "budget": budget,
+                "usage_pct": usage_pct,
+            })
+        return {"window_hours": 24, "tools": items}
+
     @app.get("/api/network/sources")
     async def network_sources(
         scan_limit: int = 1000,
@@ -836,6 +887,94 @@ def register_routes(
             "from": a.model_dump(mode="json"),
             "to": b.model_dump(mode="json"),
             "delta": delta,
+        }
+
+
+    @app.get("/api/history/reembed/runs/compare")
+    async def api_history_reembed_runs_compare(
+        indices: str = Query(..., description="comma-separated indices, e.g. '0,2,5'"),
+    ) -> dict[str, object]:
+        """v15.0.0a4: N-way comparison of completed reembed runs.
+
+        Generalises the v13.0.0a3 2-way diff to up to 4 runs (the
+        UI cap — beyond that the table becomes unreadable).
+        Indices are zero-based offsets into the chronological list
+        from ``/api/history/reembed/runs``; duplicates are stripped
+        but order is preserved.
+
+        Response shape::
+
+            {
+                "indices": [0, 2, 5],
+                "runs": [<ReembedRunRecord dict>, ...],
+                "fields": [
+                    {"name": "duration_seconds",
+                     "values": [12.4, 8.1, 9.0]},
+                    {"name": "total",     "values": [120, 130, 125]},
+                    {"name": "succeeded", "values": [...]},
+                    {"name": "failed",    "values": [...]},
+                    {"name": "cancelled", "values": [...]},
+                    {"name": "model",     "values": [...]}
+                ]
+            }
+
+        Returns 400 when:
+          - more than 4 indices,
+          - any index is non-integer,
+          - the indices list is empty,
+        and 404 when an index is out of range.
+        """
+        try:
+            from harbormaster.history import read_reembed_runs
+        except ImportError:
+            raise HTTPException(
+                503,
+                "[history] extra not installed; install with "
+                "`pip install harbormaster-mcp[history]`",
+            ) from None
+
+        try:
+            parsed = [int(s.strip()) for s in indices.split(",") if s.strip()]
+        except ValueError:
+            raise HTTPException(400, f"indices must be integers: {indices!r}") from None
+        if not parsed:
+            raise HTTPException(400, "indices must contain at least one value")
+        # Dedup while preserving order; cap at 4 (UI side-by-side limit).
+        seen: set[int] = set()
+        deduped: list[int] = []
+        for idx in parsed:
+            if idx not in seen:
+                deduped.append(idx)
+                seen.add(idx)
+        if len(deduped) > 4:
+            raise HTTPException(
+                400,
+                f"compare supports at most 4 runs; got {len(deduped)}",
+            )
+
+        runs = read_reembed_runs()
+        for idx in deduped:
+            if idx < 0 or idx >= len(runs):
+                raise HTTPException(404, f"index {idx} out of range")
+        chosen = [runs[i] for i in deduped]
+
+        # Field projections in the same order as the v13 2-way diff.
+        fields: list[dict[str, object]] = [
+            {
+                "name": "duration_seconds",
+                "values": [r.finished_at - r.started_at for r in chosen],
+            },
+            {"name": "total", "values": [r.total for r in chosen]},
+            {"name": "succeeded", "values": [r.succeeded for r in chosen]},
+            {"name": "failed", "values": [r.failed for r in chosen]},
+            {"name": "cancelled", "values": [r.cancelled for r in chosen]},
+            {"name": "model", "values": [r.model or "" for r in chosen]},
+        ]
+
+        return {
+            "indices": deduped,
+            "runs": [r.model_dump(mode="json") for r in chosen],
+            "fields": fields,
         }
 
     @app.post("/api/history/reembed/cancel")
