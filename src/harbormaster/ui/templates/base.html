@@ -23,6 +23,13 @@
     return fetch(url, opts);
   };
 </script>
+<!-- v9.0.0a1: vendored Tailwind v4 stylesheet, served from the wheel.
+     Loaded BEFORE the v3 CDN so the @theme `--color-*` tokens are
+     defined first; the CDN sheet then layers utility classes on top.
+     The CDN remains for one full version while utility-class
+     migration to semantic tokens is rolled out incrementally;
+     it will be removed in v10. -->
+<link rel="stylesheet" href="/static/tailwind.css">
 <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
 <!-- v8.0.0a7: HTMX dropped. The dashboard switched to Alpine + SSE
      in v3.0; v8.0.0a1's audit confirmed zero `hx-*` attributes

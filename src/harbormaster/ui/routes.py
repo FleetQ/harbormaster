@@ -24,11 +24,12 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator, Callable
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
@@ -44,6 +45,19 @@ from harbormaster.projects import discover_projects
 # beat the typical 60s nginx / Cloudflare idle-read timeout, long enough
 # that a fast-finishing tool sees zero heartbeat overhead.
 _HEARTBEAT_INTERVAL_S: float = 5.0
+
+# v9.0.0a1: explicit MIME-type table for the static asset route. Kept
+# minimal (only the file types the UI actually serves today) so we don't
+# inherit the surprises in the stdlib `mimetypes.guess_type` table on
+# different OSes.
+_STATIC_MEDIA_TYPES: dict[str, str] = {
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".ico": "image/x-icon",
+}
 
 
 class McpProxyRequest(BaseModel):
@@ -158,6 +172,50 @@ def register_routes(
                 "project": project_dict,
                 "status_markdown": md,
             },
+        )
+
+    @app.get("/static/{path:path}")
+    async def static_asset(path: str) -> Response:
+        """Serve a packaged static asset from harbormaster/ui/static/.
+
+        v9.0.0a1: ships the vendored Tailwind v4 stylesheet
+        (`tailwind.css`) so the dashboard no longer relies on the
+        Tailwind v3 CDN script. Resolves the file via
+        ``importlib.resources`` so it works inside zipped wheels.
+
+        Path traversal is blocked: any '..' or absolute path 404s
+        before resolution. Symlinks pointing outside the static dir
+        also 404 (resolved-path containment check).
+        """
+        if ".." in path.split("/") or path.startswith("/"):
+            raise HTTPException(status_code=404)
+        try:
+            base = resources.files("harbormaster.ui").joinpath("static")
+            target = base.joinpath(path)
+        except (ModuleNotFoundError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404) from exc
+        # `MultiplexedPath` (namespace pkgs) and zip-importer Traversables
+        # both expose `.is_file()`; use it as the existence/type probe.
+        if not target.is_file():
+            raise HTTPException(status_code=404)
+        # Containment check via the filesystem `Path` form when available
+        # (regular installs). For zipped wheels the resource API enforces
+        # its own boundary; the early '..' guard above already rejects
+        # the only client-controlled escape vector.
+        try:
+            base_resolved = Path(str(base)).resolve()
+            target_resolved = Path(str(target)).resolve()
+            if not str(target_resolved).startswith(str(base_resolved) + "/"):
+                raise HTTPException(status_code=404)
+        except OSError as exc:
+            raise HTTPException(status_code=404) from exc
+        media_type = _STATIC_MEDIA_TYPES.get(
+            Path(path).suffix.lower(), "application/octet-stream"
+        )
+        return Response(
+            content=target.read_bytes(),
+            media_type=media_type,
+            headers={"cache-control": "public, max-age=300"},
         )
 
     @app.get("/api/health")
