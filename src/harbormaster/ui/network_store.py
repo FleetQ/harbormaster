@@ -293,9 +293,28 @@ class NetworkStore:
                 params,
             ).fetchone()
             error_count = int(error_row[0]) if error_row else 0
+            # v12.0.0a5: per-source (caller) breakdown — call counts +
+            # error rate per origin. Lets the dashboard distinguish
+            # operator-initiated calls from project-to-project routing.
+            source_rows = self._conn.execute(
+                f"SELECT source, COUNT(*) AS c, "
+                f"  SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errs "
+                f"FROM mcp_calls {where} GROUP BY source",
+                params,
+            ).fetchall()
+            by_source = {
+                str(r[0]): {
+                    "calls": int(r[1]),
+                    "error_rate": (
+                        (int(r[2]) / int(r[1])) if int(r[1]) else 0.0
+                    ),
+                }
+                for r in source_rows
+            }
         return {
             "total_calls": total,
             "by_tool": by_tool,
+            "by_source": by_source,
             "top_projects_by_calls": [
                 {"project": str(r[0]), "count": int(r[1])}
                 for r in top_projects_rows
