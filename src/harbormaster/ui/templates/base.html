@@ -22,6 +22,28 @@
     opts.headers = headers;
     return fetch(url, opts);
   };
+
+  // v12.0.0a6: prime the hm-auth cookie on page load so EventSource
+  // streams (which can't carry custom headers) authenticate via the
+  // cookie. Idempotent: if the cookie already exists for this origin,
+  // POST /api/auth/cookie just refreshes its Max-Age window.
+  // No-op when there's no token (loopback + no env var → unauth UI).
+  (function primeAuthCookie() {
+    const meta = document.querySelector('meta[name="hm-auth-token"]');
+    const token = meta ? meta.getAttribute("content") : "";
+    if (!token) return;
+    // Don't block page load — fire-and-forget.
+    fetch('/api/auth/cookie', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token },
+      credentials: 'same-origin',
+    }).catch(function () {
+      // Best-effort: a network blip on the prime call doesn't break
+      // the page — hmFetch still carries the bearer header on every
+      // call. SSE streams that need the cookie will simply 401 once
+      // the prime call eventually succeeds.
+    });
+  })();
 </script>
 <!-- v9.0.0a1: vendored Tailwind v4 stylesheet, served from the wheel.
      Loaded BEFORE the v3 CDN so the @theme `--color-*` tokens are
