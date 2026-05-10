@@ -21,14 +21,14 @@
    in v19.0.0a6 / v19.0.0a5; Settings shows read-only metadata until
    v19.0.0a4 adds per-project budget edit. #}
 <div x-data="projectTabs()" x-init="restoreFromHash()">
-  <nav id="hm-project-tabs" class="border-b border-border mb-4 -mt-4 -mx-4 px-4">
+  <nav id="hm-project-tabs" class="border-b border-border mb-4 -mt-4 -mx-4 px-3">
     <ul class="flex gap-0" role="tablist">
       <template x-for="tab in tabs" :key="tab.id">
         <li>
           <button type="button"
                   @click="setTab(tab.id)"
                   :class="active === tab.id ? 'text-accent border-accent-strong' : 'text-foreground-muted border-transparent hover:text-foreground'"
-                  class="px-3 py-2 text-sm border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                  class="px-3 py-2 text-sm border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                   :aria-selected="active === tab.id"
                   :aria-label="tab.label + ' tab (shortcut ' + tab.shortcut + ')'"
                   role="tab">
@@ -42,8 +42,8 @@
 
   <!-- Overview tab: existing project header + status. -->
   <section x-show="active === 'overview'" x-transition role="tabpanel" aria-label="Overview">
-<header class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40">
-  <div class="flex items-baseline justify-between gap-4 flex-wrap">
+<header class="mb-4 border border-border rounded-md p-2.5 bg-surface-2/40">
+  <div class="flex items-baseline justify-between gap-2 flex-wrap">
     <h2 class="text-xl font-bold text-accent">{{ project_name }}</h2>
     {% if project %}
       <span class="text-xs text-foreground-subtle">
@@ -58,26 +58,26 @@
   </div>
   {% if project %}
     <p class="text-sm text-foreground-muted mt-2">{{ project.brief or "(no description)" }}</p>
-    <footer class="mt-3 flex flex-wrap gap-2 text-xs items-center">
+    <footer class="mt-2 flex flex-wrap gap-2 text-xs items-center">
       {% if project.has_serena %}
         <span class="bg-purple-900/50 text-info px-2 py-0.5 rounded">serena</span>
       {% endif %}
       {% if project.has_claude_md %}
-        <span class="bg-cyan-900/50 text-accent px-2 py-0.5 rounded">claude.md</span>
+        <span class="bg-accent-soft/50 text-accent px-2 py-0.5 rounded">claude.md</span>
       {% endif %}
       <span class="text-foreground-subtle truncate font-mono">{{ project.path }}</span>
     </footer>
   {% endif %}
 </header>
 
-<section class="mb-6">
-  <header class="mb-3 flex items-baseline justify-between">
+<section class="mb-4">
+  <header class="mb-2 flex items-baseline justify-between">
     <h3 class="text-base font-bold text-foreground-muted">Status</h3>
     <span class="text-xs text-foreground-subtle">
       sourced from <code class="text-accent">project_status</code>
     </span>
   </header>
-  <pre class="text-sm whitespace-pre-wrap break-words border border-border rounded-lg p-4 bg-gray-900/40 text-foreground-muted leading-relaxed">{{ status_markdown }}</pre>
+  <pre class="text-sm whitespace-pre-wrap break-words border border-border rounded-md p-2.5 bg-surface-2/40 text-foreground-muted leading-relaxed">{{ status_markdown }}</pre>
 </section>
 
 {% include "_partials/ask_form.html" %}
@@ -89,7 +89,7 @@
        banner so current edit/diff/history flows keep working until
        a6's redesign lands. -->
   <section x-show="active === 'memories'" x-transition role="tabpanel" aria-label="Memories">
-    <div class="text-sm text-foreground-muted p-4 mb-4 text-center border border-border rounded bg-gray-900/40">
+    <div class="text-sm text-foreground-muted p-2.5 mb-4 text-center border border-border rounded bg-surface-2/40">
       Memories editor — full implementation lands in v19.0.0a6.
     </div>
 
@@ -98,8 +98,8 @@
    file to render its markdown in-place. Uses vendored marked.min.js. #}
 <section x-data="memoriesPanel({ project: {{ project_name | tojson }} })"
          x-init="load()"
-         class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40">
-  <header class="mb-3 flex items-baseline justify-between gap-2 flex-wrap">
+         class="mb-4 border border-border rounded-md p-2.5 bg-surface-2/40">
+  <header class="mb-2 flex items-baseline justify-between gap-2 flex-wrap">
     <h3 class="text-base font-bold text-foreground-muted">Memories</h3>
     <span class="text-xs text-foreground-subtle"
           x-text="files.length === 0 ? 'no memories' : `${files.length} file${files.length === 1 ? '' : 's'}`"></span>
@@ -108,14 +108,14 @@
      class="text-xs text-danger" x-text="error"></p>
   <div x-show="!error && files.length === 0" role="status"
        data-empty-state="memories.no-files"
-       class="border border-border bg-gray-900/40 text-foreground-muted px-4 py-6 rounded text-center">
+       class="border border-border bg-surface-2/40 text-foreground-muted px-3 py-6 rounded text-center">
     <p class="text-sm font-bold text-foreground mb-1">No memories found</p>
     <p class="text-xs text-foreground-muted">
       This project doesn't yet have a <code>CLAUDE.md</code> or any
       <code>.serena/memories/*.md</code> files.
     </p>
   </div>
-  <div x-show="files.length > 0" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+  <div x-show="files.length > 0" class="grid grid-cols-1 md:grid-cols-3 gap-2">
     <div class="md:col-span-1">
       <!-- v14.0.0a5: tag filter input. Files are filtered by
            substring-match on the YAML-frontmatter tags array (see
@@ -135,7 +135,7 @@
                 :aria-pressed="tagFilterMode === 'and'"
                 aria-label="Match all tags (AND)"
                 :class="tagFilterMode === 'and'
-                        ? 'border-accent-strong text-accent bg-cyan-900/30'
+                        ? 'border-accent-strong text-accent bg-accent-soft/30'
                         : 'border-border text-foreground-muted hover:text-accent'"
                 class="px-1.5 py-0 rounded border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           AND
@@ -145,7 +145,7 @@
                 :aria-pressed="tagFilterMode === 'or'"
                 aria-label="Match any tag (OR)"
                 :class="tagFilterMode === 'or'
-                        ? 'border-accent-strong text-accent bg-cyan-900/30'
+                        ? 'border-accent-strong text-accent bg-accent-soft/30'
                         : 'border-border text-foreground-muted hover:text-accent'"
                 class="px-1.5 py-0 rounded border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           OR
@@ -159,9 +159,9 @@
                   :aria-current="selected && selected.name === f.name ? 'true' : 'false'"
                   :aria-label="`Open memory file ${f.name}`"
                   :class="selected && selected.name === f.name
-                          ? 'bg-cyan-900/40 text-accent'
-                          : 'text-foreground-muted hover:bg-gray-800/50 hover:text-accent'"
-                  class="w-full text-left text-xs font-mono px-2 py-1.5 rounded truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+                          ? 'bg-accent-soft/40 text-accent'
+                          : 'text-foreground-muted hover:bg-surface-3/50 hover:text-accent'"
+                  class="w-full text-left text-xs font-mono px-2 py-1.5 rounded truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             <span x-text="f.name"></span>
             <span class="text-[10px] text-foreground-subtle ml-1"
                   x-text="`${(f.size/1024).toFixed(1)}KB`"></span>
@@ -169,7 +169,7 @@
             <span class="block mt-0.5 flex flex-wrap gap-1"
                   x-show="(f.tags || []).length > 0">
               <template x-for="t in (f.tags || [])" :key="'tag:' + f.name + ':' + t">
-                <span class="text-[9px] px-1.5 py-0 rounded bg-cyan-900/40 text-accent border border-cyan-900/60"
+                <span class="text-[9px] px-1.5 py-0 rounded bg-accent-soft/40 text-accent border border-accent-soft/60"
                       x-text="t"></span>
               </template>
             </span>
@@ -178,7 +178,7 @@
       </template>
       </ul>
     </div>
-    <article class="md:col-span-2 border border-border rounded p-3 bg-gray-950/60 min-h-[8rem]">
+    <article class="md:col-span-2 border border-border rounded p-2 bg-surface-1/60 min-h-[8rem]">
       <p x-show="!selected" class="text-xs text-foreground-subtle">Select a file to view.</p>
       <!-- v10.0.0a6: edit toolbar -->
       <div x-show="selected" class="flex items-center justify-between gap-2 mb-2">
@@ -200,7 +200,7 @@
                   @click="save()"
                   :disabled="saving"
                   aria-label="Save memory file"
-                  class="text-xs px-2 py-0.5 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent disabled:opacity-50">
+                  class="text-xs px-2 py-0.5 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent disabled:opacity-50">
             <span x-text="saving ? 'Saving…' : 'Save'"></span>
           </button>
           <!-- v11.0.0a2: revision history toggle -->
@@ -237,7 +237,7 @@
            can still type raw YAML in the textarea below; chips re-derive
            on every chip mutation. -->
       <div x-show="editing"
-           class="mb-2 p-2 border border-border rounded bg-gray-950/40">
+           class="mb-2 p-2 border border-border rounded bg-surface-1/40">
         <div class="flex items-center justify-between mb-1">
           <span class="text-[10px] text-foreground-subtle">Tags (frontmatter)</span>
           <span class="text-[10px] text-foreground-subtle"
@@ -245,7 +245,7 @@
         </div>
         <div class="flex flex-wrap gap-1 items-center">
           <template x-for="(t, i) in tagChips" :key="'chip:' + i + ':' + t">
-            <span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-cyan-900/40 text-accent border border-cyan-900/60">
+            <span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-accent-soft/40 text-accent border border-accent-soft/60">
               <span x-text="t"></span>
               <button type="button"
                       @click="removeTagChip(i)"
@@ -286,7 +286,7 @@
                   @keydown.ctrl.shift.z.prevent="navigateRevisions(1)"
                   aria-label="Memory file source — Cmd+Z navigates revision history"
                   class="w-full min-h-[20rem] bg-surface-1 border border-border rounded p-2 text-xs font-mono text-foreground"></textarea>
-        <div class="prose prose-invert prose-sm max-w-none border border-border rounded p-2 bg-gray-950/40 min-h-[20rem] overflow-auto"
+        <div class="prose prose-invert prose-sm max-w-none border border-border rounded p-2 bg-surface-1/40 min-h-[20rem] overflow-auto"
              aria-live="polite" aria-label="Live preview"
              x-html="previewHtml"></div>
       </div>
@@ -298,7 +298,7 @@
         position <span x-text="revisionCursor === null ? 'live' : `#${revisionCursor + 1} of ${revisions.length}`"></span>
       </p>
       <!-- v11.0.0a2: revision history panel -->
-      <aside x-show="showHistory" class="mt-3 border-t border-border pt-3">
+      <aside x-show="showHistory" class="mt-2 border-t border-border pt-3">
         <p class="text-xs text-foreground-muted mb-2">Revision history (newest first)</p>
         <p x-show="historyError" role="alert" class="text-xs text-danger mb-2"
            x-text="historyError"></p>
@@ -320,7 +320,7 @@
           <li x-show="revisions.length === 0 && !historyError"
               class="text-xs text-foreground-subtle">No prior revisions on file.</li>
         </ul>
-        <div x-show="revisionPreview" class="mt-3 border border-amber-900/40 rounded bg-surface-1 p-2">
+        <div x-show="revisionPreview" class="mt-2 border border-amber-900/40 rounded bg-surface-1 p-2">
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs text-warning">Revision <span x-text="revisionPreviewId"></span> (read-only)</span>
             <button type="button" @click="copyRevisionToClipboard()"
@@ -334,7 +334,7 @@
         <!-- v12.0.0a4: unified diff vs current. Shown when the
              "Diff against revision" dropdown has a selection.
              v14.0.0a3: format toggle (Unified / Side-by-side). -->
-        <div x-show="diffOutput || diffError || diffHtml" class="mt-3 border border-cyan-900/40 rounded bg-surface-1 p-2">
+        <div x-show="diffOutput || diffError || diffHtml" class="mt-2 border border-accent-soft/40 rounded bg-surface-1 p-2">
           <div class="flex items-center justify-between mb-1 gap-2">
             <span class="text-xs text-accent">Diff: revision <span x-text="diffFrom"></span> → current</span>
             <div class="flex items-center gap-1 text-xs" role="group" aria-label="Diff format">
@@ -342,7 +342,7 @@
                       @click="diffFormat = 'unified'; loadDiff()"
                       :aria-pressed="diffFormat === 'unified'"
                       :class="diffFormat === 'unified'
-                              ? 'border-accent-strong text-accent bg-cyan-900/30'
+                              ? 'border-accent-strong text-accent bg-accent-soft/30'
                               : 'border-border text-foreground-muted hover:text-accent'"
                       class="px-2 py-0.5 rounded border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
                 Unified
@@ -351,7 +351,7 @@
                       @click="diffFormat = 'html'; loadDiff()"
                       :aria-pressed="diffFormat === 'html'"
                       :class="diffFormat === 'html'
-                              ? 'border-accent-strong text-accent bg-cyan-900/30'
+                              ? 'border-accent-strong text-accent bg-accent-soft/30'
                               : 'border-border text-foreground-muted hover:text-accent'"
                       class="px-2 py-0.5 rounded border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
                 Side-by-side
@@ -368,7 +368,7 @@
                we additionally restrict the container max-height for
                UX consistency with the unified view. -->
           <div x-show="diffFormat === 'html' && diffHtml && !diffError"
-               class="text-xs max-h-64 overflow-auto bg-gray-950/30 rounded p-1"
+               class="text-xs max-h-64 overflow-auto bg-surface-1/30 rounded p-1"
                x-html="diffHtml"></div>
         </div>
       </aside>
@@ -376,7 +376,7 @@
   </div>
 
   <!-- v10.0.0a6: new-memory creation form -->
-  <details class="mt-3 border border-border rounded p-2 bg-gray-950/40">
+  <details class="mt-2 border border-border rounded p-2 bg-surface-1/40">
     <summary class="text-xs text-foreground-muted cursor-pointer">Create new memory…</summary>
     <form @submit.prevent="createNew()" class="mt-2 space-y-2">
       <label class="block text-xs text-foreground-muted">
@@ -396,7 +396,7 @@
         <button type="submit"
                 :disabled="creating || !newName"
                 aria-label="Create new memory file"
-                class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent disabled:opacity-50">
+                class="text-xs px-3 py-1 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent disabled:opacity-50">
           <span x-text="creating ? 'Creating…' : 'Create'"></span>
         </button>
         <span x-show="createError" role="alert"
@@ -963,10 +963,10 @@
          x-init="load()"
          x-on:hm:trajectory:dirty.window="if ($event.detail && $event.detail.project === project) load()"
          x-on:hm:trajectory:append.window="if ($event.detail && $event.detail.project === project) prepend($event.detail.entry)"
-         class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40">
-  <header class="mb-3 flex items-baseline justify-between gap-2 flex-wrap">
+         class="mb-4 border border-border rounded-md p-2.5 bg-surface-2/40">
+  <header class="mb-2 flex items-baseline justify-between gap-2 flex-wrap">
     <h3 class="text-base font-bold text-foreground-muted">Recent Q&amp;A</h3>
-    <div class="flex items-center gap-3 text-xs text-foreground-subtle">
+    <div class="flex items-center gap-2 text-xs text-foreground-subtle">
       <label class="flex items-center gap-1.5">
         limit
         <input type="number" min="1" max="200" x-model.number="limit" @change="load()"
@@ -983,16 +983,16 @@
        :aria-hidden="!(!message && !error && trajectories.length === 0)"
        role="status"
        data-empty-state="trajectory.no-entries"
-       class="border border-border bg-gray-900/40 text-foreground-muted px-4 py-6 rounded text-center">
+       class="border border-border bg-surface-2/40 text-foreground-muted px-3 py-6 rounded text-center">
     <p class="text-sm font-bold text-foreground mb-1">No questions asked yet</p>
-    <p class="text-xs text-foreground-muted mb-3">
+    <p class="text-xs text-foreground-muted mb-2">
       Use the <span class="text-accent">Ask</span> form above to query this project.
       Each question + answer pair lands here as a trajectory.
     </p>
     <button type="button"
             @click="document.querySelector(`section[x-data^='askForm'] textarea`)?.focus()"
             aria-label="Focus the ask textarea"
-            class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+            class="text-xs px-3 py-1 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
       Focus ask form
     </button>
   </div>
@@ -1008,7 +1008,7 @@
         <button type="button" @click="open = !open"
                 :aria-expanded="open"
                 :aria-label="open ? 'Collapse trajectory details' : 'Expand trajectory details'"
-                class="w-full text-left px-3 py-2 hover:bg-gray-900/50 transition flex items-baseline justify-between gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                class="w-full text-left px-3 py-2 hover:bg-surface-2/50 transition flex items-baseline justify-between gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
           <span class="text-sm text-foreground truncate" x-text="t.question"></span>
           <span class="text-xs text-foreground-subtle shrink-0 flex gap-2 items-center">
             <!-- v12.0.0a2: tier badges migrated to the shared
@@ -1102,11 +1102,11 @@
         switch (this.tier(entry)) {
           case 'fresh':
           case 'stale':
-            return 'border-cyan-700/40 bg-cyan-950/30';
+            return 'border-accent-strong/40 bg-accent-soft/30';
           case 'stuck':
             return 'border-rose-700/50 bg-rose-950/30';
           default:
-            return 'border-border bg-gray-950/50';
+            return 'border-border bg-surface-1/50';
         }
       },
 
@@ -1208,7 +1208,7 @@
 
   <!-- Q&A History tab: project-scoped recall lands in v19.0.0a5. -->
   <section x-show="active === 'qa-history'" x-transition role="tabpanel" aria-label="Q and A History">
-    <div class="text-sm text-foreground-muted p-8 text-center border border-border rounded bg-gray-900/40">
+    <div class="text-sm text-foreground-muted p-8 text-center border border-border rounded bg-surface-2/40">
       Project-scoped Q&amp;A history search — full impl in v19.0.0a5.
     </div>
   </section>
@@ -1218,7 +1218,7 @@
        `project` is None there (matches the existing header guard). -->
   <section x-show="active === 'settings'" x-transition role="tabpanel" aria-label="Settings">
     {% if project %}
-      <dl class="grid grid-cols-2 gap-2 text-sm border border-border rounded-lg p-4 bg-gray-900/40">
+      <dl class="grid grid-cols-2 gap-2 text-sm border border-border rounded-md p-2.5 bg-surface-2/40">
         <dt class="text-foreground-muted">Project name</dt>
         <dd class="text-foreground">{{ project.name }}</dd>
         <dt class="text-foreground-muted">Path</dt>
@@ -1233,7 +1233,7 @@
         <dd class="text-foreground">inherits</dd>
       </dl>
     {% else %}
-      <p class="text-sm text-foreground-muted p-4 text-center border border-border rounded bg-gray-900/40">
+      <p class="text-sm text-foreground-muted p-2.5 text-center border border-border rounded bg-surface-2/40">
         Settings are unavailable for remote-host project views.
       </p>
     {% endif %}
@@ -1286,7 +1286,7 @@
    summary fetched from /api/projects/budget?host=<host>. No new
    endpoint; data the page already owns is rendered inline. #}
 {% block inspector %}
-<div class="p-3"
+<div class="p-2"
      x-data='projectInspector({
        project: {{ project | tojson if project else "null" }},
        host: {{ host | tojson }},

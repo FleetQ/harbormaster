@@ -11,7 +11,7 @@
 <div x-data="helpPopover()"
      @keydown.window="onKeyDown($event)">
   <button type="button" @click="open = !open"
-          class="fixed bottom-4 right-4 z-30 bg-gray-900/80 hover:bg-surface-3 border border-border text-accent w-9 h-9 rounded-full text-base font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+          class="fixed bottom-4 right-4 z-30 bg-surface-2/80 hover:bg-surface-3 border border-border text-accent w-9 h-9 rounded-full text-base font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
           :title="open ? 'close help (Esc)' : 'keyboard shortcuts (?)'"
           :aria-label="open ? 'Close keyboard shortcuts help' : 'Open keyboard shortcuts help'"
           :aria-expanded="open"
@@ -24,15 +24,15 @@
        aria-label="Keyboard shortcuts"
        :aria-hidden="!open"
        @click.away="open = false"
-       class="fixed bottom-16 right-4 z-30 w-80 max-h-[70vh] overflow-y-auto bg-surface-1 border border-border rounded-lg shadow-xl p-4">
-    <header class="flex items-baseline justify-between mb-3">
+       class="fixed bottom-16 right-4 z-30 w-80 max-h-[70vh] overflow-y-auto bg-surface-1 border border-border rounded-md shadow-xl p-2.5">
+    <header class="flex items-baseline justify-between mb-2">
       <h3 class="text-sm font-bold text-foreground">Keyboard shortcuts</h3>
       <button type="button" @click="open = false"
               aria-label="Close keyboard shortcuts help"
-              class="text-foreground-muted hover:text-foreground text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">close</button>
+              class="text-foreground-muted hover:text-foreground text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">close</button>
     </header>
     <template x-for="section in shortcuts" :key="section.scope">
-      <div class="mb-3">
+      <div class="mb-2">
         <h4 class="text-[11px] uppercase tracking-wide text-foreground-subtle mb-1.5"
             x-text="section.scope"></h4>
         <ul class="space-y-1 text-xs">
@@ -46,7 +46,7 @@
         </ul>
       </div>
     </template>
-    <p class="mt-3 pt-3 border-t border-border text-[11px] text-foreground-subtle">
+    <p class="mt-2 pt-3 border-t border-border text-[11px] text-foreground-subtle">
       Press <kbd class="bg-surface-3 border border-border rounded px-1 py-0 text-accent font-mono">Esc</kbd>
       or <kbd class="bg-surface-3 border border-border rounded px-1 py-0 text-accent font-mono">?</kbd>
       to dismiss.
@@ -61,8 +61,8 @@
      missing. -->
 <section x-data="kpiStrip()" x-init="loadKpi(); loadBudget(); startPolling()"
          aria-label="Dashboard at-a-glance metrics"
-         class="mb-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-  <div class="border border-border rounded-lg p-3 bg-gray-900/40"
+         class="mb-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+  <div class="border border-border rounded-md p-2 bg-surface-2/40"
        data-kpi-cell="projects"
        data-tour-step="kpi-strip">
     <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Projects</p>
@@ -70,7 +70,7 @@
        x-text="kpi.projects ?? '—'"
        :aria-label="`${kpi.projects ?? 0} projects discovered`"></p>
   </div>
-  <div class="border border-border rounded-lg p-3 bg-gray-900/40"
+  <div class="border border-border rounded-md p-2 bg-surface-2/40"
        data-kpi-cell="active-embeds">
     <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Active embeds</p>
     <p class="text-2xl font-bold"
@@ -78,14 +78,14 @@
        x-text="activeEmbedsLabel()"
        :aria-label="`Reembed phase ${kpi.active_embeds?.phase || 'unknown'}`"></p>
   </div>
-  <div class="border border-border rounded-lg p-3 bg-gray-900/40"
+  <div class="border border-border rounded-md p-2 bg-surface-2/40"
        data-kpi-cell="recent-queries">
     <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Recent queries (1h)</p>
     <p class="text-2xl font-bold text-foreground"
        x-text="kpi.recent_queries ?? '—'"
        :aria-label="`${kpi.recent_queries ?? 0} queries in the last hour`"></p>
   </div>
-  <div class="border border-border rounded-lg p-3 bg-gray-900/40"
+  <div class="border border-border rounded-md p-2 bg-surface-2/40"
        data-kpi-cell="bridge">
     <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Bridge</p>
     <p class="text-sm font-bold pt-1.5"
@@ -93,7 +93,7 @@
        x-text="kpi.bridge ?? '—'"
        :aria-label="`Bridge ${kpi.bridge || 'unknown'}`"></p>
   </div>
-  <div class="border border-border rounded-lg p-3 bg-gray-900/40"
+  <div class="border border-border rounded-md p-2 bg-surface-2/40"
        data-kpi-cell="dispatcher">
     <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Dispatcher</p>
     <p class="text-sm font-bold pt-1.5 text-success"
@@ -106,7 +106,7 @@
        v15.0.0a4: hover reveals the per-tool budget breakdown beneath.
        The data is pulled lazily on first hover (loadToolsBudget), so
        operators that never hover pay zero cost. -->
-  <div class="border border-border rounded-lg p-3 bg-gray-900/40 relative"
+  <div class="border border-border rounded-md p-2 bg-surface-2/40 relative"
        data-kpi-cell="hosts-budget"
        @mouseenter="showToolsBudget()"
        @mouseleave="toolsBudgetHover = false">
@@ -123,7 +123,7 @@
     <div x-show="toolsBudgetHover && (toolsBudget.tools || []).length > 0"
          x-cloak
          data-kpi-tightest-tooltip
-         class="absolute left-0 right-0 top-full mt-1 z-10 border border-border rounded bg-gray-950/95 p-2 text-[10px] space-y-0.5 shadow-lg">
+         class="absolute left-0 right-0 top-full mt-1 z-10 border border-border rounded bg-surface-1/95 p-2 text-[10px] space-y-0.5 shadow-lg">
       <!-- v17.0.0a4: tightest-cap breakdown for the worst-usage host. -->
       <p class="text-foreground-subtle uppercase tracking-wide"
          x-show="tightestBreakdown.host">
@@ -156,8 +156,8 @@
 <!-- v2.1.0a1: bridge + plugin status strip. Sticky on desktop,
      collapsible on mobile. Loads async, doesn't block project grid. -->
 <section x-data="statusStrip()" x-init="loadAll()"
-         class="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-  <article class="border border-border rounded-lg p-4 bg-gray-900/40">
+         class="mb-4 grid grid-cols-1 md:grid-cols-2 gap-2">
+  <article class="border border-border rounded-md p-2.5 bg-surface-2/40">
     <header class="flex items-center justify-between mb-2">
       <h3 class="text-sm font-bold text-foreground-muted">FleetQ Bridge</h3>
       <!-- v12.0.0a2: migrated from inline color/icon spans to the
@@ -194,7 +194,7 @@
     <p x-show="bridgeError" :aria-hidden="!bridgeError" role="alert" aria-live="assertive" class="text-xs text-danger" x-text="bridgeError"></p>
   </article>
 
-  <article class="border border-border rounded-lg p-4 bg-gray-900/40">
+  <article class="border border-border rounded-md p-2.5 bg-surface-2/40">
     <header class="flex items-center justify-between mb-2 gap-2 flex-wrap">
       <h3 class="text-sm font-bold text-foreground-muted">Plugins</h3>
       <div class="flex items-center gap-2">
@@ -265,7 +265,7 @@
     </div>
     <!-- v15.0.0a2: cross-host config diff panel. -->
     <div x-show="configDiffOpen"
-         class="mt-3 border border-cyan-900/40 rounded bg-surface-1 p-2">
+         class="mt-2 border border-accent-soft/40 rounded bg-surface-1 p-2">
       <div class="flex items-center justify-between mb-1 gap-2">
         <span class="text-xs text-accent">Config diff: local → <span x-text="pluginHost"></span></span>
         <button type="button" @click="configDiffOpen = false"
@@ -288,7 +288,7 @@
 <!-- v5.0.0a1: auto-reembed runner status. Polls /api/history/state
      every 3s while phase is "running"; idles otherwise. -->
 <section x-data="reembedPanel()" x-init="loadOnce()"
-         class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40"
+         class="mb-4 border border-border rounded-md p-2.5 bg-surface-2/40"
          x-show="state.available && (state.phase !== 'idle' || state.auto_reembed_enabled)">
   <header class="flex items-center justify-between mb-2 gap-2 flex-wrap">
     <h3 class="text-sm font-bold text-foreground-muted">Auto-reembed</h3>
@@ -298,7 +298,7 @@
               :disabled="state.phase === 'running' || triggering || cancelling"
               :aria-busy="triggering"
               aria-label="Run reembed now"
-              class="text-xs px-2 py-0.5 rounded border border-border bg-gray-900/60 hover:bg-surface-3 disabled:bg-surface-2 disabled:text-foreground-subtle transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+              class="text-xs px-2 py-0.5 rounded border border-border bg-surface-2/60 hover:bg-surface-3 disabled:bg-surface-2 disabled:text-foreground-subtle transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
               title="run reembed now (skips the auto_reembed_on_drift gate)">
         <span x-show="!triggering">run now</span>
         <span x-show="triggering">starting…</span>
@@ -310,7 +310,7 @@
               :disabled="cancelling"
               :aria-busy="cancelling"
               aria-label="Cancel running reembed"
-              class="text-xs px-2 py-0.5 rounded border border-warning bg-amber-900/30 hover:bg-amber-900/50 text-amber-200 disabled:opacity-50 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+              class="text-xs px-2 py-0.5 rounded border border-warning bg-amber-900/30 hover:bg-amber-900/50 text-amber-200 disabled:opacity-50 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
               title="signal the running reembed to stop after current host">
         <span x-show="!cancelling">cancel</span>
         <span x-show="cancelling">cancelling…</span>
@@ -355,7 +355,7 @@
 
   <!-- v7.0.0a4: collapsible last-5-runs history table.
        Lazy-loads via fetchRuns() the first time the user opens it. -->
-  <details class="mt-3 text-xs" x-show="state.available"
+  <details class="mt-2 text-xs" x-show="state.available"
            @toggle="if ($event.target.open) loadRuns()">
     <summary class="cursor-pointer text-foreground-subtle hover:text-foreground-muted">
       <span>recent runs</span>
@@ -369,7 +369,7 @@
            :aria-hidden="!(!runsLoading && runs.length === 0)"
            role="status"
            data-empty-state="reembed.no-runs"
-           class="border border-border bg-gray-900/40 text-foreground-muted px-3 py-4 rounded text-center">
+           class="border border-border bg-surface-2/40 text-foreground-muted px-3 py-2.5 rounded text-center">
         <p class="text-xs font-bold text-foreground mb-1">No reembed runs yet</p>
         <p class="text-[11px] text-foreground-muted mb-2">
           Click <span class="text-accent">run now</span> above to trigger a manual run,
@@ -378,7 +378,7 @@
         <button type="button" @click="triggerManual()"
                 :disabled="state.phase === 'running' || triggering || cancelling"
                 aria-label="Trigger reembed run now"
-                class="text-[11px] px-2 py-0.5 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent transition disabled:bg-surface-2 disabled:text-foreground-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                class="text-[11px] px-2 py-0.5 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent transition disabled:bg-surface-2 disabled:text-foreground-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
           Run now
         </button>
       </div>
@@ -397,7 +397,7 @@
                   :disabled="selectedRunIndices.length < 2 || compareLoading"
                   data-reembed-compare-trigger
                   aria-label="Compare selected reembed runs side-by-side"
-                  class="px-1.5 py-0.5 rounded border border-accent-strong text-accent hover:bg-cyan-900/30 disabled:border-border disabled:text-foreground-subtle disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                  class="px-1.5 py-0.5 rounded border border-accent-strong text-accent hover:bg-accent-soft/30 disabled:border-border disabled:text-foreground-subtle disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             Compare selected
           </button>
           <button type="button"
@@ -440,7 +440,7 @@
                        @change="toggleCompareSelection(runs.indexOf(r))"
                        data-reembed-compare-checkbox
                        :aria-label="`Select reembed run finished at ${formatRelative(r.finished_at)} for comparison`"
-                       class="h-3 w-3 accent-cyan-500" />
+                       class="h-3 w-3 accent-accent" />
               </td>
               <td class="pr-2 py-0.5 text-foreground-muted"
                   x-text="formatRelative(r.finished_at)"></td>
@@ -475,7 +475,7 @@
       </table>
       <!-- v14.0.0a3: per-row diff panel. Renders the JSON delta from
            the v13.a3 reembed parity endpoint as a 5-cell summary. -->
-      <div x-show="runDiffOpen" class="mt-3 border border-cyan-900/40 rounded bg-surface-1 p-2 text-xs">
+      <div x-show="runDiffOpen" class="mt-2 border border-accent-soft/40 rounded bg-surface-1 p-2 text-xs">
         <div class="flex items-center justify-between mb-1">
           <span class="text-accent">
             Diff: run #<span x-text="runDiff.from_index"></span>
@@ -514,7 +514,7 @@
            (sparklineHtml from v16.a4 _tiny_sparkline.html). -->
       <div x-show="compareOpen"
            data-reembed-compare-panel
-           class="mt-3 border border-cyan-900/40 rounded bg-surface-1 p-2 text-xs">
+           class="mt-2 border border-accent-soft/40 rounded bg-surface-1 p-2 text-xs">
         <div class="flex items-center justify-between mb-1">
           <span class="text-accent">
             Compare:
@@ -566,14 +566,14 @@
 <!-- v2.1.0a3: recall search. Hits /api/recall (which wraps the
      recall_qa MCP tool) and renders match cards inline. -->
 <section x-data="recallPanel()" x-init="restoreFromUrl()"
-         class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40">
-  <header class="mb-3 flex items-center justify-between gap-2 flex-wrap">
+         class="mb-4 border border-border rounded-md p-2.5 bg-surface-2/40">
+  <header class="mb-2 flex items-center justify-between gap-2 flex-wrap">
     <h2 class="text-lg font-bold">Recall Q&amp;A history</h2>
     <span class="text-xs text-foreground-subtle">
       semantic search over <code class="text-accent">recall_qa</code> store
     </span>
   </header>
-  <form @submit.prevent="search()" class="flex flex-col md:flex-row gap-2 mb-3">
+  <form @submit.prevent="search()" class="flex flex-col md:flex-row gap-2 mb-2">
     <input type="text" x-model="question" required minlength="2"
            placeholder="e.g. how does authentication work?"
            class="flex-1 bg-surface-1 border border-border rounded px-3 py-2 text-sm focus:border-accent-strong focus:outline-none">
@@ -588,7 +588,7 @@
     <button type="submit"
             :disabled="loading || question.trim().length < 2"
             :aria-busy="loading"
-            class="bg-accent-strong hover:bg-accent disabled:bg-surface-3 disabled:text-foreground-muted text-white font-bold px-4 py-2 rounded text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+            class="bg-accent-strong hover:bg-accent disabled:bg-surface-3 disabled:text-foreground-muted text-white font-bold px-3 py-2 rounded text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
       <span x-show="!loading">Search</span>
       <span x-show="loading" aria-hidden="true">…</span>
     </button>
@@ -600,7 +600,7 @@
        x-text="`${matches.length} match${matches.length === 1 ? '' : 'es'} (backend: ${backend})`"></p>
     <ul class="space-y-2">
       <template x-for="m in matches" :key="m.id + ':' + m.host">
-        <li class="border border-border rounded p-3 bg-gray-950/50">
+        <li class="border border-border rounded p-2 bg-surface-1/50">
           <div class="flex items-baseline justify-between gap-2 flex-wrap text-xs">
             <a :href="`/projects/${encodeURIComponent(m.project)}${m.host && m.host !== 'local' ? '?host=' + encodeURIComponent(m.host) : ''}`"
                class="font-bold text-accent hover:underline" x-text="m.project"></a>
@@ -621,16 +621,16 @@
        :aria-hidden="!(searched && matches.length === 0 && !error && !message)"
        role="status"
        data-empty-state="recall.no-matches"
-       class="border border-border bg-gray-900/40 text-foreground-muted px-4 py-6 rounded text-center">
+       class="border border-border bg-surface-2/40 text-foreground-muted px-3 py-6 rounded text-center">
     <p class="text-sm font-bold text-foreground mb-1">No matches found</p>
-    <p class="text-xs text-foreground-muted mb-3">
+    <p class="text-xs text-foreground-muted mb-2">
       Try broadening the question, removing the project filter,
       or selecting <code class="text-accent">all hosts</code>.
     </p>
     <button type="button"
             @click="question = ''; project = ''; host = 'local'; searched = false; persistToUrl()"
             aria-label="Clear recall filters"
-            class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+            class="text-xs px-3 py-1 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
       Clear filters
     </button>
   </div>
@@ -640,16 +640,16 @@
      /api/graph; we re-render with mermaid.run() after the DOM has the
      fresh markup so the layout adapts to includeDevDeps / transitive. -->
 <section x-data="graphPanel()" x-init="loadGraph()"
-         class="mb-6 border border-border rounded-lg p-4 bg-gray-900/40">
-  <header class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+         class="mb-4 border border-border rounded-md p-2.5 bg-surface-2/40">
+  <header class="flex items-center justify-between mb-2 gap-2 flex-wrap">
     <h2 class="text-lg font-bold">Project graph</h2>
-    <div class="flex items-center gap-3 text-xs text-foreground-muted">
+    <div class="flex items-center gap-2 text-xs text-foreground-muted">
       <label class="flex items-center gap-1.5">
-        <input type="checkbox" x-model="includeDevDeps" @change="loadGraph()" class="accent-cyan-500">
+        <input type="checkbox" x-model="includeDevDeps" @change="loadGraph()" class="accent-accent">
         dev deps
       </label>
       <label class="flex items-center gap-1.5">
-        <input type="checkbox" x-model="transitive" @change="loadGraph()" class="accent-cyan-500">
+        <input type="checkbox" x-model="transitive" @change="loadGraph()" class="accent-accent">
         transitive (lockfiles)
       </label>
       <span x-show="graph.projects_discovered !== undefined"
@@ -677,12 +677,12 @@
     <div class="absolute top-2 right-2 z-10 flex gap-1">
       <button type="button" @click="reset()"
               aria-label="Reset graph zoom"
-              class="text-xs bg-gray-900/80 hover:bg-surface-3 border border-border px-2 py-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+              class="text-xs bg-surface-2/80 hover:bg-surface-3 border border-border px-2 py-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
               :title="`reset zoom (current: ${scale.toFixed(2)}×) — press Esc or double-tap`">
         reset
       </button>
     </div>
-    <div class="overflow-hidden max-h-[60vh] border border-border-strong rounded bg-gray-950/40 p-2 select-none"
+    <div class="overflow-hidden max-h-[60vh] border border-border-strong rounded bg-surface-1/40 p-2 select-none"
          @wheel.prevent="onWheel($event)"
          @touchstart="onTouchStart($event)"
          @touchmove.prevent="onTouchMove($event)"
@@ -702,9 +702,9 @@
      v5.0.0a6: text-based filter input + URL state encoding.
      v6.0.0a3: sort dropdown + group toggle. -->
 <section x-data="projectGrid()" x-init="init()">
-  <header class="mb-4 flex items-baseline justify-between gap-3 flex-wrap">
+  <header class="mb-4 flex items-baseline justify-between gap-2 flex-wrap">
     <h2 class="text-lg font-bold">Projects</h2>
-    <div class="flex items-baseline gap-3 ml-auto flex-wrap">
+    <div class="flex items-baseline gap-2 ml-auto flex-wrap">
       <select x-model="sort" @change="persistToUrl()"
               class="bg-surface-1 border border-border rounded px-2 py-1.5 text-xs focus:border-accent-strong focus:outline-none">
         <option value="last_commit">sort: recent</option>
@@ -728,7 +728,7 @@
 
   <div x-show="loading" class="text-foreground-muted">Loading projects…</div>
 
-  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="border border-red-800 bg-red-950/40 text-danger px-4 py-3 rounded">
+  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="border border-red-800 bg-red-950/40 text-danger px-3 py-2 rounded">
     Error loading projects: <span x-text="error"></span>
   </div>
 
@@ -737,15 +737,15 @@
        :aria-hidden="!(!loading && !error && projects.length === 0)"
        role="status"
        data-empty-state="dashboard.no-projects"
-       class="border border-border bg-gray-900/40 text-foreground-muted px-4 py-6 rounded text-center">
+       class="border border-border bg-surface-2/40 text-foreground-muted px-3 py-6 rounded text-center">
     <p class="text-sm font-bold text-foreground mb-1">No projects discovered</p>
-    <p class="text-xs text-foreground-muted mb-3">
+    <p class="text-xs text-foreground-muted mb-2">
       Harbormaster scans <code class="text-accent">~/htdocs/*</code> by default.
       Add <code class="text-accent">[projects] glob</code> or <code class="text-accent">[hosts.*]</code>
       entries to <code class="text-accent">~/.config/harbormaster/config.toml</code>.
     </p>
     <a href="https://github.com/FleetQ/harbormaster/blob/main/docs/operator-guide.md"
-       class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent transition inline-block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+       class="text-xs px-3 py-1 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent transition inline-block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
       Read the operator guide
     </a>
   </div>
@@ -753,11 +753,11 @@
   <div x-show="!loading && !error && filter && visibleProjects().length === 0"
        :aria-hidden="!(filter && visibleProjects().length === 0)"
        role="status"
-       class="border border-border bg-gray-900/40 text-foreground-muted px-4 py-6 rounded">
+       class="border border-border bg-surface-2/40 text-foreground-muted px-3 py-6 rounded">
     No projects match <code class="text-accent" x-text="filter"></code>.
     <button type="button" @click="filter = ''; persistToUrl()"
             aria-label="Clear project filter"
-            class="ml-2 text-accent hover:text-accent underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">clear</button>
+            class="ml-2 text-accent hover:text-accent underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">clear</button>
   </div>
 
   <!-- v6.0.0a3: groupedProjects() returns one entry for flat mode
@@ -770,11 +770,11 @@
         <h3 x-show="g.label"
             class="text-sm font-bold text-foreground-muted uppercase tracking-wide mb-2 mt-2 border-b border-border pb-1"
             x-text="g.label"></h3>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
           <template x-for="(p, idx) in g.items" :key="p.path">
       <article x-data="{ askExpanded: false }"
                :data-tour-step="idx === 0 ? 'memories' : null"
-               class="border border-border rounded-lg p-4 hover:border-accent-strong transition bg-gray-900/40">
+               class="border border-border rounded-md p-2.5 hover:border-accent-strong transition bg-surface-2/40">
         <header class="flex items-baseline justify-between mb-2 gap-2">
           <h3 class="font-bold text-accent truncate">
             <a :href="`/projects/${encodeURIComponent(p.name)}`"
@@ -783,7 +783,7 @@
           <span class="text-xs text-foreground-subtle shrink-0"
                 x-text="p.last_commit ? p.last_commit.hash : '(no git)'"></span>
         </header>
-        <p class="text-sm text-foreground-muted mb-3 line-clamp-2"
+        <p class="text-sm text-foreground-muted mb-2 line-clamp-2"
            x-text="p.brief || '(no description)'"></p>
         <footer class="flex flex-wrap gap-2 text-xs items-center">
           <!-- v7.0.0a6: language badge. Hidden when p.language is
@@ -797,11 +797,11 @@
           <span x-show="p.has_serena"
                 class="bg-purple-900/50 text-info px-2 py-0.5 rounded">serena</span>
           <span x-show="p.has_claude_md"
-                class="bg-cyan-900/50 text-accent px-2 py-0.5 rounded">claude.md</span>
+                class="bg-accent-soft/50 text-accent px-2 py-0.5 rounded">claude.md</span>
           <span class="text-foreground-subtle truncate font-mono flex-1" x-text="p.path"></span>
           <!-- v3.0.0a7: per-card inline ask form trigger -->
           <button type="button" @click="askExpanded = !askExpanded"
-                  class="ml-auto bg-cyan-900/50 text-accent px-2 py-0.5 rounded hover:bg-cyan-800/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+                  class="ml-auto bg-accent-soft/50 text-accent px-2 py-0.5 rounded hover:bg-accent-strong/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
                   :aria-expanded="askExpanded"
                   :aria-label="askExpanded ? 'Close inline ask form for ' + p.name : 'Open inline ask form for ' + p.name"
                   :title="askExpanded ? 'collapse ask form' : 'inline ask without leaving the dashboard'"
@@ -813,7 +813,7 @@
         <section x-show="askExpanded" x-cloak
                  x-data="askForm({ project: p.name, host: 'local' })"
                  data-tour-step="ask-form"
-                 class="mt-3 border-t border-border pt-3">
+                 class="mt-2 border-t border-border pt-3">
           <form @submit.prevent="ask()">
             <textarea x-model="question" rows="2" required minlength="3"
                       :disabled="loading"
@@ -831,14 +831,14 @@
               <button type="submit"
                       :disabled="loading || question.trim().length < 3"
                       :aria-busy="loading"
-                      class="bg-accent-strong hover:bg-accent disabled:bg-surface-3 disabled:text-foreground-muted text-white font-bold px-2 py-0.5 rounded text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                      class="bg-accent-strong hover:bg-accent disabled:bg-surface-3 disabled:text-foreground-muted text-white font-bold px-2 py-0.5 rounded text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
                 <span x-show="!loading">Ask</span>
                 <span x-show="loading" aria-hidden="true">…</span>
               </button>
               <button type="button" x-show="loading" @click="abort()"
                       aria-label="Stop streaming"
                       :aria-hidden="!loading"
-                      class="text-warning hover:text-warning underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">stop</button>
+                      class="text-warning hover:text-warning underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">stop</button>
             </div>
           </form>
           <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="mt-2 text-xs text-danger" x-text="error"></div>
@@ -847,7 +847,7 @@
                aria-live="polite"
                aria-atomic="false"
                aria-label="Streaming answer"
-               class="mt-2 text-xs whitespace-pre-wrap break-words border border-border rounded p-2 bg-gray-950/50 text-foreground leading-relaxed max-h-48 overflow-y-auto"
+               class="mt-2 text-xs whitespace-pre-wrap break-words border border-border rounded p-2 bg-surface-1/50 text-foreground leading-relaxed max-h-48 overflow-y-auto"
                x-text="streamText"></pre>
         </section>
       </article>
@@ -1207,7 +1207,7 @@
         if (rt && rt.available && rt.state_file_present) {
           if (rt.connected && !rt.stale && rt.subscribed) return 'bg-emerald-900/50 text-success';
           if (rt.connected && rt.stale) return 'bg-amber-900/50 text-warning';
-          if (rt.connected) return 'bg-cyan-900/50 text-accent';
+          if (rt.connected) return 'bg-accent-soft/50 text-accent';
           return 'bg-rose-900/50 text-danger';
         }
         return 'bg-emerald-900/50 text-success';
@@ -1444,7 +1444,7 @@
     javascript: 'bg-yellow-900/40 text-yellow-200 border-yellow-800',
     php: 'bg-purple-900/40 text-purple-200 border-purple-800',
     rust: 'bg-orange-900/40 text-orange-200 border-orange-800',
-    go: 'bg-cyan-900/40 text-accent border-accent-strong',
+    go: 'bg-accent-soft/40 text-accent border-accent-strong',
     ruby: 'bg-rose-900/40 text-rose-200 border-rose-800',
     unknown: 'bg-surface-3 text-foreground-subtle border-border',
   };
@@ -1841,7 +1841,7 @@
 
       phaseBadgeClass() {
         const map = {
-          running: 'bg-cyan-900/50 text-accent',
+          running: 'bg-accent-soft/50 text-accent',
           done: 'bg-emerald-900/50 text-success',
           failed: 'bg-rose-900/50 text-danger',
           idle: 'bg-surface-3 text-foreground-muted',
@@ -1862,7 +1862,7 @@
         const phase = this.state.phase;
         if (phase === 'running' && this.state.cancel_requested) return '⏳';
         if (phase === 'running') {
-          return '<span class="inline-block w-2 h-2 border border-cyan-300 border-t-transparent rounded-full animate-spin"></span>';
+          return '<span class="inline-block w-2 h-2 border border-accent border-t-transparent rounded-full animate-spin"></span>';
         }
         const map = { idle: '⏸', done: '✓', failed: '✗', cancelled: '⚠' };
         return map[phase] || '●';
@@ -2142,12 +2142,12 @@
      :aria-label="`Tour step ${stepIndex + 1} of ${steps.length}`">
   <!-- Backdrop. Pointer-events on so clicks dismiss the highlight
        but not the underlying card (we keep operator interactivity). -->
-  <div class="absolute inset-0 bg-gray-950/40 pointer-events-auto"
+  <div class="absolute inset-0 bg-surface-1/40 pointer-events-auto"
        @click="next()"></div>
   <!-- Popover, positioned by computed anchorRect coords. -->
   <div x-show="anchorRect"
        :style="`top: ${popoverTop}px; left: ${popoverLeft}px;`"
-       class="absolute pointer-events-auto bg-surface-2 border border-accent-strong rounded-lg p-4 shadow-2xl max-w-sm">
+       class="absolute pointer-events-auto bg-surface-2 border border-accent-strong rounded-md p-2.5 shadow-2xl max-w-sm">
     <header class="flex items-center justify-between mb-2 gap-2">
       <span class="text-[10px] uppercase tracking-wide text-accent"
             x-text="`Step ${stepIndex + 1} of ${steps.length}`"></span>
@@ -2159,7 +2159,7 @@
     </header>
     <h3 class="text-sm font-bold text-foreground mb-1"
         x-text="currentStep().title"></h3>
-    <p class="text-xs text-foreground-muted mb-3"
+    <p class="text-xs text-foreground-muted mb-2"
        x-text="currentStep().body"></p>
     <div class="flex items-center justify-between gap-2">
       <button type="button" @click="prev()"
@@ -2170,7 +2170,7 @@
       </button>
       <button type="button" @click="next()"
               aria-label="Next step"
-              class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent">
+              class="text-xs px-3 py-1 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent">
         <span x-text="stepIndex === steps.length - 1 ? 'Done' : 'Next'"></span>
       </button>
     </div>
@@ -2308,7 +2308,7 @@
    network events. Auto-refreshes every 10s; soft-fails when /api/kpi or
    /api/network/events is unreachable so the inspector never blocks. #}
 {% block inspector %}
-<div class="p-3" data-tour-step="inspector-content">
+<div class="p-2" data-tour-step="inspector-content">
   <section x-data="kpiInspector()" x-init="load(); start()" class="mb-4">
     <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Summary</h3>
     <dl class="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">

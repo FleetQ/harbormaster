@@ -1904,7 +1904,8 @@ def test_reembed_panel_phase_badge_classes(populated_config):
     # halves from raw color utilities to semantic tokens; the bg halves
     # keep their `/50` opacity variant which the migration intentionally
     # skips (semantic tokens with opacity are a future v13 polish item).
-    assert "bg-cyan-900/50 text-accent" in r.text  # running
+    # v19.0.0a4: cyan -> accent-soft as part of the violet rebrand.
+    assert "bg-accent-soft/50 text-accent" in r.text  # running
     assert "bg-emerald-900/50 text-success" in r.text  # done
     assert "bg-rose-900/50 text-danger" in r.text  # failed
     # phaseBadgeClass mapper is in scope.

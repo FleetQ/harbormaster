@@ -60,8 +60,9 @@ def test_input_css_defines_light_mode_media_query() -> None:
 def test_input_css_defines_theme_light_class() -> None:
     text = _read("tailwind.input.css")
     assert "html.theme-light" in text
-    # Light surface lightness flipped vs dark default.
-    assert "--color-surface-1: oklch(0.98 0 0)" in text
+    # v19.0.0a4: light surface uses the violet-tinted high-lightness
+    # value (was the chroma-zero `oklch(0.98 0 0)` in v12.0.0a7).
+    assert "--color-surface-1: oklch(0.97 0.005 280)" in text
 
 
 def test_input_css_defines_theme_dark_explicit_override() -> None:
@@ -70,7 +71,9 @@ def test_input_css_defines_theme_dark_explicit_override() -> None:
     light from the media query)."""
     text = _read("tailwind.input.css")
     assert "html.theme-dark" in text
-    assert "--color-surface-1: oklch(0.20 0 0)" in text
+    # v19.0.0a4: dark surface dropped from 0.20 → 0.15 (true near-
+    # black) and gained a faint cool tint (chroma 0.005, hue 280).
+    assert "--color-surface-1: oklch(0.15 0.005 280)" in text
 
 
 def test_built_tailwind_css_has_light_mode_tokens() -> None:
