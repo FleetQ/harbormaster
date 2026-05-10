@@ -63,7 +63,9 @@ def test_plugins_enabled_badge_has_icon_and_aria_label() -> None:
     assert idx != -1
     # v14.0.0a6: window grew to 1600 to clear the new host-filter dropdown
     # markup before the badge call.
-    block = src[idx : idx + 1600]
+    # v15.0.0a2: window grew to 2000 — added "all" option + Compare config
+    # button between the dropdown and the badge.
+    block = src[idx : idx + 2000]
     assert "stateBadgeHtml(pluginsBadgeProps())" in block
     # Props builder retains the same icon + aria-label semantics.
     assert "pluginsBadgeProps()" in src
