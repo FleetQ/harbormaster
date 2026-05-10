@@ -169,11 +169,12 @@ def test_wt_merge_script_uses_env_remote_override() -> None:
 
 
 def test_wt_merge_script_uses_no_ff_merge_format() -> None:
-    """Merge commit message format is `Merge $BRANCH` (mirrors the
-    autonomous-sprint convention)."""
+    """Merge commit message format is `Merge ${BRANCH}` (the v14.0.0a2
+    fix braced the variable to avoid the `set -u` ellipsis bug; the
+    bare `$BRANCH` form is also accepted for backwards compat)."""
     text = SCRIPT.read_text(encoding="utf-8")
     assert "git merge --no-ff" in text
-    assert "Merge $BRANCH" in text
+    assert ("Merge ${BRANCH}" in text) or ("Merge $BRANCH" in text)
 
 
 def test_wt_merge_script_uses_set_e_safe_mode() -> None:

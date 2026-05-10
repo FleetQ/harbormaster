@@ -191,16 +191,44 @@
                x-text="revisionPreview"></pre>
         </div>
         <!-- v12.0.0a4: unified diff vs current. Shown when the
-             "Diff against revision" dropdown has a selection. -->
-        <div x-show="diffOutput || diffError" class="mt-3 border border-cyan-900/40 rounded bg-surface-1 p-2">
-          <div class="flex items-center justify-between mb-1">
+             "Diff against revision" dropdown has a selection.
+             v14.0.0a3: format toggle (Unified / Side-by-side). -->
+        <div x-show="diffOutput || diffError || diffHtml" class="mt-3 border border-cyan-900/40 rounded bg-surface-1 p-2">
+          <div class="flex items-center justify-between mb-1 gap-2">
             <span class="text-xs text-accent">Diff: revision <span x-text="diffFrom"></span> → current</span>
+            <div class="flex items-center gap-1 text-xs" role="group" aria-label="Diff format">
+              <button type="button"
+                      @click="diffFormat = 'unified'; loadDiff()"
+                      :aria-pressed="diffFormat === 'unified'"
+                      :class="diffFormat === 'unified'
+                              ? 'border-accent-strong text-accent bg-cyan-900/30'
+                              : 'border-border text-foreground-muted hover:text-accent'"
+                      class="px-2 py-0.5 rounded border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                Unified
+              </button>
+              <button type="button"
+                      @click="diffFormat = 'html'; loadDiff()"
+                      :aria-pressed="diffFormat === 'html'"
+                      :class="diffFormat === 'html'
+                              ? 'border-accent-strong text-accent bg-cyan-900/30'
+                              : 'border-border text-foreground-muted hover:text-accent'"
+                      class="px-2 py-0.5 rounded border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                Side-by-side
+              </button>
+            </div>
           </div>
           <p x-show="diffError" role="alert" class="text-xs text-danger mb-2"
              x-text="diffError"></p>
-          <pre x-show="diffOutput && !diffError"
+          <pre x-show="diffFormat === 'unified' && diffOutput && !diffError"
                class="text-xs whitespace-pre text-foreground max-h-64 overflow-auto font-mono"
                x-text="diffOutput"></pre>
+          <!-- v14.0.0a3: server returns sanitised difflib.HtmlDiff
+               table; render via x-html. Server already sanitises but
+               we additionally restrict the container max-height for
+               UX consistency with the unified view. -->
+          <div x-show="diffFormat === 'html' && diffHtml && !diffError"
+               class="text-xs max-h-64 overflow-auto bg-gray-950/30 rounded p-1"
+               x-html="diffHtml"></div>
         </div>
       </aside>
     </article>
@@ -264,6 +292,12 @@
       diffFrom: '',
       diffOutput: '',
       diffError: '',
+      // v14.0.0a3: diff-format toggle (Unified / Side-by-side).
+      // `diffHtml` holds the server-rendered difflib.HtmlDiff table
+      // string (already sanitised server-side; we render via x-html
+      // into the same diff panel).
+      diffFormat: 'unified',
+      diffHtml: '',
       historyError: '',
       revisionPreview: '',
       revisionPreviewId: null,
@@ -434,6 +468,8 @@
         this.diffFrom = '';
         this.diffOutput = '';
         this.diffError = '';
+        // v14.0.0a3: clear html-mode buffer on history toggle too.
+        this.diffHtml = '';
         if (!this.showHistory || !this.selected) return;
         await this.loadHistory();
       },
@@ -487,19 +523,29 @@
       async loadDiff() {
         this.diffOutput = '';
         this.diffError = '';
+        this.diffHtml = '';
         if (!this.diffFrom || !this.selected) return;
         try {
+          // v14.0.0a3: format=html requests the v13.a3 side-by-side
+          // difflib.HtmlDiff table; default (no param) returns text.
+          const fmt = this.diffFormat === 'html' ? '&format=html' : '';
           const url = `/api/projects/${encodeURIComponent(this.project)}`
                       + `/memory-revisions/diff?from=${encodeURIComponent(this.diffFrom)}`
-                      + `&file=` + encodeURIComponent(this.selected.name);
+                      + `&file=` + encodeURIComponent(this.selected.name)
+                      + fmt;
           const r = await hmFetch(url);
           if (!r.ok) {
             let detail = 'HTTP ' + r.status;
             try { const j = await r.json(); detail = j.detail || detail; } catch (_) {}
             throw new Error(detail);
           }
-          this.diffOutput = await r.text();
-          if (!this.diffOutput) this.diffOutput = '(no differences)';
+          if (this.diffFormat === 'html') {
+            this.diffHtml = await r.text();
+            if (!this.diffHtml) this.diffHtml = '<em>(no differences)</em>';
+          } else {
+            this.diffOutput = await r.text();
+            if (!this.diffOutput) this.diffOutput = '(no differences)';
+          }
         } catch (e) {
           this.diffError = 'failed to load diff: ' + e.message;
         }
