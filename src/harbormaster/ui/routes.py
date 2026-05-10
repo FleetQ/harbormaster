@@ -154,15 +154,46 @@ def register_routes(
         return _render(request, "network.html", {})
 
     @app.get("/api/network/events")
-    async def list_network_events(limit: int = 500) -> dict[str, object]:
+    async def list_network_events(
+        limit: int = 500,
+        tool: str | None = None,
+        source: str | None = None,
+        from_: int | None = Query(None, alias="from"),
+        to: int | None = None,
+    ) -> dict[str, object]:
+        """v13.0.0a4: optional server-side filters.
+
+        - ``?tool=ask_project`` — exact match on the MCP tool name.
+        - ``?source=operator`` — exact match on the caller (project
+          name for cross-project routing, ``"operator"`` for direct
+          dashboard / API use).
+        - ``?from=<unix_ms>`` / ``?to=<unix_ms>`` — inclusive
+          timestamp range. Either bound is optional.
+
+        All filters AND together. Omitting all four preserves the
+        v10/v11/v12 behavior. Filters apply BEFORE LIMIT so the
+        operator gets the most recent N matching events, not the
+        most recent N events possibly filtered to nothing.
+        """
         from harbormaster.ui.network_log import network_log
 
         if limit < 1 or limit > 5000:
             raise HTTPException(400, "limit must be between 1 and 5000")
-        events = network_log.recent(limit=limit)
+        if from_ is not None and to is not None and from_ > to:
+            raise HTTPException(400, "from must be <= to")
+        events = network_log.recent(
+            limit=limit, tool=tool, source=source,
+            from_ms=from_, to_ms=to,
+        )
         return {
             "count": len(events),
             "events": [e.as_dict() for e in events],
+            "filters": {
+                "tool": tool,
+                "source": source,
+                "from": from_,
+                "to": to,
+            },
         }
 
     @app.get("/api/network/stats")
