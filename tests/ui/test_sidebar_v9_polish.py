@@ -86,11 +86,12 @@ def test_rail_collapse_state_present() -> None:
 
 
 def test_rail_collapsed_offset_main_content() -> None:
-    """When the rail is collapsed the main content's left margin
-    must shrink from 60 to 12 (Tailwind units = 240px → 48px)."""
+    """When the rail is collapsed the main content's left offset
+    must shrink from 60 to 12 (Tailwind units = 240px → 48px).
+    v10.0.0a3: `ml-` → `left-` (main is now position:fixed)."""
     src = BASE_HTML.read_text()
     # Main content has both classes bound conditionally on railCollapsed.
-    assert "railCollapsed ? 'md:ml-12' : 'md:ml-60'" in src
+    assert "railCollapsed ? 'md:left-12' : 'md:left-60'" in src
 
 
 def test_host_filter_dropdown_present() -> None:
