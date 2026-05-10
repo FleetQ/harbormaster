@@ -1,0 +1,74 @@
+{# v11.0.0a4: stateBadge unification.
+
+   A single Alpine helper for the small icon+label badges scattered
+   across statusStrip (bridge state), reembedPanel (phase), and
+   networkPanel (live/offline). Eliminates 3 near-identical markup
+   blocks so future tweaks (icon family, ring color, hover) happen
+   in one place.
+
+   Usage in a template (Alpine context):
+
+     {% include "_partials/_state_badge.html" %}
+     <template x-data="{ b: { state: 'ok', icon: '✓', color: 'emerald', label: 'enabled' } }">
+       <div x-html="stateBadgeHtml(b)"></div>
+     </template>
+
+   Or, the more idiomatic call (computed by the parent component):
+
+     <span x-html="stateBadgeHtml({ state, icon, color, label })"></span>
+
+   Props:
+     state  — semantic state name (used as data-state attr for tests)
+     icon   — single character / emoji (e.g. ✓, ⚠, ⊘)
+     color  — tailwind color name (emerald, amber, rose, gray, cyan)
+     label  — human-readable text shown to the right of the icon
+              (also becomes the aria-label).
+
+   The helper attaches itself to `window.harbormaster.stateBadgeHtml`
+   so it's reachable from any Alpine factory without per-component
+   registration. Idempotent — multiple includes are safe.
+#}
+<script>
+(function () {
+  if (window.harbormaster && window.harbormaster.stateBadgeHtml) return;
+  window.harbormaster = window.harbormaster || {};
+
+  const COLOR_CLASSES = {
+    emerald: 'bg-emerald-900/50 text-emerald-300',
+    amber:   'bg-amber-900/50 text-amber-300',
+    rose:    'bg-rose-900/50 text-rose-300',
+    cyan:    'bg-cyan-900/50 text-cyan-300',
+    gray:    'bg-gray-800 text-gray-400',
+  };
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function stateBadgeHtml(props) {
+    const state = props && props.state ? props.state : 'unknown';
+    const icon  = props && props.icon  ? props.icon  : '';
+    const color = props && props.color && COLOR_CLASSES[props.color]
+                  ? props.color
+                  : 'gray';
+    const label = props && props.label ? props.label : '';
+    const colorClass = COLOR_CLASSES[color];
+    return (
+      '<span class="text-xs px-2 py-0.5 rounded inline-flex items-center gap-1 '
+      + escapeHtml(colorClass)
+      + '" data-state="' + escapeHtml(state) + '"'
+      + ' aria-label="' + escapeHtml(label) + '">'
+      + (icon ? '<span aria-hidden="true">' + escapeHtml(icon) + '</span>' : '')
+      + '<span>' + escapeHtml(label) + '</span>'
+      + '</span>'
+    );
+  }
+
+  window.harbormaster.stateBadgeHtml = stateBadgeHtml;
+})();
+</script>

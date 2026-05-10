@@ -38,8 +38,16 @@
          class="border border-gray-800 rounded-lg p-3 bg-gray-900/40">
   <div class="flex items-baseline justify-between gap-2 mb-2 text-xs">
     <span class="text-gray-500" x-text="`${events.length} event${events.length === 1 ? '' : 's'} recorded`"></span>
-    <span class="text-gray-500" x-show="connected">live</span>
-    <span class="text-amber-400" x-show="!connected && initialized">offline</span>
+    {# v11.0.0a4: stateBadge unification — replaces two inline color-
+       only spans with the shared icon+label badge component. #}
+    <span x-show="connected"
+          x-html="window.harbormaster.stateBadgeHtml({
+            state: 'live', icon: '●', color: 'emerald', label: 'live',
+          })"></span>
+    <span x-show="!connected && initialized"
+          x-html="window.harbormaster.stateBadgeHtml({
+            state: 'offline', icon: '⊘', color: 'amber', label: 'offline',
+          })"></span>
   </div>
   <p x-show="error" :aria-hidden="!error" role="alert"
      class="text-xs text-red-400 mb-2" x-text="error"></p>

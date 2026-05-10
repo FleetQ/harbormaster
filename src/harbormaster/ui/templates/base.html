@@ -99,6 +99,10 @@
      before Alpine boots. Centralized here so every template benefits. */
   [x-cloak] { display: none !important; }
 </style>
+{# v11.0.0a4: stateBadge helper available globally via
+   window.harbormaster.stateBadgeHtml so any Alpine factory can
+   render a unified badge with one line. #}
+{% include "_partials/_state_badge.html" %}
 </head>
 <body class="h-screen overflow-hidden">
 <!-- v10.0.0a3: full app-shell layout.
