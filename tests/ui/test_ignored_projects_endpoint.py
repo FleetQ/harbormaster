@@ -68,12 +68,13 @@ def test_endpoint_pattern_diff_does_not_match_visible_projects(tmp_path: Path) -
 
 
 def test_sidebar_markup_includes_ignored_section() -> None:
-    """The base.html sidebar must declare the v10.0.0a4 ignored
-    section so operators see at-a-glance what's hidden."""
+    """The sidebar partial must declare the v10.0.0a4 ignored section
+    so operators see at-a-glance what's hidden. As of v19.0.0a1 the
+    sidebar lives in `_partials/_sidebar.html`."""
     src = (
         Path(__file__).parent.parent.parent
         / "src" / "harbormaster" / "ui"
-        / "templates" / "base.html"
+        / "templates" / "_partials" / "_sidebar.html"
     ).read_text()
     assert 'data-sidebar-group="ignored"' in src
     # State + loader hooked into the Alpine component.

@@ -58,9 +58,13 @@ def test_dispatcher_page_renders(trace_client: TestClient) -> None:
 
 
 def test_dispatcher_page_in_nav(trace_client: TestClient) -> None:
+    """v19.0.0a1 retired the topbar nav links in favor of the Cmd-K
+    command palette as the global navigation surface. Dispatcher must
+    remain reachable as a tool entry there."""
     r = trace_client.get("/")
     assert r.status_code == 200
-    assert 'href="/dispatcher"' in r.text
+    assert "id: 'dispatcher'" in r.text
+    assert "href: '/dispatcher'" in r.text
 
 
 # -- /api/dispatcher/recent ----------------------------------------------
