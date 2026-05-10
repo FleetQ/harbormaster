@@ -894,6 +894,166 @@ higher-noise triples first when the answer is dense.
 
 - Tauri / Electron native wrapper.
 - Multi-user UI (post-v1).
-- Plugin system (post-v2).
 - Non-Python backend implementations (e.g., Rust core).
 - gRPC transport.
+
+> **v2.0 update**: Plugin system landed in v2.0 — see [§24
+> Plugins](#24-plugins-v20). The "post-v2" guard was satisfied in
+> the v2.0 alpha line.
+
+---
+
+# Part B — v9–v19 additions
+
+The sections above (§1–§20) capture the v1.x architecture as drafted
+during the original Plan phase (2026-05-08). The sections below are
+additive updates documenting the major architectural surfaces that
+landed across the autonomous v9 → v18 chain and the in-flight v19
+work. Each section names the version that introduced the surface and
+the alphas that built it out.
+
+## 21. Dispatcher trace surface (v9.0.0a3 → v17.0.0a1)
+
+The dispatcher is observable end-to-end:
+
+* **`DispatcherStats` singleton** (v9.0.0a2) records per-tool
+  counters (`in_flight`, `total_completed`, `total_failed`),
+  in-flight spans, and `last_dispatched_at`. Thread-safe; ~2 lock
+  acquires per dispatch.
+* **`GET /api/dispatcher/status`** exposes the canonical schema
+  consumed by both the KPI strip and the trace surface.
+* **`GET /api/dispatcher/trace`** is an SSE stream emitting typed
+  `span_start` / `span_end` events with monotonic `span_id` and SSE
+  `id:` lines for browser-native reconnect.
+* **Backend instrumentation slice** (v16.0.0a6) adds `parent_span_id`
+  + `trace_id` + `span_context` to every span. Both backends
+  (`claude.py`, v17.0.0a2 for `codex.py`) emit child spans for the
+  model's own tool use.
+* **Waterfall renderer** (v17.0.0a1) at `GET /dispatcher` consumes
+  the parent / child stream and renders a true tree. v18.0.0a2
+  added a hover / focus tooltip surfacing span attributes.
+
+## 22. Inter-project network graph (v10.0.0a7 → v13.0.0a4)
+
+A live graph of project-to-project MCP calls, separate from the
+manifest-derived dependency graph in §18:
+
+* **`MCPCallLog` ring buffer** (v10.0.0a7) records every Harbormaster
+  MCP call with caller / target / tool / window. The
+  `X-Caller-Project` header propagated from v11.0.0a1 lets a calling
+  project identify itself.
+* **`network_store.py` SQLite-backed log** (v11.0.0a1) replaces the
+  pure ring buffer so the graph survives restarts.
+* **`GET /network`** renders the graph with a vendored Cytoscape
+  build (373 KB, lives in `ui/static/`).
+* **`GET /api/network/stats?window=…`** (v11.0.0a6) is the aggregate
+  endpoint used by the chat-list view + dashboard panels.
+* **Filters + URL state** (v13.0.0a4) — host / project / tool / window
+  filters survive reload via URL state; chat-list ↔ graph view
+  toggle is localStorage-backed (v10.0.0a8).
+
+## 23. Memories editor (v10.0.0a5 → v15.0.0a1)
+
+The UI surfaces per-project memory files for read + edit:
+
+* **Allowlist** is intentionally narrow: per-project `CLAUDE.md` plus
+  `.serena/memories/*.md`. Anything else is read-only.
+* **Atomic write-back** via `PUT` / `POST` (v10.0.0a6).
+* **`memory_revisions.db`** (v11.0.0a2) keeps the last 20 revisions
+  per file. Editor `History` toggle exposes them; v12.0.0a4 adds
+  `GET /api/memory/diff` for unified-diff viewing; v14.0.0a3 surfaces
+  side-by-side HtmlDiff.
+* **Sanitised markdown** (v11.0.0a3) — `markdown-it-py` for parsing,
+  `bleach` for sanitisation, 300 ms debounce live preview.
+* **Cmd+Z undo / redo** (v14.0.0a5) — persistent undo cursor lifted to
+  v15.0.0a1's tag UX cluster.
+* **Tag chip editor + AND/OR filter** (v15.0.0a1) — block-list YAML
+  fronts the chip UI.
+
+## 24. Plugins (v2.0)
+
+The plugin system lifted from "post-v2" to first-class in v2.0. A
+plugin contributes additional MCP tools and (optionally) UI surfaces.
+
+* `plugins list` CLI (v2.0.1) enumerates discovered plugins.
+* Cross-host plugin discovery via SSH (v14.0.0a6) lets the dashboard
+  see what's installed remotely.
+* Concurrent multi-host plugin discovery (v15.0.0a2) parallelises the
+  discovery scan; cross-host config diff lives alongside it.
+
+## 25. Backend protocol + Codex parity (v2.0 → v17.0.0a2)
+
+The backend abstraction is a Python `Protocol` lifted to
+`backends/base.py`. Two first-party backends ship in-tree:
+
+| Backend | Token usage | Tool-use sub-spans |
+|---|---|---|
+| `claude` (v1.0) | Real, in SSE `usage` (v11.0.0a5; was approximate v9.0.0a5–v11.0.0a4) | Yes (v16.0.0a6 backend slice) |
+| `codex` (v2.0) | Real (v12.0.0a1) | Yes (v17.0.0a2) |
+
+Symbol re-export pattern (v12.0.0a1): `StreamUsage` + `_StreamWithUsage`
+lifted to `base.py`, re-exported from `claude.py` so existing tests +
+external callers continue importing from the old location.
+
+## 26. Budget triad (v14.0.0a4 + v15.0.0a4 + v16.0.0a5)
+
+Three independent daily call-budget axes; the tightest cap wins per
+incoming MCP call.
+
+| Axis | Config | Endpoint | Version |
+|---|---|---|---|
+| Per-host | `[hosts.<host>] daily_call_budget = N` | `GET /api/hosts/budget` | v14.0.0a4 |
+| Per-tool | `[budget] daily_call_budget_per_tool = { … }` | `GET /api/tools/budget` | v15.0.0a4 |
+| Per-project (per host) | `[hosts.<host>.projects.<project>] daily_call_budget = N` | `GET /api/projects/budget?host=…` | v16.0.0a5 |
+
+The dashboard KPI strip surfaces today's headroom per axis plus the
+tightest cap. v17.0.0a4 added a hover tooltip on the tightest-cap KPI.
+
+## 27. App shell + light/dark theme (v8 → v19.0.0a1)
+
+The app shell evolved across four majors:
+
+* **v8.0.0a5–a6** — KPI strip atop dashboard, left navigation sidebar
+  with grouped projects + pinned. HTMX dropped (a7), semantic OKLCH
+  colour tokens added.
+* **v9.0.0a1** — Tailwind v4 vendored at wheel-build time
+  (`build_tailwind_css.py`); the wheel ships with the minified output.
+* **v9.0.0a6** — Sidebar polish (archived / rail-collapse / host
+  filter); Cmd-K palette dynamic-action.
+* **v10.0.0a3** — Full app-shell layout with fixed topbar / sidebar.
+* **v12.0.0a7** — Light-mode toggle (auto / light / dark); no flash
+  on reload via early-applied `data-theme` attribute.
+* **v15.0.0a6** — Dashboard tour wizard.
+* **v19.0.0a1** — Three-column shell rewrite: four-landmark CSS grid
+  (`hm-topbar`, `hm-sidebar`, `hm-main`, `inspector`), inspector
+  collapse via in-pane button with localStorage persistence. v10
+  fixed-footer + v9 mobile-hamburger / rail-collapse retired in
+  favour of the inspector-collapse model. Topbar nav links retired —
+  Cmd-K palette is the single navigation surface.
+
+## 28. Pre-commit hooks + config doc parity (v15.0.0a5 + v16.0.0a2)
+
+Two repo-local hooks ship in `.pre-commit-config.yaml`:
+
+* **`harbormaster-config-check`** runs `harbormaster-mcp config check`
+  against `examples/harbormaster.toml`; fails the commit on any
+  schema error.
+* **`harbormaster-config-doc-parity`** fails the commit if a Pydantic
+  field is added to `src/harbormaster/config.py` without a matching
+  mention in `docs/operator-config-reference.md`. On failure it emits
+  a copy-paste-ready markdown stanza naming the field, type, and
+  default — paste verbatim into the reference.
+
+`pre-commit` ships in `[dev]` (v16.0.0a2); `bash
+scripts/post_sync_install_hooks.sh` wires the hook into
+`.git/hooks/pre-commit`.
+
+## 29. SSE auth + heartbeat tuning (v11.0.0a7 + v12.0.0a6)
+
+* **Cookie-backed bearer for SSE** (v12.0.0a6) — UI doesn't have to
+  pass `Authorization:` from JS; the cookie is set on initial token
+  exchange.
+* **Per-surface heartbeat tuning** (v11.0.0a7) — defaults are 5 s
+  streaming / 30 s network / 10 s trace. Configurable via
+  `heartbeat_interval_streaming_s`, `heartbeat_interval_network_s`,
+  `heartbeat_interval_trace_s` top-level keys.

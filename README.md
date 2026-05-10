@@ -1,38 +1,54 @@
 # Harbormaster
 
-> MCP server that routes Q&A across all your projects — locally or over SSH. **Part of the [FleetQ](https://fleetq.net) ecosystem.**
+> One MCP server, many projects, one operator console. Local + SSH + observability + budgets — without changing directory.
 
 [![PyPI](https://img.shields.io/pypi/v/harbormaster-mcp.svg?label=harbormaster-mcp)](https://pypi.org/project/harbormaster-mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Status](https://img.shields.io/badge/status-stable-green.svg)](#status)
+[![Status](https://img.shields.io/badge/status-stable-green.svg)](#versioning)
+
+Harbormaster is an MCP server that routes Q&A and delegations across every
+project on your machine — and across SSH-reachable hosts — without making you
+`cd` between them. Each target project's subagent loads its own `CLAUDE.md` /
+Serena memories, answers, and returns a summary back to the calling
+session.
+
+It also ships a local web dashboard for the operator: a project grid with
+KPIs, an inter-project network graph, a live dispatcher trace waterfall,
+a memory editor for `CLAUDE.md` and `.serena/memories/*.md`, multi-axis
+budgets (per-host, per-tool, per-project), and a light/dark theme.
+
+> Part of the [FleetQ](https://fleetq.net) ecosystem. Standalone OSS works
+> fully without FleetQ; FleetQ Bridge integration is purely additive.
+
+---
 
 ## What it does
 
-You work across many projects, each with its own `CLAUDE.md` and Serena memories. Switching cwd loses context. Harbormaster lets one Claude Code session ask any project a question without changing directory — the project's subagent loads its own memory, answers, and returns a summary.
+You work across many projects, each with its own `CLAUDE.md` and Serena
+memories. Switching cwd loses context. Harbormaster lets one Claude Code
+(or Codex) session ask any project a question without changing directory —
+the project's subagent loads its own memory, answers, and returns a summary.
 
-Optional SSH fan-out lets the same tools target remote VPS hosts. Optional FleetQ adapter makes Harbormaster a first-class citizen of the FleetQ Bridge ecosystem (Platform Tool, A2A Agent Cards, federated knowledge graph).
+Eight MCP tools cover the day-to-day flow: list projects and hosts, inspect
+project status, ask a single project, fan out to many, recall prior Q&A,
+walk the inter-project dependency graph. Optional SSH fan-out targets
+remote VPS hosts. Optional FleetQ adapter exposes Harbormaster as a
+first-class Bridge daemon (Platform Tool, A2A Agent Cards, federated
+KnowledgeGraph).
 
-## Tools
+The companion web UI turns the same MCP server into a local operator
+console: dashboards, trace waterfall, network graph, memory editor.
 
-| Tool | Purpose | Cost |
-|---|---|---|
-| `list_projects(host=None)` | Enumerate configured projects (local) or remote dir listing (SSH). | ~50 ms / ~1 s |
-| `list_hosts()` | Configured `[hosts]` + `~/.ssh/config` Host aliases. | ~5 ms |
-| `project_status(name, host=None)` | Git log, Serena memories, log tails. | ~200 ms / ~2 s |
-| `ask_project(name, question, max_turns=5, host=None)` | Spawn `claude -p` in project cwd, return ≤ 800-word summary. | ~30 s / ~90 s |
-| `delegate_task(name, task, deliverable, allow_writes=False, host=None)` | Read-only delegation; v1 fails closed for writes. | ~60 s / ~90 s |
-| `fan_out_ask(question, project_filter=None, host_filter=None, max_concurrency=5, max_turns=3)` | Parallel multi-project Q&A. Returns one section per target. | ~`max_turns × claude_p_time` × ⌈targets/max_concurrency⌉ |
-| `recall_qa(question, top_k=5, host=None, project=None, min_similarity=0.6)` | Semantic recall over prior `ask_project` / `delegate_task` answers (v1.2 phase 1). Opt-in via `[history] enabled = true`. | ~50 ms (FTS5) / ~150 ms (vec, after model warm-up) |
-| `project_graph(format="json", include_dev_deps=False)` | Cross-project dependency graph from manifest parsing (v1.2 phase 3). Edges only when a dep name matches another known project. Returns nodes + edges + optional Mermaid markup. | ~100 ms / ~10 ms cached |
+---
 
-See [`docs/architecture-harbormaster.md`](docs/architecture-harbormaster.md) for the full design (Q&A history is §17, project graph is §18).
+## Quick start
 
-## Install
+Install with the `[ui]` extra so you also get the operator dashboard:
 
 ```bash
-pipx install harbormaster-mcp
-# or run without install:
-uvx harbormaster-mcp
+uvx --prerelease=allow 'harbormaster-mcp[ui]' --version
+# or with pipx:
+pipx install --pip-args='--pre' 'harbormaster-mcp[ui]'
 ```
 
 Register in Claude Code:
@@ -54,44 +70,82 @@ Or in Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_confi
 }
 ```
 
-### Live UI (optional)
-
-Install with the `[ui]` extra and run the dashboard alongside (or instead of) the MCP server:
+Run the operator UI alongside (separate process — both read the same
+TOML config so projects discovered by one are visible to the other):
 
 ```bash
-pipx install 'harbormaster-mcp[ui]'
+export HARBORMASTER_UI_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
 harbormaster-ui --port 7531
-# open http://127.0.0.1:7531/
+# then open http://127.0.0.1:7531/ — paste the token at the prompt
 ```
 
-v1.0.0a4 ships:
+Zero-config by default: Harbormaster auto-discovers projects under
+`~/htdocs/*` if it exists. For any other layout, see [Configuration](#configuration).
 
-- **Dashboard** at `/` — project grid with framework / git / Serena / CLAUDE.md badges (HTMX + Alpine + Tailwind via CDN, ~no build step).
-- **`GET /api/projects`** — JSON list of every project Harbormaster discovers (use this to script your own dashboards).
-- **`GET /api/health`** — `{"status":"ok","version":"..."}` for liveness probes.
+---
 
-The UI is a separate process from the MCP server. Run both — they read the same TOML config so projects discovered by one are visible to the other. SSE feed of live MCP queries lands in v1.0.0a5.
+## Tools
 
-### HTTP / SSE transport
+Eight MCP tools, all optionally targetable at a remote host via `host="<label>"`.
 
-For remote MCP clients or running outside the desktop client, Harbormaster can speak SSE / streamable-http instead of stdio. **A bearer token is required** — there is no auth-disabled HTTP mode.
+| Tool | Purpose | Cost |
+|---|---|---|
+| `list_projects(host=None)` | Enumerate configured projects (local) or remote dir listing (SSH). | ~50 ms / ~1 s |
+| `list_hosts()` | Configured `[hosts]` plus `~/.ssh/config` Host aliases. | ~5 ms |
+| `project_status(name, host=None)` | Git log, Serena memory list, log tails. | ~200 ms / ~2 s |
+| `ask_project(name, question, max_turns=5, host=None)` | Spawn `claude -p` (or configured backend) in project cwd, return ≤ 800-word summary. | ~30 s / ~90 s |
+| `delegate_task(name, task, deliverable, allow_writes=False, host=None)` | Read-only delegation (writes fail closed by default). | ~60 s / ~90 s |
+| `fan_out_ask(question, project_filter=None, host_filter=None, max_concurrency=5, max_turns=3)` | Parallel multi-project Q&A; one section per target. | ~`max_turns × backend_time × ⌈targets / max_concurrency⌉` |
+| `recall_qa(question, top_k=5, host=None, project=None, min_similarity=0.6)` | Semantic recall over prior Q&A answers. Opt-in via `[history] enabled = true`. | ~50 ms (FTS5) / ~150 ms (vec, after warm-up) |
+| `project_graph(format="json", include_dev_deps=False, transitive=False)` | Cross-project dependency graph from manifest parsing. Returns nodes + edges + optional Mermaid markup. | ~100 ms / ~10 ms cached |
 
-```bash
-export HARBORMASTER_MCP_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
-harbormaster-mcp --transport sse --host 127.0.0.1 --port 7532
-# or the new MCP spec transport:
-harbormaster-mcp --transport streamable-http --port 7532
-```
+Full design notes for each tool live in [`docs/architecture-harbormaster.md`](docs/architecture-harbormaster.md).
 
-Clients send the token as `Authorization: Bearer <token>`. Missing or wrong tokens return 401.
+---
 
-Override the env-var name with `--auth-token-env MY_VAR` if you keep secrets under a different name. Use `--host 0.0.0.0` only if you understand the implications — the bearer token is the only thing between the open port and your projects.
+## UI overview
 
-Run `harbormaster-mcp --help` for the full flag set.
+The companion dashboard (`harbormaster-ui --port 7531`) is a local-first
+operator console. All surfaces speak the same SSE event stream that powers
+the MCP transport, so what you see in the UI matches what your MCP clients
+see.
 
-## Configure
+- **Dashboard (`/`)** — KPI strip across the top (in-flight calls,
+  completed, failed, today's budget headroom, tightest cap), project grid
+  with framework / git / Serena / `CLAUDE.md` badges, Plugins / Auto-reembed
+  / Recent Q&A panels, sidebar with grouped projects + pinned + ignored.
+- **Project page (`/projects/<name>`)** — per-project status, Recent Q&A
+  history (live-updates as streamed answers complete), inline ask /
+  delegate / fan-out forms, memories list. Tab system splits the surface
+  into Status / Memory / Activity for fast switching.
+- **Network (`/network`)** — inter-project call graph rendered with a
+  vendored Cytoscape build. Edge weights track real Harbormaster MCP calls
+  (caller → target). Filters by host / project / tool / window; switchable
+  graph / chat list view; SSE-driven live append. Aggregate stats at
+  `/api/network/stats?window=…`.
+- **Dispatcher trace (`/dispatcher`)** — live in-flight spans + last-100
+  completed spans rendered as a waterfall with parent / child nesting.
+  Each span exposes tool, project, host, duration, and (where the backend
+  emits it) tool-call sub-spans for the model's own tool use. Real backend
+  token usage in the SSE `usage` event.
+- **Memories editor** — read / edit allowlisted files (per-project
+  `CLAUDE.md` + `.serena/memories/*.md`) with bleach-sanitised live
+  markdown preview, last-20-revisions history, side-by-side HTML diff,
+  Cmd+Z undo / redo, and an optional tag chip editor.
+- **Cmd-K command palette** — bigram fuzzy-matched action launcher;
+  shareable URLs via `?q=` pre-fill; pulls actions from a single catalog
+  so every page surface adds itself for free.
+- **Light / dark theme toggle** — auto / light / dark, OKLCH semantic
+  colour tokens, no flash on reload.
 
-Zero-config by default — Harbormaster discovers projects under `~/htdocs/*` if it exists. For any other layout, drop a TOML file at `~/.config/harbormaster/config.toml`:
+Operator-facing reference: [`docs/operator-guide.md`](docs/operator-guide.md).
+
+---
+
+## Configuration
+
+Zero-config by default. For any other layout, drop a TOML file at
+`~/.config/harbormaster/config.toml`:
 
 ```toml
 [projects]
@@ -105,149 +159,144 @@ remote_htdocs = "~/htdocs"
 [hosts.hetzner-1]
 ssh_host = "hetzner-1.example.com"
 remote_htdocs = "/var/www"
+
+# Optional — opt in to Q&A history / recall
+[history]
+enabled = true
+
+# Optional — daily call budgets
+[budget]
+daily_call_budget_per_tool = { ask_project = 200, delegate_task = 50 }
 ```
 
-A per-project override at `./.harbormaster.toml` in your cwd takes precedence over the user-level config.
-
-Full schema and all options: **[`docs/operator-config-reference.md`](docs/operator-config-reference.md)** — canonical reference for every TOML section, key, type, default, and valid range.
-
-## Remote hosts
-
-Every project-targeting tool accepts an optional `host` parameter. With `host` set, Harbormaster runs the equivalent command on that SSH host:
-
-```
-> ask_project(name="pricex", question="quick health check?", host="friday")
-[ssh friday bash -lc 'cd ~/htdocs/pricex && claude -p ...']
-```
-
-**Pre-flight on each remote host**:
-
-1. Install Claude Code: `npm i -g @anthropic-ai/claude-code`.
-2. Authenticate once: `claude` (this is a separate Anthropic seat per host).
-3. Ensure project paths exist with their `CLAUDE.md` / `.serena/` in place.
-4. Confirm passwordless SSH from your machine (`BatchMode=yes` is enforced).
-
-## Streaming
-
-`POST /mcp/{server}` accepts `Accept: text/event-stream` for incremental output. Long-running tools (`ask_project`, `delegate_task`, `fan_out_ask`, all 30–90s) emit heartbeat events on the wire while they run, then a final `result` event with the same MCP envelope JSON-mode would return. `ask_project` against a local project additionally emits per-token `chunk` events as `claude -p --output-format stream-json` produces them.
-
-Direct curl example (bypasses FleetQ — for testing or a custom consumer):
+A per-project override at `./.harbormaster.toml` in your cwd takes
+precedence over the user-level config. Validate at any time with:
 
 ```bash
-curl -N -X POST http://127.0.0.1:7531/mcp/harbormaster \
-  -H 'Accept: text/event-stream' \
-  -H 'Content-Type: application/json' \
-  -d '{"method":"tools/call","params":{"name":"ask_project","arguments":{"name":"alpha","question":"summarize"}}}'
+harbormaster-mcp config check
 ```
 
-Through the FleetQ Bridge, set `stream: true` in the request body — the Bridge forwards `text/event-stream` bytes verbatim with `X-Accel-Buffering: no` so reverse proxies don't buffer.
+Full schema (every section, key, type, default, valid range):
+**[`docs/operator-config-reference.md`](docs/operator-config-reference.md)**.
 
-JSON mode (no `Accept: text/event-stream`, no `stream` flag) is unchanged — fully backward-compatible.
+---
 
-## v1 limits
+## Backends
 
-- Read-only delegation (`allow_writes=True` returns an error).
-- 60 s local / 90 s remote subprocess timeout.
-- 800-word output cap (full output dumped to `/tmp/harbormaster-*.md` on truncation).
-- Remote `list_projects` returns a flat list of directory names (rich metadata is local-only — gathering it remotely would mean N round-trips).
-- Per-token `chunk` events are local-only — `ask_project` over SSH still falls back to heartbeat + final result (remote stdout demux is a separate refactor).
+Harbormaster's backend abstraction is a Protocol; the project ships two
+first-party implementations:
 
-## Status
+| Backend | Default for | Notes |
+|---|---|---|
+| `claude` (`claude -p`) | `[backends.default]` | The reference backend. Per-token streaming, real backend-reported token usage in the SSE `usage` event, tool_use sub-span instrumentation. |
+| `codex` (Codex CLI) | opt-in via `[backends.codex]` | Token instrumentation parity (v12.0.0a1). Tool-use sub-span instrumentation parity (v17.0.0a2). Same ask / delegate / fan-out surface. |
 
-**v2.1.0** — GA shipped 2026-05-09 (same evening as v1.0.0 + v2.0.0
-+ v2.0.1). The dashboard now works as a local operator console:
-Mermaid project graph + FleetQ Bridge / plugin status panels (v2.1.0a1),
-per-project detail page (a2), recall search inline (a3), "Ask this
-project" SSE form (a4), delegate + fan-out forms (a5), trajectory
-history view (a6). 554 tests, mypy --strict + ruff clean across 46
-source files.
+Switching a project's backend is a TOML edit — no code changes. SSH hosts
+each carry their own backend setting (`backend = "codex"` on the host
+block) so you can mix backends across the fleet.
 
-| Phase | Status | Focus |
-|-------|--------|-------|
-| v1.0 | **Complete** (a8–a14) | Local + SSH + Live UI + PyPI alpha publish pipeline + SSE chunk streaming on both sides + FleetQ Bridge HTTP-tunnel mode |
-| v1.1 | **Complete** (a13–a16) | Platform Tool seeder · A2A Agent Card per project · live FleetQ smoke · `update_endpoints` watch · Memory writeback · operator guide |
-| v1.2 | **Complete** (a17–a20) | Q&A history with sqlite-vec + fastembed · auto project graph from manifest parsing · federated KG via FleetQ KnowledgeGraph · cross-session memory recall via auto-grounding |
-| v2.0 | **Complete** (a1–a7) | Lockfile-aware deps + transitive graph · embedding upgrade-in-place · multi-backend (Codex) · plugin API · LLM triple extraction · cross-host recall aggregation · per-token streaming through Bridge |
-| v2.0.1 | **Complete** | SSH argv-quoting + pysher kwarg + plugin warn-missing + plugins list CLI |
-| v2.1 | **Complete** (a1–a6) | Mermaid graph + bridge/plugin status panels · project detail page · recall search inline · "Ask this project" SSE form · delegate + fan-out forms · trajectory history view |
+Pre-flight on each remote host: install the backend's CLI, authenticate
+once, ensure project paths exist with their `CLAUDE.md` / `.serena/` in
+place, and confirm passwordless SSH from your machine (`BatchMode=yes` is
+enforced by Harbormaster).
 
-See [`docs/sprint-retro-harbormaster-v1.0.0.md`](docs/sprint-retro-harbormaster-v1.0.0.md)
-for the v1 arc, [`docs/sprint-retro-harbormaster-v2.0.0.md`](docs/sprint-retro-harbormaster-v2.0.0.md)
-for v2.0, and [`docs/sprint-retro-harbormaster-v2.1.0.md`](docs/sprint-retro-harbormaster-v2.1.0.md)
-for v2.1.
-
-See [`docs/design-harbormaster.md`](docs/design-harbormaster.md) for the full design.
-
-## Lineage
-
-Harbormaster v1.0 grew out of `project-router-mcp` v0.1 (2026-05-08). v0.1 git history is preserved on this repository — the v0.1 single-file server lived at `src/server.py` and remains in commits prior to the v1.0 scaffolding refactor.
-
-## Architecture
-
-Single Python process hosting an MCP server (stdio + HTTP/SSE), an embedded Live UI, and an optional FleetQ adapter. Pluggable backend per host (default: `claude -p`). All shell-bound strings pass through `shlex.quote`.
-
-Detailed component diagrams, transport choices, and integration contract: [`docs/architecture-harbormaster.md`](docs/architecture-harbormaster.md).
+---
 
 ## FleetQ Bridge integration (optional)
 
-Install with the `[fleetq]` extra and Harbormaster can register itself as a Bridge daemon in your FleetQ deployment, advertising its 6 MCP tools to the platform:
+Install with the `[fleetq]` extra and Harbormaster registers itself as a
+Bridge daemon, advertises its MCP tools as Platform Tools, publishes an
+A2A Agent Card per project, and writes back semantic triples to the
+federated KnowledgeGraph:
 
 ```bash
-pipx install 'harbormaster-mcp[fleetq]'
+pipx install 'harbormaster-mcp[ui,fleetq]'
 ```
-
-In your config TOML:
 
 ```toml
 [fleetq]
 enabled = true
 register_as_bridge = true
-base_url = "https://app.fleetq.net"   # or your self-hosted FleetQ URL
-api_token_env = "FLEETQ_API_TOKEN"    # env var holding the Sanctum token
-heartbeat_interval = 30               # seconds between heartbeats
+base_url = "https://app.fleetq.net"
+api_token_env = "FLEETQ_API_TOKEN"
+heartbeat_interval = 30
 ```
-
-Then export your Sanctum token (must have a `team:<uuid>` ability) and run the MCP server:
 
 ```bash
 export FLEETQ_API_TOKEN=...
 harbormaster-mcp
 ```
 
-Harbormaster shows up in your FleetQ Connections UI as `harbormaster on <hostname>`. v1.0.0a6 ships **register + heartbeat + disconnect**; the reverse-WebSocket relay channel for incoming MCP tool calls lands in v1.0.0a7+.
+Harbormaster shows up in the FleetQ Connections UI as
+`harbormaster on <hostname>`. Reverse-tunnel calls flow from
+FleetQ → Bridge → Harbormaster transparently with `text/event-stream`
+forwarding (`X-Accel-Buffering: no` so reverse proxies don't buffer).
 
 Discovered contract reference: [`docs/fleetq-bridge-contract.md`](docs/fleetq-bridge-contract.md).
 
-## Releasing
+---
 
-PyPI publishing is automated via Trusted Publishing (OIDC) — no API tokens in the repo. Tag-pushes to `v*` trigger `.github/workflows/publish.yml`. Setup steps and the release checklist live in [`docs/publishing.md`](docs/publishing.md).
+## Versioning
 
-## Pre-commit hooks (v15.0.0a5)
+Harbormaster ships on a proven alpha-cadence: each major (`vN.0.0`) is
+preceded by a sequence of `vN.0.0aK` alpha tags, every alpha is a
+PyPI-published release, and the GA tag `vN.0.0` is a no-code promotion
+plus a cumulative retro doc.
+
+The cadence has shipped GA 18 times (v1 through v18) without a single
+forced rollback. Current head: **v19.0.0a1**.
+
+Every behaviour change lands in one alpha and shows up in
+[`CHANGELOG.md`](CHANGELOG.md) under the corresponding major release.
+Per-major retros under [`docs/sprint-retro-harbormaster-v*.md`](docs/)
+are the source-of-truth narrative if you want the why behind a change.
+
+PyPI publishing is automated via Trusted Publishing (OIDC) — no API
+tokens in the repo. Tag-pushes to `v*` trigger the publish workflow.
+
+---
+
+## Pre-commit hooks
 
 Two repo-local hooks ship in [`.pre-commit-config.yaml`](.pre-commit-config.yaml):
 
-- **`harbormaster-config-check`** — runs `harbormaster-mcp config check` against [`examples/harbormaster.toml`](examples/harbormaster.toml). Fails the commit on any schema error in the example.
-- **`harbormaster-config-doc-parity`** — fails the commit if a Pydantic field is added to `src/harbormaster/config.py` without a matching mention in [`docs/operator-config-reference.md`](docs/operator-config-reference.md).
+- **`harbormaster-config-check`** — validates [`examples/harbormaster.toml`](examples/harbormaster.toml) against the TOML schema. Fails the commit on any schema error.
+- **`harbormaster-config-doc-parity`** — fails the commit if a Pydantic field is added to `src/harbormaster/config.py` without a matching mention in [`docs/operator-config-reference.md`](docs/operator-config-reference.md). On failure, the hook emits a copy-paste-ready markdown stanza so adding the missing doc takes seconds.
 
 Install once:
 
 ```sh
-# v16.0.0a2: pre-commit ships in the [dev] extra, so the second
-# command just wires the hook into .git/hooks/pre-commit.
 uv sync --extra dev
 bash scripts/post_sync_install_hooks.sh
 ```
 
-(Or, if you'd rather use a system / pipx pre-commit:
-`pipx install pre-commit && pre-commit install`.)
+Or with a system / pipx pre-commit: `pipx install pre-commit && pre-commit install`.
 
-Both hooks then run on every `git commit`.
+---
 
-If `harbormaster-config-doc-parity` flags an undocumented field, it
-also emits a copy-paste-ready markdown stanza naming the field, type
-and default — paste verbatim into
-[`docs/operator-config-reference.md`](docs/operator-config-reference.md)
-and re-stage to satisfy the hook.
+## Contributing
+
+Harbormaster is primarily a single-operator tool. Pull requests are welcome
+when they fit the alpha-per-feature cadence:
+
+1. One feature per branch — `feat/v<N>.<P>-<phase-name>`.
+2. Tests + `mypy --strict` + `ruff` clean before requesting review.
+3. Update [`docs/operator-config-reference.md`](docs/operator-config-reference.md) for any new config field (the doc-parity hook will tell you).
+4. Keep changes additive when possible — Harbormaster's invariant is
+   zero breaking changes per release line.
+
+Operator workflows and deployment scenarios are documented in
+[`docs/operator-guide.md`](docs/operator-guide.md).
+
+---
+
+## Lineage
+
+Harbormaster v1.0 grew out of `project-router-mcp` v0.1 (2026-05-08). v0.1
+git history is preserved on this repository — the v0.1 single-file server
+lived at `src/server.py` in commits prior to the v1.0 scaffolding refactor.
+
+---
 
 ## License
 
