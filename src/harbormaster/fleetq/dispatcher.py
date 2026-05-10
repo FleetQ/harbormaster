@@ -51,6 +51,48 @@ logger = logging.getLogger(__name__)
 SERVER_NAME = "harbormaster"
 
 
+# v16.0.0a6: thread-local current-span context. Backends look this up
+# (via ``current_span_id()``) so child spans they emit (e.g. tool_use
+# blocks observed in claude.py's stream-json output) can be attributed
+# to the dispatch that spawned them.
+#
+# Use the ``span_context()`` context manager — never set the attribute
+# manually. Nested ``with`` blocks restore the previous value on exit
+# so child spans don't leak across dispatches.
+_thread_local = threading.local()
+
+
+def current_span_id() -> int | None:
+    """Return the active dispatch's span_id, or None outside a span."""
+    return getattr(_thread_local, "span_id", None)
+
+
+def current_trace_id() -> int | None:
+    """Return the active dispatch's trace_id, or None outside a span."""
+    return getattr(_thread_local, "trace_id", None)
+
+
+@contextlib.contextmanager
+def span_context(*, span_id: int, trace_id: int | None) -> Iterator[None]:
+    """Bind ``span_id`` + ``trace_id`` for the duration of the block.
+
+    Used by the dispatcher around the actual MCP tool invocation so
+    backends called inside that invocation see the parent span via
+    :func:`current_span_id` / :func:`current_trace_id`. Restores any
+    previously-bound values on exit (supports nested dispatches in
+    the same thread).
+    """
+    prev_span = getattr(_thread_local, "span_id", None)
+    prev_trace = getattr(_thread_local, "trace_id", None)
+    _thread_local.span_id = span_id
+    _thread_local.trace_id = trace_id
+    try:
+        yield
+    finally:
+        _thread_local.span_id = prev_span
+        _thread_local.trace_id = prev_trace
+
+
 # v9.0.0a2: per-tool runtime counters for the dispatcher.
 # Exposed via GET /api/dispatcher/status (UI route) and consumed by
 # the dispatcher CLI when running against an HTTP server.
@@ -72,6 +114,13 @@ class _RunningSpan:
     project: str | None
     started_at: float  # epoch seconds
     span_id: int = 0  # monotonically incrementing per-process
+    # v16.0.0a6: parent/child + trace correlation. Root span has
+    # parent_span_id = None; child spans (e.g. tool_use blocks
+    # observed inside a backend stream) point at the dispatch span
+    # that spawned them. trace_id == root span_id so the waterfall
+    # renderer can group every span belonging to one operator action.
+    parent_span_id: int | None = None
+    trace_id: int | None = None
 
 
 @dataclass
@@ -81,6 +130,11 @@ class _CompletedSpan:
     Lives in DispatcherStats._completed (bounded ring buffer) so the
     trace waterfall surface can show the last-N completions without
     a separate persistent store.
+
+    v16.0.0a6: ``parent_span_id`` + ``trace_id`` carry parent/child
+    + trace-correlation context for the waterfall renderer. Default
+    None preserves the v9.a3 byte-shape for callers that never
+    populated them.
     """
     span_id: int
     tool: str
@@ -88,6 +142,8 @@ class _CompletedSpan:
     started_at: float
     ended_at: float
     ok: bool
+    parent_span_id: int | None = None
+    trace_id: int | None = None
 
 
 # Bounded number of completed spans to retain. Pure UI data — sized to
@@ -145,29 +201,83 @@ class DispatcherStats:
         self._next_span_id: int = 1
         self._subscribers: list[_SpanSubscription] = []
 
-    def record_start(self, tool: str, project: str | None = None) -> _RunningSpan:
+    def record_start(
+        self,
+        tool: str,
+        project: str | None = None,
+        *,
+        parent_span_id: int | None = None,
+        trace_id: int | None = None,
+    ) -> _RunningSpan:
         """Note that a tool dispatch has begun. Returns the span the
-        caller must pass back to ``record_end``."""
+        caller must pass back to ``record_end``.
+
+        v16.0.0a6: ``parent_span_id`` and ``trace_id`` are optional
+        carry-throughs. When both are None (the legacy v9.a3 path),
+        the new span becomes a root: ``trace_id = span_id`` so every
+        descendant emitted under it can be grouped without needing
+        the dispatcher to look anything up. When ``parent_span_id``
+        is set but ``trace_id`` is not, the trace_id propagates from
+        the running parent.
+        """
         with self._lock:
+            new_span_id = self._next_span_id
+            self._next_span_id += 1
+            # Root spans carry trace_id = own span_id so descendants
+            # can group by trace_id without a parent lookup chain.
+            if parent_span_id is None and trace_id is None:
+                effective_trace_id: int | None = new_span_id
+            elif trace_id is not None:
+                effective_trace_id = trace_id
+            else:
+                # parent_span_id is set; inherit its trace_id.
+                # mypy: the outer branches guarantee parent_span_id is int.
+                assert parent_span_id is not None  # noqa: S101
+                effective_trace_id = self._lookup_trace_id_locked(parent_span_id)
+                if effective_trace_id is None:
+                    # Parent already finished and rolled out of the
+                    # ring; treat the child as a new root.
+                    effective_trace_id = new_span_id
             span = _RunningSpan(
                 tool=tool,
                 project=project,
                 started_at=time.time(),
-                span_id=self._next_span_id,
+                span_id=new_span_id,
+                parent_span_id=parent_span_id,
+                trace_id=effective_trace_id,
             )
-            self._next_span_id += 1
             counters = self._tools.setdefault(tool, _ToolCounters())
             counters.in_flight += 1
             self._running.append(span)
             event = {
                 "kind": "span_start",
                 "span_id": span.span_id,
+                "parent_span_id": span.parent_span_id,
+                "trace_id": span.trace_id,
                 "tool": span.tool,
                 "project": span.project,
                 "started_at": span.started_at,
             }
             self._fanout_locked(event)
         return span
+
+    def _lookup_trace_id_locked(self, span_id: int) -> int | None:
+        """Walk both the running list and the recently-completed ring
+        to find the trace_id of the span with the given id.
+
+        Caller MUST hold ``self._lock``.
+        """
+        for s in self._running:
+            if s.span_id == span_id:
+                return s.trace_id
+        # _completed is typed as Any (it's a deque held inside an
+        # Any-typed slot for stdlib-compatibility), so explicitly
+        # narrow each entry to _CompletedSpan to satisfy mypy --strict.
+        for raw in self._completed:
+            c: _CompletedSpan = raw
+            if c.span_id == span_id:
+                return c.trace_id
+        return None
 
     def record_end(self, span: _RunningSpan, *, ok: bool) -> None:
         """Note that a previously-started dispatch has ended."""
@@ -191,11 +301,15 @@ class DispatcherStats:
                 started_at=span.started_at,
                 ended_at=ended_at,
                 ok=ok,
+                parent_span_id=span.parent_span_id,
+                trace_id=span.trace_id,
             )
             self._completed.append(completed)
             event = {
                 "kind": "span_end",
                 "span_id": span.span_id,
+                "parent_span_id": span.parent_span_id,
+                "trace_id": span.trace_id,
                 "tool": span.tool,
                 "project": span.project,
                 "started_at": span.started_at,
@@ -228,6 +342,8 @@ class DispatcherStats:
         return [
             {
                 "span_id": s.span_id,
+                "parent_span_id": s.parent_span_id,
+                "trace_id": s.trace_id,
                 "tool": s.tool,
                 "project": s.project,
                 "started_at": s.started_at,
@@ -384,12 +500,17 @@ class MCPDispatcher:
         project = _extract_project(payload)
         span = _STATS.record_start(tool=tool_name, project=project)
         ok = False
-        try:
-            envelope = self._dispatch_envelope(payload)
-            ok = not _envelope_is_error(envelope)
-            yield json.dumps(envelope, default=str)
-        finally:
-            _STATS.record_end(span, ok=ok)
+        # v16.0.0a6: bind the active span so backends invoked inside
+        # the dispatch can attribute child spans (e.g. tool_use blocks
+        # observed in claude.py's stream-json output) via
+        # `current_span_id()` / `current_trace_id()`.
+        with span_context(span_id=span.span_id, trace_id=span.trace_id):
+            try:
+                envelope = self._dispatch_envelope(payload)
+                ok = not _envelope_is_error(envelope)
+                yield json.dumps(envelope, default=str)
+            finally:
+                _STATS.record_end(span, ok=ok)
 
     def _dispatch_envelope(self, payload: dict[str, Any]) -> dict[str, Any]:
         method = payload.get("method")

@@ -10,7 +10,10 @@ from harbormaster.fleetq.bridge import BridgeClient, BridgeError, RegisterRespon
 from harbormaster.fleetq.dispatcher import (
     DispatcherStats,
     MCPDispatcher,
+    current_span_id,
+    current_trace_id,
     get_dispatcher_stats,
+    span_context,
 )
 from harbormaster.fleetq.endpoints import HARBORMASTER_TOOLS, build_manifest
 from harbormaster.fleetq.heartbeat import HeartbeatLoop
@@ -37,6 +40,9 @@ __all__ = [
     "MemoryWriter",
     "RegisterResponse",
     "build_manifest",
+    "current_span_id",
+    "current_trace_id",
     "get_dispatcher_stats",
     "read_bridge_state",
+    "span_context",
 ]
