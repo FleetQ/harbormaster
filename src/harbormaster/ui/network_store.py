@@ -300,6 +300,32 @@ class NetworkStore:
             ).fetchall()
         return {str(r[0]): int(r[1]) for r in rows}
 
+
+    def count_by_tool(
+        self, *, since_ms: int | None = None,
+    ) -> dict[str, int]:
+        """v15.0.0a4: per-tool call counts in the given time window.
+
+        Used by /api/tools/budget to compare per-tool call volume
+        against the optional ``daily_call_budget_per_tool`` from
+        ``[budget]`` config. ``since_ms`` is unix-ms; ``None`` means
+        all rows.
+
+        Mirrors :meth:`count_by_target` for shape consistency.
+        """
+        params: list[object] = []
+        where = ""
+        if since_ms is not None:
+            where = "WHERE timestamp >= ?"
+            params.append(since_ms)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT tool, COUNT(*) AS c FROM mcp_calls {where} "
+                "GROUP BY tool",
+                params,
+            ).fetchall()
+        return {str(r[0]): int(r[1]) for r in rows}
+
     def distinct_sources(self, *, scan_limit: int = 1000) -> list[str]:
         """v14.0.0a2: distinct caller (source) values across the most
         recent ``scan_limit`` events, sorted alphabetically.

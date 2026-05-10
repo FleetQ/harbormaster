@@ -100,14 +100,32 @@
   </div>
   <!-- v14.0.0a4: per-host call budget summary. Shows the worst-usage
        host's percentage; "—" if no hosts have a budget configured.
-       Click cell-text to navigate to /network for the full breakdown. -->
-  <div class="border border-border rounded-lg p-3 bg-gray-900/40"
-       data-kpi-cell="hosts-budget">
+       Click cell-text to navigate to /network for the full breakdown.
+       v15.0.0a4: hover reveals the per-tool budget breakdown beneath.
+       The data is pulled lazily on first hover (loadToolsBudget), so
+       operators that never hover pay zero cost. -->
+  <div class="border border-border rounded-lg p-3 bg-gray-900/40 relative"
+       data-kpi-cell="hosts-budget"
+       @mouseenter="showToolsBudget()"
+       @mouseleave="toolsBudgetHover = false">
     <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Host budget</p>
     <p class="text-2xl font-bold pt-0.5"
        :class="hostBudgetClass()"
        x-text="hostBudgetLabel()"
        :aria-label="hostBudgetAriaLabel()"></p>
+    <!-- v15.0.0a4: per-tool breakdown on hover. -->
+    <div x-show="toolsBudgetHover && (toolsBudget.tools || []).length > 0"
+         x-cloak
+         class="absolute left-0 right-0 top-full mt-1 z-10 border border-border rounded bg-gray-950/95 p-2 text-[10px] space-y-0.5 shadow-lg">
+      <p class="text-foreground-subtle uppercase tracking-wide">Per-tool · 24h</p>
+      <template x-for="t in (toolsBudget.tools || [])" :key="'tb:' + t.tool">
+        <div class="flex items-baseline gap-2">
+          <span class="font-mono text-foreground-muted truncate" x-text="t.tool"></span>
+          <span class="text-foreground-subtle"
+                x-text="t.budget == null ? `${t.calls_24h} calls` : `${t.usage_pct}% (${t.calls_24h}/${t.budget})`"></span>
+        </div>
+      </template>
+    </div>
   </div>
 </section>
 
@@ -737,6 +755,12 @@
       // v14.0.0a4: per-host call budget summary. Loaded separately so
       // the existing /api/kpi shape doesn't have to grow.
       hostBudget: { hosts: [] },
+      // v15.0.0a4: per-tool budget breakdown — lazy-loaded on first
+      // hover over the host-budget KPI cell. Operators that never
+      // hover never trigger the fetch.
+      toolsBudget: { tools: [] },
+      toolsBudgetHover: false,
+      _toolsBudgetLoaded: false,
       _interval: null,
 
       async loadKpi() {
@@ -746,6 +770,25 @@
           this.kpi = await r.json();
         } catch (_) {
           // Soft-fail — leave kpi = {} so cells fall back to '—'.
+        }
+      },
+
+      // v15.0.0a4: lazy fetch of the per-tool budget breakdown. Only
+      // hits /api/tools/budget on first hover; subsequent hovers reuse
+      // the cached result. Polls also refresh it (via the 30s tick)
+      // so an idle hover keeps the data fresh.
+      async loadToolsBudget() {
+        try {
+          const r = await hmFetch('/api/tools/budget');
+          if (!r.ok) return;
+          this.toolsBudget = await r.json();
+          this._toolsBudgetLoaded = true;
+        } catch (_) { /* soft-fail */ }
+      },
+      async showToolsBudget() {
+        this.toolsBudgetHover = true;
+        if (!this._toolsBudgetLoaded) {
+          await this.loadToolsBudget();
         }
       },
 
@@ -763,6 +806,10 @@
         this._interval = setInterval(() => {
           this.loadKpi();
           this.loadBudget();
+          // v15.0.0a4: keep the tool-breakdown current too — but only
+          // after it's been loaded once (don't fetch on a never-hovered
+          // dashboard).
+          if (this._toolsBudgetLoaded) this.loadToolsBudget();
         }, 30000);
       },
 

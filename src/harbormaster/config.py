@@ -15,7 +15,7 @@ import tomllib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 LogLevel = Literal["debug", "info", "warning", "error", "critical"]
 _FORBID_EXTRA = ConfigDict(extra="forbid")
@@ -197,6 +197,40 @@ class PluginsConfig(BaseModel):
     allow: list[str] = Field(default_factory=list)
 
 
+
+class BudgetConfig(BaseModel):
+    """v15.0.0a4 — per-tool soft call budgets.
+
+    Counterpart to ``HostConfig.daily_call_budget`` which tracks
+    per-host call volume. ``daily_call_budget_per_tool`` is a
+    ``{tool_name: int}`` map; tools NOT listed have no budget
+    tracked. Budgets are surfaced via ``GET /api/tools/budget`` and
+    on the dashboard KPI strip when v14.0.0a4's
+    ``hosts-budget`` cell is hovered (it expands to show the
+    per-tool breakdown).
+
+    Empty map = no per-tool budgets configured (the v14 per-host
+    budget remains the only call-volume guard). All values must be
+    > 0; setting a 0 budget would mean "always over budget" which
+    is never useful.
+    """
+
+    model_config = _FORBID_EXTRA
+
+    daily_call_budget_per_tool: dict[str, int] = Field(default_factory=dict)
+
+    @field_validator("daily_call_budget_per_tool")
+    @classmethod
+    def _validate_positive(cls, v: dict[str, int]) -> dict[str, int]:
+        for tool, budget in v.items():
+            if budget <= 0:
+                raise ValueError(
+                    f"daily_call_budget_per_tool[{tool!r}] must be > 0; "
+                    f"got {budget}",
+                )
+        return v
+
+
 class IgnoreConfig(BaseModel):
     """v10.0.0a4: top-level project ignore patterns.
 
@@ -239,6 +273,9 @@ class HarbormasterConfig(BaseModel):
     # v12.0.0a3: surfaces the previously hard-coded retention caps so
     # large deployments can crank them up without recompiling.
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
+    # v15.0.0a4: per-tool soft call budgets — operator-side warning
+    # surface, not enforcement. Empty by default.
+    budget: BudgetConfig = Field(default_factory=BudgetConfig)
 
 
 def _expand(p: str) -> Path:
