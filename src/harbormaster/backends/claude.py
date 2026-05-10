@@ -24,6 +24,69 @@ from harbormaster.ssh import SshTimeoutError, diagnose_ssh_failure, run_ssh
 __all__ = ["ClaudeBackend", "StreamUsage", "_StreamWithUsage"]
 
 
+# v16.0.0a6: per-process registry mapping a Claude `tool_use.id` to
+# the running span we opened for it. Populated by
+# `_maybe_emit_tool_use_span`, drained by `_maybe_close_tool_result_span`.
+# The registry is best-effort — if a `tool_use` lands without a
+# matching `tool_result` (e.g. cancelled run), the entry just stays
+# pinned until the process restarts. Unbounded growth is bounded
+# practically by the dispatch lifetime; harbormaster restarts often
+# enough that this is fine for an observability surface.
+_TOOL_USE_SPANS: dict[str, object] = {}
+
+
+def _maybe_emit_tool_use_span(block: dict[str, object]) -> None:
+    """Open a child span for a Claude `tool_use` block, if a parent
+    dispatch is currently active. Failures are swallowed.
+    """
+    try:
+        from harbormaster.fleetq import (
+            current_span_id,
+            current_trace_id,
+            get_dispatcher_stats,
+        )
+    except Exception:  # noqa: BLE001  — instrumentation must never raise
+        return
+    parent = current_span_id()
+    if parent is None:
+        return  # outside a dispatch → no span to attribute against.
+    use_id = block.get("id")
+    name = block.get("name")
+    if not isinstance(use_id, str) or not isinstance(name, str):
+        return
+    try:
+        span = get_dispatcher_stats().record_start(
+            tool=f"claude.tool:{name}",
+            parent_span_id=parent,
+            trace_id=current_trace_id(),
+        )
+    except Exception:  # noqa: BLE001
+        return
+    _TOOL_USE_SPANS[use_id] = span
+
+
+def _maybe_close_tool_result_span(block: dict[str, object]) -> None:
+    """Close the child span previously opened for the matching
+    `tool_use.id`. The Claude stream-json `tool_result` block carries
+    `tool_use_id` to correlate. Failures are swallowed.
+    """
+    try:
+        from harbormaster.fleetq import get_dispatcher_stats
+    except Exception:  # noqa: BLE001
+        return
+    use_id = block.get("tool_use_id")
+    if not isinstance(use_id, str):
+        return
+    span = _TOOL_USE_SPANS.pop(use_id, None)
+    if span is None:
+        return
+    is_error = bool(block.get("is_error"))
+    try:
+        get_dispatcher_stats().record_end(span, ok=not is_error)  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001
+        return
+
+
 class ClaudeBackend:
     """Spawns `claude -p` locally or over SSH and parses the JSON output.
 
@@ -198,6 +261,14 @@ class ClaudeBackend:
         authoritative final usage block, which we feed into the
         passed-in `StreamUsage` (v11.0.0a5).
 
+        v16.0.0a6: ``tool_use`` blocks emit child spans tagged with
+        the active dispatch's ``span_id`` / ``trace_id`` (via
+        :func:`harbormaster.fleetq.current_span_id`) so the
+        dispatcher trace surface can show parent/child waterfall
+        rows. ``tool_result`` blocks close the matching child span.
+        Failures inside the instrumentation are silently swallowed
+        — tracing is best-effort, never blocks the user-facing text.
+
         Tolerates malformed lines (raises BackendError only when the
         upstream contract is clearly broken).
         """
@@ -223,7 +294,15 @@ class ClaudeBackend:
         for block in content:
             if not isinstance(block, dict):
                 continue
-            if block.get("type") != "text":
+            block_type = block.get("type")
+            if block_type == "tool_use":
+                # v16.0.0a6: best-effort child-span emission.
+                _maybe_emit_tool_use_span(block)
+                continue
+            if block_type == "tool_result":
+                _maybe_close_tool_result_span(block)
+                continue
+            if block_type != "text":
                 continue
             text = block.get("text")
             if isinstance(text, str) and text:

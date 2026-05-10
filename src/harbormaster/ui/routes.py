@@ -717,6 +717,9 @@ def register_routes(
                         "data": json.dumps(
                             {
                                 "span_id": span["span_id"],
+                                # v16.0.0a6: parent/trace context.
+                                "parent_span_id": span.get("parent_span_id"),
+                                "trace_id": span.get("trace_id"),
                                 "tool": span["tool"],
                                 "project": span["project"],
                                 "started_at": span["started_at"],
