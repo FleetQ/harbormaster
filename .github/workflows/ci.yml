@@ -21,6 +21,11 @@ concurrency:
 permissions:
   contents: read
 
+# v18.0.0a1: re-lands the screenshot autobootstrap workflow that v14.0.0a1
+# originally tried. The earlier attempt was reverted because the operator
+# token lacked `workflow` scope and could not edit `.github/workflows/*`.
+# Token scope was refreshed in v18.0; the job below now ships unmodified.
+
 jobs:
   test:
     name: ${{ matrix.os }} · py${{ matrix.python-version }}
@@ -447,3 +452,57 @@ jobs:
           name: dist
           path: dist/
           retention-days: 14
+
+  screenshot-autobootstrap:
+    # v18.0.0a1 (re-lands v14.0.0a1 deviation): on every push to `main`, run
+    # the screenshot-diff harness with HM_SCREENSHOT_AUTOBOOTSTRAP=1. Missing
+    # baseline PNGs are written in-place by the harness. If new files were
+    # produced, commit them back to `main` so subsequent PR runs assert
+    # against the freshly-blessed baselines.
+    #
+    # Skipped on PR runs and on tag pushes — autobootstrap is only meaningful
+    # on the post-merge build.
+    name: Screenshot baselines (autobootstrap on main)
+    runs-on: ubuntu-24.04
+    needs: smoke-ui-browser
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need a real (non-shallow) checkout so the commit-back has history.
+          fetch-depth: 0
+          # Use the workflow-scoped GITHUB_TOKEN so the push back to main is
+          # authenticated. Default checkout uses this token for `git push`.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (dev + ui-test)
+        run: uv sync --extra dev --extra ui-test
+
+      - name: Install Playwright Chromium binary
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run screenshot harness in autobootstrap mode
+        env:
+          HM_SCREENSHOT_AUTOBOOTSTRAP: "1"
+        run: uv run pytest tests/ui/_screenshot_diff/ -m browser -v
+
+      - name: Commit + push new baselines if any were written
+        run: |
+          # Only restage the baseline directory — never `git add -A` here.
+          # The harness only writes inside tests/ui/_screenshot_diff/baseline/.
+          git add tests/ui/_screenshot_diff/baseline/
+          if git diff --cached --quiet; then
+            echo "No new baselines — autobootstrap pass produced zero changes."
+            exit 0
+          fi
+          git config user.email "harbormaster-bot@github.com"
+          git config user.name  "harbormaster-bot"
+          git commit -m "ci: autobootstrap new screenshot baselines [skip ci]"
+          git push origin HEAD:main
