@@ -83,9 +83,11 @@
               class="mt-2 space-y-1"
               data-trace-spans>
             <template x-for="span in trace.spans" :key="'span:' + span.span_id">
-              <li class="flex items-start gap-2 text-xs"
+              <li class="flex items-start gap-2 text-xs group relative focus-within:z-10"
                   :data-span-id="span.span_id"
-                  :data-depth="span.depth">
+                  :data-depth="span.depth"
+                  :aria-describedby="`span-tip-${span.span_id}`"
+                  tabindex="0">
                 <!-- Indent column scales with depth (1.25rem per level) -->
                 <span class="block flex-shrink-0"
                       :style="`width: ${0.25 + span.depth * 1.25}rem`"
@@ -116,6 +118,25 @@
                     <span class="text-foreground-subtle w-16 text-right"
                           x-text="`${span.duration_ms}ms`"></span>
                   </span>
+                  <!--
+                    v18.0.0a2: hover/focus tooltip summary. Reveals on
+                    pointer-hover OR keyboard-focus on the row (the row
+                    is `tabindex=0` and the tooltip is the row's
+                    aria-describedby target). No new tooltip library —
+                    Tailwind `group-hover` + `group-focus-within`
+                    handle reveal; `role=tooltip` + matching id deliver
+                    a11y. Pre-built summary string lives in
+                    spanTooltipSummary(span) so the JS factory
+                    centralizes the format and tests can pin it.
+                  -->
+                  <span :id="`span-tip-${span.span_id}`"
+                        role="tooltip"
+                        data-span-tooltip
+                        class="absolute left-8 top-full mt-1 z-20 hidden
+                               group-hover:block group-focus-within:block
+                               whitespace-pre rounded bg-surface-3 px-2 py-1
+                               text-[11px] text-foreground shadow"
+                        x-text="spanTooltipSummary(span)"></span>
                   <!-- Expanded attribute panel -->
                   <dl x-show="span.expanded"
                       class="mt-1 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-foreground-muted"
@@ -352,6 +373,29 @@
         try {
           return new Date(epoch * 1000).toISOString().replace('T', ' ').slice(0, 19);
         } catch (_) { return String(epoch); }
+      },
+
+      // v18.0.0a2: hover/focus tooltip summary for a span row.
+      // Format: "name | duration | status | k1=v1 | k2=v2"
+      // The first two attribute key-value pairs come from the span's
+      // own non-trivial fields (project + span_id) — the dispatcher
+      // span shape doesn't carry a separate `attributes` map, and
+      // these are the same first two fields the expanded panel
+      // surfaces, just inlined for the hover summary.
+      spanTooltipSummary(span) {
+        const parts = [
+          span.tool,
+          `${span.duration_ms}ms`,
+          span.ok ? 'ok' : 'error',
+        ];
+        const attrs = [
+          ['project', span.project || '—'],
+          ['span_id', span.span_id],
+        ];
+        for (const [k, v] of attrs.slice(0, 2)) {
+          parts.push(`${k}=${v}`);
+        }
+        return parts.join(' | ');
       },
 
       // ---- Active span helpers (preserved from v9.0.0a3) -----------------
