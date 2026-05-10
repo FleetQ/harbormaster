@@ -209,6 +209,10 @@ def test_trace_sse_first_event_is_ready(trace_client: TestClient) -> None:
 
     # Build a minimal Request stand-in that the handler expects.
     class _Req:
+        @property
+        def headers(self) -> dict[str, str]:
+            return {}
+
         async def is_disconnected(self) -> bool:
             return True  # cause the generator to short-circuit after `ready`
 

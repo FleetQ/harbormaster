@@ -60,6 +60,28 @@ _STATIC_MEDIA_TYPES: dict[str, str] = {
 }
 
 
+class _StreamIdSeq:
+    """v9.0.0a4: per-stream monotonic SSE event id generator.
+
+    Each ``next()`` returns a fresh string id. Used by request-scoped
+    SSE generators so every emitted event carries the SSE ``id:`` line
+    — which the browser's EventSource records as ``lastEventId`` and
+    sends back as ``Last-Event-ID`` on reconnect. The /mcp/* dispatch
+    path is request-scoped so resumption is a no-op there; the trace
+    surface (``/api/dispatcher/trace``) uses span_id as its event id
+    instead so cross-connection resumption works.
+    """
+
+    __slots__ = ("_n",)
+
+    def __init__(self, start: int = 0) -> None:
+        self._n = start
+
+    def next(self) -> str:
+        self._n += 1
+        return str(self._n)
+
+
 class McpProxyRequest(BaseModel):
     """Body schema for POST /mcp/{server} — mirrors agent-fleet's
     BridgeController::mcpCall validate() shape."""
@@ -256,7 +278,24 @@ def register_routes(
         ``{kind, span_id, tool, project, started_at, [ended_at, ok]}``.
         Heartbeats every ``_HEARTBEAT_INTERVAL_S`` seconds keep the
         connection alive through nginx/Cloudflare 60s idle timeouts.
+
+        v9.0.0a4: each event carries an SSE ``id`` field equal to the
+        event's `span_id` (process-monotonic). On reconnect, clients
+        SHOULD send a ``Last-Event-ID`` header carrying the highest
+        `span_id` they have already processed; the server replays any
+        completed spans with `span_id > last` from the ring buffer
+        before resuming the live tail.
         """
+        # v9.0.0a4: parse the Last-Event-ID header. EventSource sends it
+        # automatically on reconnect; the value is the most-recent SSE
+        # event id the client successfully processed.
+        last_event_id_raw = request.headers.get("last-event-id")
+        last_event_id: int = 0
+        if last_event_id_raw:
+            try:
+                last_event_id = max(0, int(last_event_id_raw))
+            except ValueError:
+                last_event_id = 0
 
         async def gen() -> AsyncIterator[dict[str, str]]:
             try:
@@ -266,7 +305,33 @@ def register_routes(
                 return
             stats = get_dispatcher_stats()
             sub = stats.subscribe()
-            yield {"event": "ready", "data": json.dumps({"available": True})}
+            yield {
+                "event": "ready",
+                "data": json.dumps(
+                    {"available": True, "resumed_from": last_event_id}
+                ),
+            }
+            # v9.0.0a4: replay missed completed spans from the ring
+            # buffer before resuming the live tail. Cheap — the buffer
+            # is at most 100 entries.
+            if last_event_id > 0:
+                for span in stats.recent_completed(limit=100):
+                    if int(span["span_id"]) <= last_event_id:
+                        continue
+                    yield {
+                        "event": "span_end",
+                        "id": str(span["span_id"]),
+                        "data": json.dumps(
+                            {
+                                "span_id": span["span_id"],
+                                "tool": span["tool"],
+                                "project": span["project"],
+                                "started_at": span["started_at"],
+                                "ended_at": span["ended_at"],
+                                "ok": span["ok"],
+                            }
+                        ),
+                    }
             last_heartbeat = time.time()
             try:
                 while True:
@@ -275,7 +340,14 @@ def register_routes(
                     events = sub.drain()
                     for ev in events:
                         kind = ev.pop("kind")
-                        yield {"event": kind, "data": json.dumps(ev)}
+                        # v9.0.0a4: every event carries id = span_id
+                        # so the browser's EventSource records it as
+                        # the lastEventId for the next reconnect.
+                        yield {
+                            "event": kind,
+                            "id": str(ev.get("span_id", "")),
+                            "data": json.dumps(ev),
+                        }
                     if events:
                         last_heartbeat = time.time()
                     elif time.time() - last_heartbeat >= _HEARTBEAT_INTERVAL_S:
@@ -1095,6 +1167,12 @@ async def _stream_dispatch(
 
     start = time.monotonic()
     task = asyncio.create_task(asyncio.to_thread(_dispatch_mcp, mcp, body))
+    # v9.0.0a4: per-stream monotonic event id. EventSource records the
+    # most recent id as `lastEventId`; on reconnect the browser sends it
+    # back as `Last-Event-ID`. The /mcp/* path is request-scoped so
+    # resumption isn't useful (the call is gone by then) but the id
+    # field is part of the protocol contract for typed events.
+    next_id = _StreamIdSeq()
 
     while not task.done():
         try:
@@ -1103,6 +1181,7 @@ async def _stream_dispatch(
             elapsed_ms = int((time.monotonic() - start) * 1000)
             yield {
                 "event": "heartbeat",
+                "id": next_id.next(),
                 "data": json.dumps({"elapsed_ms": elapsed_ms}),
             }
         except BaseException:  # noqa: BLE001 — task raised, post-loop handles it
@@ -1120,19 +1199,21 @@ async def _stream_dispatch(
     except HTTPException as e:
         yield {
             "event": "error",
+            "id": next_id.next(),
             "data": json.dumps({"status": e.status_code, "detail": e.detail}),
         }
         return
     except Exception as e:  # noqa: BLE001 — surface any error as SSE event
         yield {
             "event": "error",
+            "id": next_id.next(),
             "data": json.dumps(
                 {"status": 500, "detail": f"{type(e).__name__}: {e}"}
             ),
         }
         return
 
-    yield {"event": "result", "data": json.dumps(result)}
+    yield {"event": "result", "id": next_id.next(), "data": json.dumps(result)}
 
 
 PromptBuilder = Callable[[dict[str, Any]], str]
@@ -1335,9 +1416,13 @@ async def _emit_chunks_then_result(
     across the asyncio.to_thread Future boundary. Convert to a
     sentinel value so the asyncio side detects end-of-iter without
     ever propagating StopIteration through a Future.
+
+    v9.0.0a4: every emitted event carries a per-stream monotonic
+    SSE ``id`` so the browser's EventSource records ``lastEventId``.
     """
     chunks: list[str] = []
     sentinel = object()
+    next_id = _StreamIdSeq()
 
     def _next_or_sentinel() -> Any:
         try:
@@ -1351,6 +1436,7 @@ async def _emit_chunks_then_result(
         except BackendError as e:
             yield {
                 "event": "error",
+                "id": next_id.next(),
                 "data": json.dumps(
                     {"status": 502, "detail": f"BackendError({e.code}): {e}"}
                 ),
@@ -1359,6 +1445,7 @@ async def _emit_chunks_then_result(
         except (ValueError, FileNotFoundError) as e:
             yield {
                 "event": "error",
+                "id": next_id.next(),
                 "data": json.dumps(
                     {"status": 400, "detail": f"{type(e).__name__}: {e}"}
                 ),
@@ -1367,14 +1454,18 @@ async def _emit_chunks_then_result(
         if chunk is sentinel:
             break
         chunks.append(chunk)
-        yield {"event": "chunk", "data": json.dumps({"text": chunk})}
+        yield {
+            "event": "chunk",
+            "id": next_id.next(),
+            "data": json.dumps({"text": chunk}),
+        }
 
     envelope = {
         "result": {
             "content": [{"type": "text", "text": "".join(chunks)}],
         },
     }
-    yield {"event": "result", "data": json.dumps(envelope)}
+    yield {"event": "result", "id": next_id.next(), "data": json.dumps(envelope)}
 
 
 def _dispatch_mcp(mcp: Any, body: McpProxyRequest) -> dict[str, Any]:
