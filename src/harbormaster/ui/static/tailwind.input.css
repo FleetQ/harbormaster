@@ -1,0 +1,84 @@
+/* v9.0.0a1: Tailwind v4 source CSS.
+ *
+ * This file is the canonical source for the dashboard's CSS theme.
+ * At wheel-build time, hatchling's `build_tailwind_css.py` build hook
+ * runs `npx @tailwindcss/cli` to compile this file into the sibling
+ * `tailwind.css`, which is the artifact actually served at runtime
+ * via `GET /static/tailwind.css`.
+ *
+ * v8.0.0a7 defined `--hm-*` OKLCH tokens inline under `:root` in
+ * `base.html`. v9.0.0a1 lifts those exact values into a Tailwind
+ * v4 `@theme` block here so they become first-class theme values
+ * (Tailwind generates `--color-*` custom properties + utility
+ * classes for them automatically). The inline `:root` tokens in
+ * `base.html` remain for one full version as a fallback for
+ * operators who haven't yet served the vendored stylesheet (CDN
+ * fallback path); they will be removed in v10.
+ *
+ * Token values match v8.0.0a7 exactly — no re-derivation. Only the
+ * names change to align with Tailwind's `--color-<name>` convention
+ * (the legacy `--hm-*` aliases are kept for direct CSS consumers).
+ */
+@import "tailwindcss";
+
+@theme {
+    /* Surfaces — graduated grays, darkest = canvas. */
+    --color-surface-1: oklch(0.20 0 0);
+    --color-surface-2: oklch(0.26 0 0);
+    --color-surface-3: oklch(0.32 0 0);
+
+    /* Foreground — text & icons. */
+    --color-foreground:        oklch(0.96 0 0);
+    --color-foreground-muted:  oklch(0.74 0 0);
+    --color-foreground-subtle: oklch(0.60 0 0);
+
+    /* Accent — cyan family (primary action color). */
+    --color-accent:        oklch(0.78 0.13 215);
+    --color-accent-strong: oklch(0.62 0.15 220);
+    --color-accent-soft:   oklch(0.32 0.06 220);
+
+    /* Semantic state colors. */
+    --color-success: oklch(0.74 0.15 162);
+    --color-warning: oklch(0.80 0.16 80);
+    --color-danger:  oklch(0.66 0.20 25);
+    --color-info:    oklch(0.78 0.13 215);
+
+    /* Border tokens. */
+    --color-border:        oklch(0.32 0 0);
+    --color-border-strong: oklch(0.42 0 0);
+
+    /* Focus ring — accent at higher chroma so it punches through
+       any background. */
+    --color-ring: oklch(0.85 0.16 215);
+
+    /* Default font stack — keep monospace dashboard aesthetic from v3. */
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Legacy `--hm-*` aliases. The v8.0.0a7 audit (tests/ui/test_phase7_distribution)
+ * pinned these names; preserve them so external consumers don't break. */
+:root {
+    --hm-surface-1: var(--color-surface-1);
+    --hm-surface-2: var(--color-surface-2);
+    --hm-surface-3: var(--color-surface-3);
+    --hm-foreground:        var(--color-foreground);
+    --hm-foreground-muted:  var(--color-foreground-muted);
+    --hm-foreground-subtle: var(--color-foreground-subtle);
+    --hm-accent:        var(--color-accent);
+    --hm-accent-strong: var(--color-accent-strong);
+    --hm-accent-soft:   var(--color-accent-soft);
+    --hm-success: var(--color-success);
+    --hm-warning: var(--color-warning);
+    --hm-danger:  var(--color-danger);
+    --hm-info:    var(--color-info);
+    --hm-border:        var(--color-border);
+    --hm-border-strong: var(--color-border-strong);
+    --hm-ring: var(--color-ring);
+}
+
+/* Alpine x-cloak — centralized so every template benefits without
+ * inline `<style>` copies. */
+[x-cloak] { display: none !important; }
+
+/* Body font default. */
+body { font-family: var(--font-mono); }

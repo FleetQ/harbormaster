@@ -105,6 +105,19 @@ path = "src/harbormaster/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/harbormaster"]
+# v9.0.0a1: hatchling auto-includes every file under `packages`
+# (not just .py) so the vendored Tailwind v4 stylesheet under
+# src/harbormaster/ui/static/ ships with the wheel automatically.
+# A previously-attempted `force-include` here caused duplicate-name
+# zip entries — relying on the default include is the correct path.
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+# v9.0.0a1: compile Tailwind v4 CSS at wheel-build time. The hook
+# (build_tailwind_css.py at repo root) runs `npx @tailwindcss/cli`
+# against src/harbormaster/ui/static/tailwind.input.css, writing
+# the minified output to src/harbormaster/ui/static/tailwind.css.
+# Falls back to the committed file when Node is absent.
+path = "build_tailwind_css.py"
 
 [tool.ruff]
 line-length = 100
