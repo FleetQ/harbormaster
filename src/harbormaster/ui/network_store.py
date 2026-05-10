@@ -301,6 +301,39 @@ class NetworkStore:
         return {str(r[0]): int(r[1]) for r in rows}
 
 
+    def count_by_target_filtered(
+        self,
+        *,
+        targets: list[str],
+        since_ms: int | None = None,
+    ) -> dict[str, int]:
+        """v16.0.0a5: per-target counts restricted to a known set.
+
+        Equivalent to ``count_by_target`` followed by a Python-side
+        filter, but pushes the predicate to SQLite. Targets not seen
+        in the window are returned with count 0 so the caller can
+        render "configured but never called" cells uniformly.
+
+        Empty ``targets`` returns ``{}`` (no rows scanned).
+        """
+        if not targets:
+            return {}
+        placeholders = ",".join("?" * len(targets))
+        params: list[object] = list(targets)
+        where = f"WHERE target IN ({placeholders})"
+        if since_ms is not None:
+            where += " AND timestamp >= ?"
+            params.append(since_ms)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT target, COUNT(*) AS c FROM mcp_calls {where} "
+                "GROUP BY target",
+                params,
+            ).fetchall()
+        seen = {str(r[0]): int(r[1]) for r in rows}
+        # Fill zero-counts so the caller sees every requested target.
+        return {t: seen.get(t, 0) for t in targets}
+
     def count_by_tool(
         self, *, since_ms: int | None = None,
     ) -> dict[str, int]:

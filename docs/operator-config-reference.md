@@ -113,10 +113,26 @@ project-targeting tools can target via `host="<label>"`.
 | `connect_timeout` | `int` (s) | `10`          | Passed to `ssh -o ConnectTimeout`. |
 | `total_timeout`   | `int` (s) | `120`         | Outer wall-clock budget (kills the remote command after N seconds). |
 | `daily_call_budget` | `int`   | _none_        | v14.0.0a4: optional soft cap on the number of MCP calls routed to this host per 24h. Surfaced via `GET /api/hosts/budget` and the dashboard KPI strip. `None` (default) means no budget tracked. |
+| `projects`        | `dict[str, HostProjectBudget]` | `{}` | v16.0.0a5: per-host-per-project budget cells. Closes the budget triad alongside per-host (above) + per-tool (`[budget].daily_call_budget_per_tool`). Each entry is `[hosts.<host>.projects.<project_name>]` with a `daily_call_budget = <int>` field. Surfaced via `GET /api/projects/budget?host=<name>`. |
+
+### `[hosts.<host>.projects.<project_name>]`
+
+v16.0.0a5: nested per-project budget block. Tightest cap wins
+(per-host OR per-tool OR per-project) when more than one applies.
+
+| Key                | Type    | Default  | Notes |
+|--------------------|---------|----------|-------|
+| `daily_call_budget` | `int`  | _none_   | Soft cap on MCP calls targeting this project per 24h. `None` (default) means no per-project budget tracked. Combined with the per-host and per-tool caps via "tightest wins" arithmetic. |
 
 ```toml
 [hosts.friday]
 ssh_host = "katsarov-server.local"
+
+[hosts.friday.projects.frontend]
+daily_call_budget = 50
+
+[hosts.friday.projects.backend]
+daily_call_budget = 100
 
 [hosts.hetzner-1]
 ssh_host = "hetzner-1.example.com"

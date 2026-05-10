@@ -319,6 +319,110 @@ def register_routes(
             })
         return {"window_hours": 24, "tools": items}
 
+    @app.get("/api/projects/budget")
+    async def api_projects_budget(host: str) -> dict[str, object]:
+        """v16.0.0a5: per-host-per-project call counts (last 24h) vs
+        configured ``daily_call_budget`` from
+        ``[hosts.<host>.projects.<project_name>]`` (carry-over #9).
+
+        Closes the third axis of the budget triad: per-host (v14.a4)
+        + per-tool (v15.a4) + per-project (this).
+
+        Response shape mirrors ``/api/tools/budget``::
+
+            {
+                "host": "<name>",
+                "window_hours": 24,
+                "projects": [
+                    {"project": "frontend", "calls_24h": 12,
+                     "budget": 50, "usage_pct": 24.0,
+                     "tightest_cap": 50,
+                     "tightest_cap_axis": "project"},
+                    ...
+                ]
+            }
+
+        ``tightest_cap`` is the minimum of the per-project budget,
+        the per-host budget, and the per-tool budget for the
+        applicable tools — the cap that would actually trigger first.
+        ``tightest_cap_axis`` records which one won
+        (``"project"`` / ``"host"`` / ``"tool"``); when no cap
+        applies, it is ``null``.
+
+        404 when ``host`` is not in ``[hosts.*]``.
+        """
+        host_cfg = config.hosts.get(host)
+        if host_cfg is None:
+            raise HTTPException(
+                404,
+                f"host {host!r} is not in [hosts.*] config",
+            )
+
+        from harbormaster.ui.network_log import network_log
+
+        window_ms = 24 * 60 * 60 * 1000
+        since_ms = int(time.time() * 1000) - window_ms
+        project_names = sorted(host_cfg.projects.keys())
+        counts = network_log.count_by_target_filtered(
+            targets=project_names, since_ms=since_ms,
+        )
+
+        # The per-host budget applies to every project on this host.
+        host_budget = host_cfg.daily_call_budget
+        # Per-tool budget — tightest across "ask_project" and
+        # "delegate_task" since those are the project-targeting tools.
+        # The dict may have other tools (fan_out_ask etc.); we only
+        # care about the project-budget intersection.
+        tool_budgets = config.budget.daily_call_budget_per_tool
+        relevant_tool_caps = [
+            v for k, v in tool_budgets.items()
+            if k in {"ask_project", "delegate_task"} and v is not None
+        ]
+        per_tool_min = min(relevant_tool_caps) if relevant_tool_caps else None
+
+        items: list[dict[str, object]] = []
+        for project_name in project_names:
+            proj_cfg = host_cfg.projects[project_name]
+            calls = counts.get(project_name, 0)
+            project_budget = proj_cfg.daily_call_budget
+
+            # tightest cap across the three axes; record which one won.
+            cap_candidates: list[tuple[int, str]] = []
+            if project_budget is not None:
+                cap_candidates.append((project_budget, "project"))
+            if host_budget is not None:
+                cap_candidates.append((host_budget, "host"))
+            if per_tool_min is not None:
+                cap_candidates.append((per_tool_min, "tool"))
+            if cap_candidates:
+                tightest_cap, tightest_axis = min(
+                    cap_candidates, key=lambda t: t[0],
+                )
+                tightest_cap_v: int | None = tightest_cap
+                tightest_axis_v: str | None = tightest_axis
+            else:
+                tightest_cap_v = None
+                tightest_axis_v = None
+
+            usage_pct = (
+                None
+                if project_budget is None
+                else round(calls / project_budget * 100, 1)
+            )
+            items.append({
+                "project": project_name,
+                "calls_24h": calls,
+                "budget": project_budget,
+                "usage_pct": usage_pct,
+                "tightest_cap": tightest_cap_v,
+                "tightest_cap_axis": tightest_axis_v,
+            })
+        return {
+            "host": host,
+            "window_hours": 24,
+            "projects": items,
+        }
+
     @app.get("/api/network/sources")
     async def network_sources(
         scan_limit: int = 1000,

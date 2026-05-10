@@ -40,6 +40,25 @@ class BackendConfig(BaseModel):
     output_word_cap: int = Field(default=800, gt=0)
 
 
+class HostProjectBudget(BaseModel):
+    """v16.0.0a5: per-host-per-project budget cell.
+
+    Lets an operator say "alpha host's frontend project may consume
+    at most 50 ask-or-delegate calls per 24h" via TOML::
+
+        [hosts.alpha.projects.frontend]
+        daily_call_budget = 50
+
+    Tightest cap wins when the per-host budget
+    (``HostConfig.daily_call_budget``), the per-tool budget
+    (``BudgetConfig.daily_call_budget_per_tool``) and this per-project
+    budget all apply to the same call. ``None`` = no budget tracked.
+    """
+
+    model_config = _FORBID_EXTRA
+    daily_call_budget: int | None = Field(default=None, gt=0)
+
+
 class HostConfig(BaseModel):
     model_config = _FORBID_EXTRA
 
@@ -53,6 +72,11 @@ class HostConfig(BaseModel):
     # in network_log targeting this host vs the cap. None = no budget
     # tracked (host appears with budget=null in the report).
     daily_call_budget: int | None = Field(default=None, gt=0)
+    # v16.0.0a5: per-project budget cells (carry-over #9). Closes the
+    # third axis of the budget triad — per-host (this file),
+    # per-tool ([budget].daily_call_budget_per_tool), per-project
+    # (here). Surfaced via GET /api/projects/budget?host=<name>.
+    projects: dict[str, HostProjectBudget] = Field(default_factory=dict)
 
 
 class ServerConfig(BaseModel):
