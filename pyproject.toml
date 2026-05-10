@@ -83,6 +83,10 @@ dev = [
     "sqlite-vec>=0.1.6",
     "fastembed>=0.3",
     "onnxruntime<1.26",
+    # v13.0.0a1: Pillow drives the screenshot-diff harness's pixel
+    # comparison (ImageChops.difference). Used by the unit tests in
+    # tests/ui/_screenshot_diff/ which run in the regular -m '' pass.
+    "Pillow>=10.0",
 ]
 ui-test = [
     # v3.0.0a10: headless browser tests for the dashboard / fan-out /
@@ -91,6 +95,10 @@ ui-test = [
     #     uv run playwright install chromium
     "playwright>=1.45",
     "pytest-playwright>=0.5",
+    # v13.0.0a1: Pillow also needed for the screenshot-diff harness
+    # under -m browser (helper.py uses ImageChops). Keeps `uv sync
+    # --extra ui-test` self-sufficient.
+    "Pillow>=10.0",
 ]
 
 [project.scripts]
