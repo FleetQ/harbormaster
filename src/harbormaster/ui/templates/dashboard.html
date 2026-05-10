@@ -747,6 +747,14 @@
       open: false,
       shortcuts: [
         {
+          scope: 'global',
+          rows: [
+            { keys: 'Cmd / Ctrl + K', action: 'open command palette' },
+            { keys: '?', action: 'toggle keyboard help' },
+            { keys: 'Esc', action: 'dismiss palette / popover' },
+          ],
+        },
+        {
           scope: 'graph zoom (dashboard)',
           rows: [
             { keys: '+ / =', action: 'zoom in' },
@@ -754,13 +762,6 @@
             { keys: '↑ ↓ ← →', action: 'pan' },
             { keys: 'Esc', action: 'reset zoom' },
             { keys: 'double-tap', action: 'reset zoom (touch)' },
-          ],
-        },
-        {
-          scope: 'this popover',
-          rows: [
-            { keys: '?', action: 'toggle keyboard help' },
-            { keys: 'Esc', action: 'dismiss popover' },
           ],
         },
       ],
