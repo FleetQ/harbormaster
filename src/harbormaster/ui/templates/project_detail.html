@@ -75,8 +75,17 @@
     </p>
   </div>
   <div x-show="files.length > 0" class="grid grid-cols-1 md:grid-cols-3 gap-3">
-    <ul class="md:col-span-1 space-y-1">
-      <template x-for="f in files" :key="'mem:' + f.name">
+    <div class="md:col-span-1">
+      <!-- v14.0.0a5: tag filter input. Files are filtered by
+           substring-match on the YAML-frontmatter tags array (see
+           server-side _extract_memory_tags). Empty filter = show all. -->
+      <input type="text"
+             x-model="tagFilter"
+             placeholder="filter by tag…"
+             aria-label="Filter memories by tag"
+             class="w-full mb-2 text-xs bg-surface-1 border border-border rounded px-2 py-1 text-foreground placeholder:text-foreground-subtle focus:border-accent-strong focus:outline-none">
+      <ul class="space-y-1">
+      <template x-for="f in filteredFiles()" :key="'mem:' + f.name">
         <li>
           <button type="button"
                   @click="select(f)"
@@ -89,10 +98,19 @@
             <span x-text="f.name"></span>
             <span class="text-[10px] text-foreground-subtle ml-1"
                   x-text="`${(f.size/1024).toFixed(1)}KB`"></span>
+            <!-- v14.0.0a5: pill badges for each tag. -->
+            <span class="block mt-0.5 flex flex-wrap gap-1"
+                  x-show="(f.tags || []).length > 0">
+              <template x-for="t in (f.tags || [])" :key="'tag:' + f.name + ':' + t">
+                <span class="text-[9px] px-1.5 py-0 rounded bg-cyan-900/40 text-accent border border-cyan-900/60"
+                      x-text="t"></span>
+              </template>
+            </span>
           </button>
         </li>
       </template>
-    </ul>
+      </ul>
+    </div>
     <article class="md:col-span-2 border border-border rounded p-3 bg-gray-950/60 min-h-[8rem]">
       <p x-show="!selected" class="text-xs text-foreground-subtle">Select a file to view.</p>
       <!-- v10.0.0a6: edit toolbar -->
@@ -148,14 +166,29 @@
       <!-- v11.0.0a3: split-pane editor with live (debounced) preview.
            Raw markdown left, sanitised HTML right. -->
       <div x-show="editing" class="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <!-- v14.0.0a5: Cmd/Ctrl+Z navigates back through revision
+             history; Cmd/Ctrl+Shift+Z navigates forward. Falls
+             through to native textarea undo when no revision exists
+             in the requested direction. -->
         <textarea x-model="draft"
                   @input.debounce.300ms="updatePreview()"
-                  aria-label="Memory file source"
+                  @keydown.meta.z.prevent="navigateRevisions(-1)"
+                  @keydown.ctrl.z.prevent="navigateRevisions(-1)"
+                  @keydown.meta.shift.z.prevent="navigateRevisions(1)"
+                  @keydown.ctrl.shift.z.prevent="navigateRevisions(1)"
+                  aria-label="Memory file source — Cmd+Z navigates revision history"
                   class="w-full min-h-[20rem] bg-surface-1 border border-border rounded p-2 text-xs font-mono text-foreground"></textarea>
         <div class="prose prose-invert prose-sm max-w-none border border-border rounded p-2 bg-gray-950/40 min-h-[20rem] overflow-auto"
              aria-live="polite" aria-label="Live preview"
              x-html="previewHtml"></div>
       </div>
+      <!-- v14.0.0a5: undo/redo status — shown only while editing AND
+           there's at least one prior revision to navigate to. -->
+      <p x-show="editing && (revisions.length > 0)"
+         class="mt-1 text-[10px] text-foreground-subtle">
+        Cmd+Z = previous revision · Cmd+Shift+Z = next revision ·
+        position <span x-text="revisionCursor === null ? 'live' : `#${revisionCursor + 1} of ${revisions.length}`"></span>
+      </p>
       <!-- v11.0.0a2: revision history panel -->
       <aside x-show="showHistory" class="mt-3 border-t border-border pt-3">
         <p class="text-xs text-foreground-muted mb-2">Revision history (newest first)</p>
@@ -271,6 +304,9 @@
     return {
       project: initial.project,
       files: [],
+      // v14.0.0a5: tag filter (substring match against any tag in the
+      // file's YAML frontmatter `tags:` array). Empty = show all.
+      tagFilter: '',
       selected: null,
       rendered: '',
       error: '',
@@ -286,6 +322,10 @@
       // v11.0.0a2: revision history state
       showHistory: false,
       revisions: [],
+      // v14.0.0a5: undo/redo cursor into `revisions`. null = "live"
+      // (showing the on-disk content); 0..N-1 = index into the
+      // (newest-first) revisions array.
+      revisionCursor: null,
       // v12.0.0a4: diff-against-revision state. `diffFrom` is the
       // revision id selected in the dropdown; `diffOutput` holds the
       // unified-diff text returned by the server.
@@ -320,10 +360,22 @@
         }
       },
 
+      // v14.0.0a5: client-side filter — substring match (case-insensitive)
+      // against any tag in f.tags. Empty filter = identity.
+      filteredFiles() {
+        const q = (this.tagFilter || '').trim().toLowerCase();
+        if (!q) return this.files;
+        return this.files.filter(f =>
+          (f.tags || []).some(t => t.toLowerCase().includes(q))
+        );
+      },
+
       async select(f) {
         this.selected = f;
         this.editing = false;
         this.saveError = '';
+        // v14.0.0a5: reset undo/redo cursor when switching files.
+        this.revisionCursor = null;
         this.rendered = '<p class="text-xs text-foreground-subtle">loading…</p>';
         // v11.0.0a3: prefer server-side bleach-sanitised HTML via
         // ?render=html. Falls back to the v10 client-side marked.js
@@ -513,6 +565,55 @@
           await navigator.clipboard.writeText(this.revisionPreview);
         } catch (e) {
           this.historyError = 'clipboard error: ' + (e && e.message ? e.message : e);
+        }
+      },
+
+      // v14.0.0a5: navigate the revision history with Cmd+Z / Cmd+Shift+Z.
+      // direction: -1 = previous (older), +1 = next (newer / back to live).
+      // `revisions` is newest-first; cursor=null means "live on-disk content".
+      // Cursor cycle:
+      //   null → 0 → 1 → 2 → ...      (Cmd+Z, going older)
+      //   ... 1 → 0 → null            (Cmd+Shift+Z, going newer)
+      // Auto-loads history on first nav if it hasn't been fetched yet.
+      async navigateRevisions(direction) {
+        if (!this.selected) return;
+        if (this.revisions.length === 0) {
+          await this.loadHistory();
+          if (this.revisions.length === 0) return;
+        }
+        let next;
+        if (direction < 0) {
+          // Older: null → 0 → 1 → ...
+          next = this.revisionCursor === null ? 0 : this.revisionCursor + 1;
+          if (next >= this.revisions.length) next = this.revisions.length - 1;
+        } else {
+          // Newer: ... → 1 → 0 → null
+          if (this.revisionCursor === null) return;
+          next = this.revisionCursor - 1;
+        }
+        if (next === null || next < 0) {
+          // Restore the live (on-disk) draft. Re-fetching ensures
+          // we don't keep stale text if the file changed externally.
+          this.revisionCursor = null;
+          try {
+            const r = await hmFetch(this._fileUrl(this.selected.name));
+            if (r.ok) this.draft = await r.text();
+          } catch (_) { /* leave draft as-is */ }
+          this.updatePreview();
+          return;
+        }
+        const rev = this.revisions[next];
+        try {
+          const url = `/api/projects/${encodeURIComponent(this.project)}`
+                    + `/memory-revisions/${encodeURIComponent(rev.id)}`
+                    + `?file=` + encodeURIComponent(this.selected.name);
+          const r = await hmFetch(url);
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          this.draft = await r.text();
+          this.revisionCursor = next;
+          this.updatePreview();
+        } catch (e) {
+          this.saveError = 'failed to load revision: ' + e.message;
         }
       },
 

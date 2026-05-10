@@ -1176,6 +1176,8 @@ def register_routes(
                 "name": "CLAUDE.md",
                 "size": st.st_size,
                 "mtime": int(st.st_mtime),
+                # v14.0.0a5: YAML frontmatter `tags: [...]` if present.
+                "tags": _extract_memory_tags(claude),
             })
         memdir = project_path / ".serena" / "memories"
         if memdir.is_dir():
@@ -1187,8 +1189,57 @@ def register_routes(
                     "name": f".serena/memories/{f.name}",
                     "size": st.st_size,
                     "mtime": int(st.st_mtime),
+                    "tags": _extract_memory_tags(f),
                 })
         return out
+
+    def _extract_memory_tags(path: Path) -> list[str]:
+        """v14.0.0a5: parse a single ``tags:`` line out of YAML frontmatter.
+
+        Frontmatter shape we accept (everything else ignored)::
+
+            ---
+            tags: [foo, bar, baz]
+            ---
+
+        or::
+
+            ---
+            tags: ["foo", "bar"]
+            ---
+
+        Reads only the first 4 KiB of the file to bound cost (frontmatter
+        always lives at the top). No PyYAML dependency — we look for the
+        opening ``---``, then a single ``tags:`` line whose value is a
+        JSON-style list. Anything more exotic returns an empty list.
+        Failures are silent (operator-side feature, never block listing).
+        """
+        try:
+            head = path.read_bytes()[:4096].decode("utf-8", errors="replace")
+        except OSError:
+            return []
+        if not head.startswith("---"):
+            return []
+        # Frontmatter ends at the next "---" line. Find it.
+        end_marker = head.find("\n---", 3)
+        if end_marker == -1:
+            return []
+        block = head[3:end_marker]
+        for raw_line in block.splitlines():
+            line = raw_line.strip()
+            if not line.lower().startswith("tags:"):
+                continue
+            value = line[5:].strip()
+            if not (value.startswith("[") and value.endswith("]")):
+                return []
+            inner = value[1:-1]
+            tags: list[str] = []
+            for tok in inner.split(","):
+                t = tok.strip().strip('"').strip("'")
+                if t:
+                    tags.append(t)
+            return tags
+        return []
 
     def _memory_path_for(project_path: Path, file_token: str) -> Path:
         """Validate `file_token` and return the absolute path inside
