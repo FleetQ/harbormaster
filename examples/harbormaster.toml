@@ -34,6 +34,13 @@ output_word_cap = 800
 # remote_htdocs = "~/htdocs"
 # daily_call_budget = 1000
 
+# v16.0.0a5: per-host-per-project budget cells. Closes the budget
+# triad alongside per-host (above) and per-tool ([budget]).
+# [hosts.alpha.projects.frontend]
+# daily_call_budget = 50
+# [hosts.alpha.projects.backend]
+# daily_call_budget = 100
+
 [server]
 ui_port = 7531
 mcp_http_port = 7532
