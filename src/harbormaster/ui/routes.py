@@ -21,6 +21,7 @@ This module is only loaded when the [ui] extra is installed — pure stdio
 users never hit this import path.
 """
 import asyncio
+import difflib
 import json
 import time
 from collections.abc import AsyncIterator, Callable
@@ -1044,7 +1045,45 @@ def register_routes(
         any SSH/parse failure is returned as ``{..., "error": "<msg>"}``
         with empty plugins. ``host=local`` and missing host both keep
         the existing local-discovery behavior.
+
+        v15.0.0a2: ``?host=all`` queries every configured host
+        concurrently via ``asyncio.gather`` and returns a merged
+        envelope::
+
+            {"hosts": {"<name>": <per-host-payload>, ...}}
+
+        Each per-host payload is the same shape as the single-host
+        response (with optional ``error`` key on degraded paths).
+        ``"local"`` is included as a key with the local discovery
+        result. Errors NEVER raise — degraded hosts just carry the
+        ``error`` field.
         """
+        # v15.0.0a2: ?host=all — concurrent fan-out across all hosts.
+        if host == "all":
+            from harbormaster.plugins import query_remote_plugins
+
+            local_payload = await api_plugins(host=None)
+            host_names = sorted(config.hosts.keys())
+
+            async def _one(name: str) -> tuple[str, dict[str, object]]:
+                cfg_h = config.hosts[name]
+                # query_remote_plugins is sync (subprocess.run); offload
+                # to a thread so concurrent SSHs actually overlap rather
+                # than serialise on the event loop.
+                payload = await asyncio.to_thread(
+                    query_remote_plugins, cfg_h
+                )
+                return name, payload
+
+            if host_names:
+                pairs = await asyncio.gather(*(_one(n) for n in host_names))
+            else:
+                pairs = []
+            merged: dict[str, dict[str, object]] = {"local": local_payload}
+            for name, payload in pairs:
+                merged[name] = payload
+            return {"hosts": merged}
+
         # v14.0.0a6: cross-host shortcut. Local fallback when host is
         # unset / "local" — preserves the v2.1.0a1 behavior byte-for-byte.
         if host is not None and host != "local":
@@ -1095,6 +1134,75 @@ def register_routes(
             "discovered_count": len(eps),
             "plugins": rows,
         }
+
+
+    @app.get("/api/config/diff")
+    async def api_config_diff(host: str) -> dict[str, object]:
+        """v15.0.0a2: unified diff between local + remote config text.
+
+        Reads the local ``harbormaster.toml`` from the same search paths
+        as ``load_config`` and SSHs to the remote host for ``cat
+        ~/.config/harbormaster.toml`` via :func:`query_remote_config`.
+        Returns::
+
+            {
+                "host": "<name>",
+                "local_path": "<path or empty>",
+                "remote_path": "<path or empty>",
+                "diff": "<unified diff text>",   # may be empty if equal
+                "error": "<msg>",                # only on remote failure
+            }
+
+        404 when ``host`` is not in ``[hosts.*]``. Local-side errors
+        (no config on disk) degrade to ``local_path = ""`` and
+        ``local_text = ""``; the diff is computed against an empty
+        local file in that case.
+        """
+        host_cfg = config.hosts.get(host)
+        if host_cfg is None:
+            raise HTTPException(
+                404,
+                f"host {host!r} is not in [hosts.*] config",
+            )
+
+        from harbormaster.config import _config_search_paths
+        from harbormaster.plugins import query_remote_config
+
+        local_text = ""
+        local_path = ""
+        for candidate in _config_search_paths():
+            if candidate.is_file():
+                local_path = str(candidate)
+                try:
+                    local_text = candidate.read_text(encoding="utf-8")
+                except OSError:
+                    local_text = ""
+                break
+
+        remote_payload = await asyncio.to_thread(
+            query_remote_config, host_cfg
+        )
+        remote_text = str(remote_payload.get("text") or "")
+        remote_path = str(remote_payload.get("path") or "")
+        remote_err = remote_payload.get("error")
+
+        diff = "".join(
+            difflib.unified_diff(
+                local_text.splitlines(keepends=True),
+                remote_text.splitlines(keepends=True),
+                fromfile=local_path or "<local>",
+                tofile=f"{host}:{remote_path}" if remote_path else f"{host}:<remote>",
+            )
+        )
+        out: dict[str, object] = {
+            "host": host,
+            "local_path": local_path,
+            "remote_path": remote_path,
+            "diff": diff,
+        }
+        if remote_err:
+            out["error"] = str(remote_err)
+        return out
 
     # v7.0.0a6: TTL cache for /api/projects.
     # Per-process cache; on a 20+ project install this avoids the

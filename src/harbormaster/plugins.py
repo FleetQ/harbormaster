@@ -245,3 +245,57 @@ def query_remote_plugins(host_cfg: HostConfig) -> dict[str, Any]:
             "error": "remote response was not a JSON object",
         }
     return data
+
+
+
+def query_remote_config(host_cfg: HostConfig) -> dict[str, Any]:
+    """v15.0.0a2: SSH to ``host_cfg.ssh_host`` and read the remote
+    ``harbormaster.toml`` config text.
+
+    Returns an envelope with the canonical shape::
+
+        {"text": "<remote config text>", "path": "<remote path>"}
+
+    On any SSH or read failure, returns
+    ``{"text": "", "path": "", "error": "<message>"}`` so the caller
+    can render a degraded card without exception handling — same
+    pattern as ``query_remote_plugins``.
+
+    The remote command is ``cat ~/.config/harbormaster.toml``; if your
+    operator has a different path, point the host at it via SSH config
+    aliases (we deliberately don't take a path arg — keeps the contract
+    simple, matching the ``plugins list --json`` design).
+    """
+    from harbormaster.ssh import (
+        SshTimeoutError,
+        diagnose_ssh_failure,
+        run_ssh,
+    )
+
+    remote_path = "~/.config/harbormaster.toml"
+    # `cat` is intentional — `harbormaster-mcp config dump` doesn't exist
+    # and we want the raw on-disk file (operator may have comments etc.).
+    remote_cmd = f"cat {remote_path}"
+    try:
+        proc = run_ssh(
+            host_cfg.ssh_host,
+            remote_cmd,
+            connect_timeout=host_cfg.connect_timeout,
+            total_timeout=host_cfg.total_timeout,
+        )
+    except SshTimeoutError as exc:
+        return {"text": "", "path": "", "error": str(exc)}
+    ssh_err = diagnose_ssh_failure(host_cfg.ssh_host, proc)
+    if ssh_err is not None:
+        return {"text": "", "path": "", "error": ssh_err}
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip().splitlines()
+        last = stderr[-1] if stderr else f"exit {proc.returncode}"
+        return {
+            "text": "", "path": remote_path,
+            "error": (
+                f"remote `cat {remote_path}` failed "
+                f"(rc={proc.returncode}): {last}"
+            ),
+        }
+    return {"text": proc.stdout, "path": remote_path}

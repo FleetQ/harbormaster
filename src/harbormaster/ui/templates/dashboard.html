@@ -165,10 +165,23 @@
                 x-show="(pluginHosts || []).length > 0"
                 class="text-[10px] bg-surface-1 border border-border rounded px-1 py-0.5 text-foreground-muted">
           <option value="local">local</option>
+          <!-- v15.0.0a2: "all" — concurrent fan-out across every host. -->
+          <option value="all" x-show="(pluginHosts || []).length > 1">all</option>
           <template x-for="h in pluginHosts" :key="'ph:' + h">
             <option :value="h" x-text="h"></option>
           </template>
         </select>
+        <!-- v15.0.0a2: "Compare config" button — shown when a remote host
+             is selected. Opens an inline diff panel below the plugin
+             rows showing the unified diff between local + remote
+             harbormaster.toml. -->
+        <button type="button"
+                x-show="pluginHost && pluginHost !== 'local' && pluginHost !== 'all'"
+                @click="loadConfigDiff()"
+                aria-label="Compare config with remote host"
+                class="text-[10px] px-1.5 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent">
+          Compare config
+        </button>
         <!-- v12.0.0a2: migrated to shared stateBadgeHtml helper. -->
         <span x-html="window.harbormaster.stateBadgeHtml(pluginsBadgeProps())"></span>
       </div>
@@ -191,6 +204,42 @@
       </template>
     </div>
     <p x-show="pluginsError" :aria-hidden="!pluginsError" role="alert" aria-live="assertive" class="text-xs text-danger" x-text="pluginsError"></p>
+    <!-- v15.0.0a2: per-host fan-out summary. Only rendered when the
+         host filter is set to "all"; populated from the
+         /api/plugins?host=all envelope. -->
+    <div x-show="pluginHost === 'all' && pluginsAllHosts"
+         class="mt-2 border-t border-border pt-2 space-y-1 text-[10px]">
+      <p class="text-foreground-subtle">Per-host summary:</p>
+      <template x-for="(payload, name) in (pluginsAllHosts || {})" :key="'phost:' + name">
+        <div class="flex items-baseline gap-2">
+          <span class="font-mono text-foreground-muted" x-text="name"></span>
+          <span x-show="payload.error" class="text-danger truncate"
+                x-text="payload.error"></span>
+          <span x-show="!payload.error"
+                class="text-foreground-subtle"
+                x-text="`enabled=${payload.enabled} · ${(payload.plugins || []).length} ep`"></span>
+        </div>
+      </template>
+    </div>
+    <!-- v15.0.0a2: cross-host config diff panel. -->
+    <div x-show="configDiffOpen"
+         class="mt-3 border border-cyan-900/40 rounded bg-surface-1 p-2">
+      <div class="flex items-center justify-between mb-1 gap-2">
+        <span class="text-xs text-accent">Config diff: local → <span x-text="pluginHost"></span></span>
+        <button type="button" @click="configDiffOpen = false"
+                aria-label="Close config diff"
+                class="text-xs px-1.5 py-0 rounded border border-border hover:border-rose-700 text-foreground-muted hover:text-danger">
+          ×
+        </button>
+      </div>
+      <p x-show="configDiffError" role="alert" class="text-xs text-danger mb-2"
+         x-text="configDiffError"></p>
+      <p x-show="!configDiffError && !configDiff"
+         class="text-xs text-foreground-subtle">(no differences)</p>
+      <pre x-show="configDiff && !configDiffError"
+           class="text-xs whitespace-pre text-foreground max-h-64 overflow-auto font-mono"
+           x-text="configDiff"></pre>
+    </div>
   </article>
 </section>
 
@@ -798,6 +847,13 @@
       // once from /api/hosts so the dropdown shows configured names.
       pluginHost: 'local',
       pluginHosts: [],
+      // v15.0.0a2: per-host fan-out summary rendered when host=all.
+      // Shape: {<name>: <per-host plugin payload>, ...}
+      pluginsAllHosts: null,
+      // v15.0.0a2: cross-host config diff state.
+      configDiffOpen: false,
+      configDiff: '',
+      configDiffError: '',
 
       async loadAll() {
         await Promise.all([
@@ -821,9 +877,48 @@
             : '/api/plugins';
           const r = await hmFetch(url);
           if (!r.ok) throw new Error('HTTP ' + r.status);
-          this.plugins = await r.json();
+          const body = await r.json();
+          // v15.0.0a2: when host=all, the envelope is {hosts: {...}}.
+          // We keep `plugins` showing the local payload (the always-present
+          // entry under "local"); pluginsAllHosts populates the per-host
+          // summary panel below.
+          if (this.pluginHost === 'all' && body && body.hosts) {
+            this.pluginsAllHosts = body.hosts;
+            this.plugins = body.hosts.local || {};
+          } else {
+            this.pluginsAllHosts = null;
+            this.plugins = body;
+          }
           this.pluginsError = null;
         } catch (e) { this.pluginsError = e.message; }
+      },
+
+      // v15.0.0a2: fetch the unified diff against a remote host's
+      // harbormaster.toml. Opens the diff panel inline.
+      async loadConfigDiff() {
+        if (!this.pluginHost || this.pluginHost === 'local'
+            || this.pluginHost === 'all') return;
+        this.configDiffOpen = true;
+        this.configDiff = '';
+        this.configDiffError = '';
+        try {
+          const r = await hmFetch(
+            `/api/config/diff?host=${encodeURIComponent(this.pluginHost)}`,
+          );
+          if (!r.ok) {
+            let detail = 'HTTP ' + r.status;
+            try { const j = await r.json(); detail = j.detail || detail; } catch (_) {}
+            throw new Error(detail);
+          }
+          const body = await r.json();
+          if (body.error) {
+            this.configDiffError = body.error;
+            return;
+          }
+          this.configDiff = body.diff || '';
+        } catch (e) {
+          this.configDiffError = 'failed to load diff: ' + e.message;
+        }
       },
       // v14.0.0a6: populate the host filter dropdown from the v14.a4
       // /api/hosts/budget endpoint, which already returns the list of
