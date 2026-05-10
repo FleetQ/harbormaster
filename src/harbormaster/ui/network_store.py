@@ -240,6 +240,54 @@ class NetworkStore:
             with contextlib.suppress(asyncio.QueueFull):
                 q.put_nowait(ev)
 
+    def stats(
+        self, *, since_ms: int | None = None,
+    ) -> dict[str, object]:
+        """v11.0.0a6: aggregate metrics over rows newer than `since_ms`
+        (epoch ms). Returns total_calls, by_tool dict, top_projects
+        list, error_rate. When `since_ms` is None all rows are
+        included.
+        """
+        params: list[object] = []
+        where = ""
+        if since_ms is not None:
+            where = "WHERE timestamp >= ?"
+            params.append(since_ms)
+        with self._lock:
+            total_row = self._conn.execute(
+                f"SELECT COUNT(*) FROM mcp_calls {where}",
+                params,
+            ).fetchone()
+            total = int(total_row[0]) if total_row else 0
+            by_tool = {
+                str(r[0]): int(r[1])
+                for r in self._conn.execute(
+                    f"SELECT tool, COUNT(*) FROM mcp_calls {where} "
+                    "GROUP BY tool",
+                    params,
+                ).fetchall()
+            }
+            top_projects_rows = self._conn.execute(
+                f"SELECT target, COUNT(*) AS c FROM mcp_calls {where} "
+                "GROUP BY target ORDER BY c DESC LIMIT 5",
+                params,
+            ).fetchall()
+            error_row = self._conn.execute(
+                f"SELECT COUNT(*) FROM mcp_calls "
+                f"{where} {'AND' if where else 'WHERE'} status = 'error'",
+                params,
+            ).fetchone()
+            error_count = int(error_row[0]) if error_row else 0
+        return {
+            "total_calls": total,
+            "by_tool": by_tool,
+            "top_projects_by_calls": [
+                {"project": str(r[0]), "count": int(r[1])}
+                for r in top_projects_rows
+            ],
+            "error_rate": (error_count / total) if total else 0.0,
+        }
+
     def clear(self) -> None:
         """Truncate the table. Used by tests to isolate state."""
         with self._lock:

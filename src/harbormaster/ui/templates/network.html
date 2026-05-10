@@ -34,6 +34,58 @@
   </div>
 </header>
 
+<!-- v11.0.0a6: aggregate metrics over the last 1h / 24h / 7d.
+     Polls /api/network/stats; the window dropdown re-fetches. -->
+<section x-data="networkStats()" x-init="loadStats()"
+         class="mb-4 border border-gray-800 rounded-lg p-3 bg-gray-900/40">
+  <header class="flex items-center justify-between gap-2 mb-2 flex-wrap">
+    <h3 class="text-sm font-bold text-gray-300">Network stats</h3>
+    <select x-model="window" @change="loadStats()"
+            aria-label="Stats window"
+            class="text-xs bg-gray-950 border border-gray-800 rounded px-2 py-0.5 text-gray-300">
+      <option value="1h">last 1h</option>
+      <option value="24h">last 24h</option>
+      <option value="7d">last 7d</option>
+      <option value="all">all time</option>
+    </select>
+  </header>
+  <p x-show="error" role="alert" class="text-xs text-red-400" x-text="error"></p>
+  <dl x-show="stats" class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+    <div class="border border-gray-800 rounded p-2 bg-gray-950/40">
+      <dt class="text-gray-500">total calls</dt>
+      <dd class="text-cyan-300 font-bold text-lg" x-text="stats?.total_calls ?? 0"></dd>
+    </div>
+    <div class="border border-gray-800 rounded p-2 bg-gray-950/40">
+      <dt class="text-gray-500">error rate</dt>
+      <dd class="text-amber-300 font-bold text-lg"
+          x-text="((stats?.error_rate ?? 0) * 100).toFixed(1) + '%'"></dd>
+    </div>
+    <div class="border border-gray-800 rounded p-2 bg-gray-950/40">
+      <dt class="text-gray-500 mb-1">by tool</dt>
+      <dd class="text-gray-300 text-[11px]">
+        <template x-for="(count, tool) in stats?.by_tool ?? {}" :key="'tool:' + tool">
+          <span class="block">
+            <span class="text-cyan-400" x-text="tool"></span>
+            <span class="text-gray-600">×</span>
+            <span x-text="count"></span>
+          </span>
+        </template>
+      </dd>
+    </div>
+    <div class="border border-gray-800 rounded p-2 bg-gray-950/40">
+      <dt class="text-gray-500 mb-1">top projects</dt>
+      <dd class="text-gray-300 text-[11px]">
+        <template x-for="row in stats?.top_projects_by_calls ?? []" :key="'p:' + row.project">
+          <span class="block">
+            <span class="text-cyan-400 font-mono" x-text="row.project"></span>
+            <span class="text-gray-600 ml-1" x-text="'×' + row.count"></span>
+          </span>
+        </template>
+      </dd>
+    </div>
+  </dl>
+</section>
+
 <section x-data="networkPanel()" x-init="init()"
          class="border border-gray-800 rounded-lg p-3 bg-gray-900/40">
   <div class="flex items-baseline justify-between gap-2 mb-2 text-xs">
@@ -120,6 +172,11 @@
       initialized: false,
       error: '',
       _eventSource: null,
+      // v11.0.0a6: chatOrder() reverse-cache. The chat view re-runs
+      // chatOrder on every Alpine paint; recomputing [...events]
+      // .reverse() each time is wasteful when no new events arrived.
+      _chatOrderCache: null,
+      _chatOrderEventsLen: -1,
 
       async init() {
         // v10.0.0a8: restore the last-used view.
@@ -145,8 +202,17 @@
 
       // v10.0.0a8: chat view shows newest-first so the latest
       // activity is at the top without scrolling.
+      // v11.0.0a6: cached. Invalidated when events.length changes
+      // (push from SSE) — events are append-only modulo the FIFO
+      // shift at cap, so length is a sufficient invalidation key.
       chatOrder() {
-        return [...this.events].reverse();
+        if (this._chatOrderEventsLen === this.events.length
+            && this._chatOrderCache !== null) {
+          return this._chatOrderCache;
+        }
+        this._chatOrderCache = [...this.events].reverse();
+        this._chatOrderEventsLen = this.events.length;
+        return this._chatOrderCache;
       },
 
       async _loadInitial() {
@@ -280,6 +346,29 @@
               weight: 1,
             },
           });
+        }
+      },
+    };
+  }
+
+  // v11.0.0a6: aggregate metrics. Polls /api/network/stats on init
+  // + on window-dropdown change. No live re-poll loop — operator
+  // refreshes by re-selecting the window or reloading the page.
+  function networkStats() {
+    return {
+      window: '24h',
+      stats: null,
+      error: '',
+      async loadStats() {
+        this.error = '';
+        try {
+          const r = await hmFetch(
+            '/api/network/stats?window=' + encodeURIComponent(this.window),
+          );
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          this.stats = await r.json();
+        } catch (e) {
+          this.error = 'failed to load stats: ' + e.message;
         }
       },
     };
