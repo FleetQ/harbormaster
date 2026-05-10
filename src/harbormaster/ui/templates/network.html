@@ -77,13 +77,19 @@
     <div class="border border-border rounded p-2 bg-gray-950/40">
       <dt class="text-foreground-subtle mb-1">by source</dt>
       <dd class="text-foreground-muted text-[11px]">
+        {# v13.0.0a4: each source row is a button that dispatches the
+           hm:network:filter event so the events panel below can apply
+           the filter without re-rendering the whole stats panel. #}
         <template x-for="(row, source) in stats?.by_source ?? {}" :key="'src:' + source">
-          <span class="block">
+          <button type="button"
+                  @click="window.dispatchEvent(new CustomEvent('hm:network:filter', { detail: { source } }))"
+                  class="block w-full text-left rounded px-1 hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  :aria-label="'Filter events to source ' + source">
             <span class="text-accent font-mono" x-text="source"></span>
             <span class="text-foreground-subtle ml-1" x-text="'×' + row.calls"></span>
             <span x-show="row.error_rate > 0" class="text-warning ml-1"
                   x-text="'(' + (row.error_rate * 100).toFixed(0) + '% err)'"></span>
-          </span>
+          </button>
         </template>
       </dd>
     </div>
@@ -103,6 +109,54 @@
 
 <section x-data="networkPanel()" x-init="init()"
          class="border border-border rounded-lg p-3 bg-gray-900/40">
+  {# v13.0.0a4: server-side filter controls. Tool + source dropdowns
+     are derived from the stats panel above (auto-refresh every 30s);
+     the date inputs accept HTML5 datetime-local strings (operator's
+     local TZ, converted to unix ms before being sent to the API).
+     Filter state is mirrored to the URL so an operator can share /
+     bookmark a filtered view. #}
+  <div class="flex flex-wrap items-end gap-2 mb-3 text-xs"
+       data-filter-controls>
+    <div class="flex flex-col gap-0.5">
+      <label class="text-foreground-subtle" :for="$id('hm-net-filter-tool')">tool</label>
+      <select :id="$id('hm-net-filter-tool')" x-model="filters.tool"
+              @change="applyFilters()"
+              class="bg-surface-2 border border-border rounded px-1 py-0.5 text-foreground">
+        <option value="">(any)</option>
+        <template x-for="t in toolOptions" :key="'t:' + t">
+          <option :value="t" x-text="t"></option>
+        </template>
+      </select>
+    </div>
+    <div class="flex flex-col gap-0.5">
+      <label class="text-foreground-subtle" :for="$id('hm-net-filter-source')">source</label>
+      <select :id="$id('hm-net-filter-source')" x-model="filters.source"
+              @change="applyFilters()"
+              class="bg-surface-2 border border-border rounded px-1 py-0.5 text-foreground">
+        <option value="">(any)</option>
+        <template x-for="s in sourceOptions" :key="'s:' + s">
+          <option :value="s" x-text="s"></option>
+        </template>
+      </select>
+    </div>
+    <div class="flex flex-col gap-0.5">
+      <label class="text-foreground-subtle" :for="$id('hm-net-filter-from')">from</label>
+      <input type="datetime-local" :id="$id('hm-net-filter-from')"
+             x-model="filters.fromLocal" @change="applyFilters()"
+             class="bg-surface-2 border border-border rounded px-1 py-0.5 text-foreground">
+    </div>
+    <div class="flex flex-col gap-0.5">
+      <label class="text-foreground-subtle" :for="$id('hm-net-filter-to')">to</label>
+      <input type="datetime-local" :id="$id('hm-net-filter-to')"
+             x-model="filters.toLocal" @change="applyFilters()"
+             class="bg-surface-2 border border-border rounded px-1 py-0.5 text-foreground">
+    </div>
+    <button type="button" @click="clearFilters()"
+            x-show="hasFilters()"
+            class="text-foreground-muted hover:text-accent border border-border rounded px-2 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+      clear
+    </button>
+  </div>
   <div class="flex items-baseline justify-between gap-2 mb-2 text-xs">
     <span class="text-foreground-subtle" x-text="`${events.length} event${events.length === 1 ? '' : 's'} recorded`"></span>
     {# v11.0.0a4: stateBadge unification — replaces two inline color-
@@ -192,6 +246,75 @@
       // .reverse() each time is wasteful when no new events arrived.
       _chatOrderCache: null,
       _chatOrderEventsLen: -1,
+      // v13.0.0a4: server-side filters. `fromLocal` / `toLocal` hold
+      // the datetime-local input strings ("YYYY-MM-DDTHH:MM"); they're
+      // converted to unix-ms before being sent to the API. URL state
+      // is mirrored on every applyFilters() call.
+      filters: { tool: '', source: '', fromLocal: '', toLocal: '' },
+      toolOptions: ['ask_project', 'delegate_task', 'fan_out_ask',
+                    'recall_qa', 'project_status', 'list_projects',
+                    'list_hosts', 'project_graph'],
+      sourceOptions: [],
+
+      hasFilters() {
+        return Boolean(this.filters.tool || this.filters.source
+                       || this.filters.fromLocal || this.filters.toLocal);
+      },
+
+      // v13.0.0a4: build the events query string from the filters
+      // object. Date inputs in HTML5 datetime-local format are local
+      // time; the API expects unix ms.
+      _buildQuery(limit) {
+        const params = new URLSearchParams();
+        params.set('limit', String(limit));
+        if (this.filters.tool) params.set('tool', this.filters.tool);
+        if (this.filters.source) params.set('source', this.filters.source);
+        if (this.filters.fromLocal) {
+          const t = Date.parse(this.filters.fromLocal);
+          if (!isNaN(t)) params.set('from', String(t));
+        }
+        if (this.filters.toLocal) {
+          const t = Date.parse(this.filters.toLocal);
+          if (!isNaN(t)) params.set('to', String(t));
+        }
+        return params.toString();
+      },
+
+      // v13.0.0a4: mirror filter state into the URL hash so an
+      // operator can share a filtered view. Use the hash (not the
+      // query string) so the SSR side ignores it — same convention
+      // as v3.0.0a9's other filterable surfaces.
+      _writeFilterUrl() {
+        const params = new URLSearchParams();
+        if (this.filters.tool) params.set('tool', this.filters.tool);
+        if (this.filters.source) params.set('source', this.filters.source);
+        if (this.filters.fromLocal) params.set('from', this.filters.fromLocal);
+        if (this.filters.toLocal) params.set('to', this.filters.toLocal);
+        const next = params.toString() ? '#' + params.toString() : '';
+        if (location.hash !== next) {
+          history.replaceState(null, '', location.pathname + location.search + next);
+        }
+      },
+
+      _readFilterUrl() {
+        if (!location.hash) return;
+        const params = new URLSearchParams(location.hash.slice(1));
+        for (const k of ['tool', 'source']) {
+          if (params.has(k)) this.filters[k] = params.get(k) || '';
+        }
+        if (params.has('from')) this.filters.fromLocal = params.get('from') || '';
+        if (params.has('to')) this.filters.toLocal = params.get('to') || '';
+      },
+
+      async applyFilters() {
+        this._writeFilterUrl();
+        await this._loadInitial();
+      },
+
+      clearFilters() {
+        this.filters = { tool: '', source: '', fromLocal: '', toLocal: '' };
+        this.applyFilters();
+      },
 
       async init() {
         // v10.0.0a8: restore the last-used view.
@@ -209,6 +332,15 @@
             requestAnimationFrame(() => this._renderGraph());
           }
         });
+        // v13.0.0a4: cross-section filter dispatch from the by-source
+        // stats panel ("click a source to filter the events table").
+        window.addEventListener('hm:network:filter', (e) => {
+          const detail = e.detail || {};
+          if (detail.source !== undefined) this.filters.source = detail.source;
+          if (detail.tool !== undefined) this.filters.tool = detail.tool;
+          this.applyFilters();
+        });
+        this._readFilterUrl();
         await this._loadInitial();
         this._subscribe();
         if (this.view === 'graph' && this.events.length > 0) this._renderGraph();
@@ -232,10 +364,13 @@
 
       async _loadInitial() {
         try {
-          const r = await hmFetch('/api/network/events?limit=500');
+          const r = await hmFetch('/api/network/events?' + this._buildQuery(500));
           if (!r.ok) throw new Error('HTTP ' + r.status);
           const data = await r.json();
           this.events = Array.isArray(data.events) ? data.events : [];
+          this.error = '';
+          // Invalidate the chat-order cache; events array was replaced.
+          this._chatOrderEventsLen = -1;
         } catch (e) {
           this.error = 'failed to load: ' + e.message;
         }

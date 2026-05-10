@@ -211,19 +211,49 @@ class NetworkStore:
             self._max_rows = max_rows
             self._prune_locked()
 
-    def recent(self, limit: int | None = None) -> list[NetworkEvent]:
+    def recent(
+        self,
+        limit: int | None = None,
+        *,
+        tool: str | None = None,
+        source: str | None = None,
+        from_ms: int | None = None,
+        to_ms: int | None = None,
+    ) -> list[NetworkEvent]:
         """Return events in chronological (ASC) order, mirroring v10's
         deque-based ring buffer behaviour. When `limit` is set, returns
-        the most recent N entries (still ASC)."""
+        the most recent N entries (still ASC).
+
+        v13.0.0a4: optional filters apply server-side before LIMIT so
+        the operator gets the most recent N matching events, not the
+        most recent N events filtered to maybe-zero. All filters AND
+        together; passing none preserves v10/v11/v12 behavior exactly.
+        """
         actual_limit = limit if limit is not None else self._max_rows
+        clauses: list[str] = []
+        params: list[object] = []
+        if tool is not None:
+            clauses.append("tool = ?")
+            params.append(tool)
+        if source is not None:
+            clauses.append("source = ?")
+            params.append(source)
+        if from_ms is not None:
+            clauses.append("timestamp >= ?")
+            params.append(from_ms)
+        if to_ms is not None:
+            clauses.append("timestamp <= ?")
+            params.append(to_ms)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(actual_limit)
         with self._lock:
             cursor = self._conn.execute(
                 "SELECT timestamp, source, target, tool, status, "
                 " duration_ms, question_preview "
-                "FROM mcp_calls "
+                f"FROM mcp_calls {where} "
                 "ORDER BY id DESC "
                 "LIMIT ?",
-                (actual_limit,),
+                params,
             )
             rows = cursor.fetchall()
         # Reverse to chronological ASC for parity with v10 deque order.
