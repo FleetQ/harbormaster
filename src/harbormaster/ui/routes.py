@@ -1455,10 +1455,14 @@ async def _emit_chunks_then_result(
 
     v9.0.0a5: every text delta emits BOTH a legacy ``chunk`` event
     (data = ``{"text": ...}``) AND a typed ``token`` event
-    (data = ``{"delta": ...}``). The ``chunk`` event is deprecated
-    and will be removed in v10 — clients should migrate to ``token``.
-    A final ``usage`` event with best-effort counters precedes the
-    terminal ``result`` event.
+    (data = ``{"delta": ...}``). A final ``usage`` event with
+    best-effort counters precedes the terminal ``result`` event.
+
+    v10.0.0a2: legacy ``chunk`` event REMOVED. Only ``token`` is
+    emitted per text delta. Clients that still listen for ``chunk``
+    will get nothing — they must migrate to ``token`` (data.delta).
+    Backwards-compat cycle was one minor version (deprecated in
+    v9.0.0a5, removed in v10.0.0a2).
     """
     chunks: list[str] = []
     sentinel = object()
@@ -1495,15 +1499,9 @@ async def _emit_chunks_then_result(
         if chunk is sentinel:
             break
         chunks.append(chunk)
-        # v9.0.0a5: emit BOTH events for one full version. Legacy
-        # consumers reading `chunk` keep working; new consumers read
-        # `token`. Each carries its own monotonic id so reconnect
-        # de-dup is unambiguous.
-        yield {
-            "event": "chunk",
-            "id": next_id.next(),
-            "data": json.dumps({"text": chunk}),
-        }
+        # v10.0.0a2: only the typed `token` event is emitted now.
+        # The legacy `chunk` event was deprecated in v9.0.0a5 and
+        # removed here. Clients consume `token.delta` exclusively.
         yield {
             "event": "token",
             "id": next_id.next(),

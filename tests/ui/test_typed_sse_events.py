@@ -1,18 +1,17 @@
 """v9.0.0a5: typed SSE events alongside legacy `chunk`.
+v10.0.0a2: legacy `chunk` event removed; only `token` is emitted.
 
-Closes the v7-deferred item "Typed SSE events". The chunk pipeline
-that powers ask_project / delegate_task / fan_out_ask now emits:
+The chunk pipeline that powers ask_project / delegate_task /
+fan_out_ask now emits:
 
-  * `chunk` (legacy) — `{text: <str>}` — DEPRECATED, removed in v10
-  * `token` (new)    — `{delta: <str>}` — typed text delta
-  * `usage` (new)    — best-effort output counts before `result`
-  * `result` (existing) — final assembled MCP envelope
-  * `error` (existing) — failure envelope
+  * `token`  — `{delta: <str>}` — typed text delta (the only delta event)
+  * `usage`  — best-effort output counts before `result`
+  * `result` — final assembled MCP envelope
+  * `error`  — failure envelope
 
-Backwards compat: clients that only listen for `chunk` continue to
-work unchanged. Clients that listen for `token` are expected to
-ignore `chunk` (the v9.0.0a5 askForm script enforces this with a
-`preferTokenEvents` flag).
+Backwards-compat cycle was one minor version (deprecated v9.0.0a5,
+removed v10.0.0a2). Clients that still listen for `chunk` will get
+nothing — they must migrate to `token` (data.delta).
 """
 from __future__ import annotations
 
@@ -33,31 +32,32 @@ def _drive(iterable: object) -> list[dict[str, str]]:
     return asyncio.run(collect())
 
 
-def test_two_chunks_emit_both_chunk_and_token_events() -> None:
-    """Each text delta must yield ONE `chunk` event AND ONE `token` event."""
+def test_two_deltas_emit_only_token_events() -> None:
+    """v10.0.0a2: each text delta yields ONE `token` event (no `chunk`)."""
     def fake_iter() -> object:
         yield "hello "
         yield "world"
 
     events = _drive(fake_iter())
     kinds = [ev["event"] for ev in events]
-    # Order: chunk, token, chunk, token, usage, result.
-    assert kinds == ["chunk", "token", "chunk", "token", "usage", "result"]
+    # Order: token, token, usage, result. NO chunk events.
+    assert kinds == ["token", "token", "usage", "result"]
 
 
-def test_chunk_event_carries_text_field() -> None:
-    """Backwards-compat: legacy clients reading `text` keep working."""
+def test_chunk_event_no_longer_emitted() -> None:
+    """v10.0.0a2 removal sentinel: no `chunk` event anywhere in stream."""
     def fake_iter() -> object:
-        yield "hi"
+        yield "a"
+        yield "b"
+        yield "c"
 
     events = _drive(fake_iter())
-    chunk_event = next(ev for ev in events if ev["event"] == "chunk")
-    payload = json.loads(chunk_event["data"])
-    assert payload == {"text": "hi"}
+    kinds = [ev["event"] for ev in events]
+    assert "chunk" not in kinds
 
 
 def test_token_event_carries_delta_field() -> None:
-    """v9.0.0a5: typed token event uses `delta`, not `text`."""
+    """Typed token event uses `delta`."""
     def fake_iter() -> object:
         yield "hi"
 
@@ -94,25 +94,6 @@ def test_usage_event_carries_output_counts() -> None:
     assert payload["approximate"] is True
 
 
-def test_token_and_chunk_share_same_text() -> None:
-    """For each delta, the chunk's text and the token's delta MUST match."""
-    def fake_iter() -> object:
-        yield "alpha"
-        yield "beta"
-
-    events = _drive(fake_iter())
-    pairs: list[tuple[str, str]] = []
-    pending_chunk: str | None = None
-    for ev in events:
-        if ev["event"] == "chunk":
-            pending_chunk = json.loads(ev["data"])["text"]
-        elif ev["event"] == "token":
-            assert pending_chunk is not None
-            pairs.append((pending_chunk, json.loads(ev["data"])["delta"]))
-            pending_chunk = None
-    assert pairs == [("alpha", "alpha"), ("beta", "beta")]
-
-
 def test_every_event_carries_monotonic_id() -> None:
     """v9.0.0a4 contract preserved: per-stream monotonic ids."""
     def fake_iter() -> object:
@@ -125,7 +106,7 @@ def test_every_event_carries_monotonic_id() -> None:
     assert len(set(ids)) == len(ids), "ids must be unique"
 
 
-def test_error_path_does_not_emit_token_or_usage() -> None:
+def test_error_path_does_not_emit_usage_or_result() -> None:
     """When BackendError raises mid-iteration, only the error event
     is emitted (no usage / no result). Backwards compat with v9.0.0a4."""
     from harbormaster.backends.base import BackendError
@@ -136,7 +117,7 @@ def test_error_path_does_not_emit_token_or_usage() -> None:
 
     events = _drive(fake_iter())
     kinds = [ev["event"] for ev in events]
-    # Got chunk + token from the first delta, then immediately errored.
+    # Got token from the first delta, then immediately errored.
     assert "error" in kinds
     assert "usage" not in kinds
     assert "result" not in kinds
@@ -147,25 +128,37 @@ def test_error_path_does_not_emit_token_or_usage() -> None:
 
 def test_ask_form_script_handles_token_event() -> None:
     """The Alpine consumer in _ask_form_script.html must reference the
-    new `token` event. Pin the literal so future refactors don't drop
-    the migration."""
+    `token` event. Pin the literal so future refactors don't drop
+    the contract."""
     src = (
         Path(__file__).parent.parent.parent
         / "src" / "harbormaster" / "ui"
         / "templates" / "_partials" / "_ask_form_script.html"
     ).read_text()
     assert "ev.event === 'token'" in src
-    assert "preferTokenEvents" in src
     assert "ev.event === 'usage'" in src
     assert "ev.event === 'tool'" in src
 
 
-def test_ask_form_script_keeps_legacy_chunk_handler() -> None:
-    """Backwards-compat sentinel: the legacy `chunk` handler is still
-    present (will be removed in v10 alongside the server-side emit)."""
+def test_ask_form_script_no_longer_references_chunk() -> None:
+    """v10.0.0a2 removal sentinel: the legacy `chunk` event branch
+    must not appear in the Alpine consumer."""
     src = (
         Path(__file__).parent.parent.parent
         / "src" / "harbormaster" / "ui"
         / "templates" / "_partials" / "_ask_form_script.html"
     ).read_text()
-    assert "ev.event === 'chunk'" in src
+    assert "ev.event === 'chunk'" not in src
+    assert "preferTokenEvents" not in src
+
+
+def test_delegate_form_uses_token_not_chunk() -> None:
+    """v10.0.0a2: delegate_form's SSE consumer also migrated to
+    `token`. The legacy `chunk` branch must be gone."""
+    src = (
+        Path(__file__).parent.parent.parent
+        / "src" / "harbormaster" / "ui"
+        / "templates" / "_partials" / "delegate_form.html"
+    ).read_text()
+    assert "ev.event === 'token'" in src
+    assert "ev.event === 'chunk'" not in src

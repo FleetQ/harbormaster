@@ -1100,15 +1100,10 @@ async def test_stream_ask_project_local_yields_chunk_events_and_final_result(
         events.append(evt)
 
     types = [e["event"] for e in events]
-    # v9.0.0a5: typed events ship alongside legacy `chunk` for one
-    # full version. Order: chunk, token, chunk, token, usage, result.
-    assert types == ["chunk", "token", "chunk", "token", "usage", "result"]
+    # v10.0.0a2: legacy `chunk` removed. Order: token, token, usage, result.
+    assert types == ["token", "token", "usage", "result"]
 
-    # Legacy `chunk` event keeps `text` field — backwards-compat.
-    chunk_events = [e for e in events if e["event"] == "chunk"]
-    assert _json.loads(chunk_events[0]["data"])["text"] == "Hello, "
-    assert _json.loads(chunk_events[1]["data"])["text"] == "world."
-    # New `token` event uses `delta`.
+    # Typed `token` event carries `delta`.
     token_events = [e for e in events if e["event"] == "token"]
     assert _json.loads(token_events[0]["data"])["delta"] == "Hello, "
     assert _json.loads(token_events[1]["data"])["delta"] == "world."
@@ -1184,7 +1179,8 @@ async def test_stream_ask_project_local_502_on_backend_error_mid_stream(
         events.append(evt)
 
     types = [e["event"] for e in events]
-    assert "chunk" in types
+    # v10.0.0a2: legacy `chunk` removed; partial output now arrives as `token`.
+    assert "token" in types
     assert "result" not in types
     assert types[-1] == "error"
     err = _json.loads(events[-1]["data"])
@@ -1337,8 +1333,8 @@ async def test_stream_local_tool_delegate_task_yields_chunks(
         events.append(evt)
 
     types = [e["event"] for e in events]
-    # v9.0.0a5: typed events ship alongside legacy `chunk`.
-    assert types == ["chunk", "token", "chunk", "token", "usage", "result"]
+    # v10.0.0a2: legacy `chunk` removed; only `token` deltas remain.
+    assert types == ["token", "token", "usage", "result"]
 
     final = _json.loads(events[-1]["data"])
     assert final["result"]["content"][0]["text"] == "Plan: 1) read files"

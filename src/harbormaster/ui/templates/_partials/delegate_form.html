@@ -131,12 +131,13 @@
           buffer = events.pop() || '';
           for (const block of events) {
             const ev = this._parseEvent(block);
-            if (ev.event === 'chunk') {
+            if (ev.event === 'token') {
+              // v10.0.0a2: only `token` events carry deltas now.
               try {
                 const p = JSON.parse(ev.data);
-                this.streamText += (p.delta ?? p.chunk ?? '');
+                this.streamText += (p.delta ?? '');
                 this.chunks += 1;
-              } catch (_) { /* drop malformed chunk */ }
+              } catch (_) { /* drop malformed token */ }
             } else if (ev.event === 'result') {
               try {
                 const p = JSON.parse(ev.data);
