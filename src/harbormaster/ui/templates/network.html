@@ -307,19 +307,9 @@
       initialized: false,
       error: '',
       _eventSource: null,
-      // v11.0.0a6: chatOrder() reverse-cache. The chat view re-runs
-      // chatOrder on every Alpine paint; recomputing [...events]
-      // .reverse() each time is wasteful when no new events arrived.
-      _chatOrderCache: null,
-      _chatOrderEventsLen: -1,
-      // v15.0.0a3: timeline bucket cache. SSE bursts can fire many
-      // events per second; without throttling the getter recomputes
-      // all 60 buckets each push. We cache buckets and invalidate at
-      // most once per second (the smallest visible bucket width).
-      _timelineCache: null,
-      _timelineCacheStamp: 0,
-      _timelineCacheWindow: '',
-      _timelineCacheLen: -1,
+      // v16.0.0a1: per-getter caches now live on `this._gc` managed by
+      // the shared `cachedGetter` helper (see _partials/_cached_getter.html).
+      // The previous _chatOrderCache / _timelineCache* slots were removed.
       // v15.0.0a3: 1s interval handle for throttle tick.
       _timelineThrottleTimer: null,
       // v15.0.0a3: timeline reactivity bumper. Reading this in the
@@ -470,14 +460,11 @@
       // v11.0.0a6: cached. Invalidated when events.length changes
       // (push from SSE) — events are append-only modulo the FIFO
       // shift at cap, so length is a sufficient invalidation key.
+      // v16.0.0a1: routed through the shared cachedGetter helper.
       chatOrder() {
-        if (this._chatOrderEventsLen === this.events.length
-            && this._chatOrderCache !== null) {
-          return this._chatOrderCache;
-        }
-        this._chatOrderCache = [...this.events].reverse();
-        this._chatOrderEventsLen = this.events.length;
-        return this._chatOrderCache;
+        return cachedGetter(this, 'chatOrder',
+          { deps: [this.events.length] },
+          () => [...this.events].reverse());
       },
 
       // v14.0.0a4: bucket events into per-minute (1h window) or
@@ -486,22 +473,21 @@
       // network round-trip. Returns array of {label, count} ascending
       // chronologically (oldest left, newest right).
       // v15.0.0a3: cached + 1s-throttled. SSE bursts no longer cause
-      // an O(N×60) recompute per event push. We invalidate when:
-      //   - the timeline window changed (1h ↔ 24h),
-      //   - the events.length changed AND the cached stamp is >1s old,
-      //   - or the periodic 1s _timelineTick bumper fired.
+      // an O(N×60) recompute per event push.
+      // v16.0.0a1: routed through the shared cachedGetter helper.
+      // Invalidates when timelineWindow / events.length change OR the
+      // 1s _timelineTick bumper fires AND the ttl elapsed.
       get timelineBuckets() {
-        // Touch reactive deps so Alpine re-runs us on tick / event push.
-        // (Reading is enough — Alpine tracks the get.)
-        // eslint-disable-next-line no-unused-expressions
-        this._timelineTick;
+        return cachedGetter(this, 'timelineBuckets',
+          {
+            deps: [this.timelineWindow, this.events.length, this._timelineTick],
+            ttlMs: 1000,
+          },
+          () => this._buildTimelineBuckets());
+      },
+
+      _buildTimelineBuckets() {
         const now = Date.now();
-        const sameWindow = this._timelineCacheWindow === this.timelineWindow;
-        const sameLen = this._timelineCacheLen === this.events.length;
-        const cacheFresh = (now - this._timelineCacheStamp) < 1000;
-        if (this._timelineCache && sameWindow && sameLen && cacheFresh) {
-          return this._timelineCache;
-        }
         const isHour = this.timelineWindow === '24h';
         const bucketCount = isHour ? 24 : 60;
         const bucketMs = isHour ? (60 * 60 * 1000) : (60 * 1000);
@@ -523,10 +509,6 @@
           );
           buckets[idx].count++;
         }
-        this._timelineCache = buckets;
-        this._timelineCacheStamp = now;
-        this._timelineCacheWindow = this.timelineWindow;
-        this._timelineCacheLen = this.events.length;
         return buckets;
       },
 
@@ -559,8 +541,8 @@
           const data = await r.json();
           this.events = Array.isArray(data.events) ? data.events : [];
           this.error = '';
-          // Invalidate the chat-order cache; events array was replaced.
-          this._chatOrderEventsLen = -1;
+          // v16.0.0a1: events.length-keyed cachedGetter handles this
+          // automatically; explicit invalidation no longer needed.
         } catch (e) {
           this.error = 'failed to load: ' + e.message;
         }

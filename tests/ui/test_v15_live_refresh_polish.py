@@ -30,18 +30,21 @@ def _read(name: str) -> str:
 
 def test_network_template_timeline_uses_cache_with_1s_throttle() -> None:
     body = _read("network.html")
-    # Cache fields exist on the Alpine factory.
-    assert "_timelineCache: null" in body
-    assert "_timelineCacheStamp: 0" in body
-    # Cache is invalidated when older than 1s.
-    assert "(now - this._timelineCacheStamp) < 1000" in body
+    # v16.0.0a1: the per-getter cache fields are gone — the shared
+    # `cachedGetter` helper owns the cache slot. The 1s ttlMs +
+    # ttlMs-keyed freshness check live in `_partials/_cached_getter.html`.
+    assert "cachedGetter(this, 'timelineBuckets'" in body
+    assert "ttlMs: 1000" in body
 
 
 def test_network_template_timeline_cache_invalidates_on_window_change() -> None:
     body = _read("network.html")
-    # window mismatch breaks the cache.
+    # v16.0.0a1: window-change invalidation now flows through the deps
+    # tuple. `timelineWindow`, `events.length`, and `_timelineTick` are
+    # all in deps — a 1h ↔ 24h flip recomputes on the next read.
     assert (
-        "this._timelineCacheWindow === this.timelineWindow" in body
+        "deps: [this.timelineWindow, this.events.length, this._timelineTick]"
+        in body
     )
 
 
@@ -55,9 +58,12 @@ def test_network_template_timeline_throttle_started_in_init() -> None:
 
 def test_network_template_timeline_getter_reads_tick_for_reactivity() -> None:
     body = _read("network.html")
-    # The getter touches `this._timelineTick` so Alpine re-evaluates
-    # when the throttle bumper fires.
-    assert "this._timelineTick;" in body
+    # v16.0.0a1: `_timelineTick` is read inside the deps tuple passed
+    # to `cachedGetter` — Alpine still tracks the read (it's a normal
+    # property access on the Alpine reactive object), so the getter
+    # re-runs when the 1s throttle bumper fires.
+    assert "this._timelineTick" in body
+    assert "deps: [this.timelineWindow, this.events.length, this._timelineTick]" in body
 
 
 def test_network_template_sse_handler_pushes_to_events_unchanged() -> None:
@@ -110,7 +116,8 @@ def test_network_template_timeline_window_toggle_unchanged() -> None:
 
 def test_network_template_chat_order_cache_unchanged() -> None:
     body = _read("network.html")
-    # The v11.0.0a6 chatOrder cache must still be present — we did
-    # NOT regress it while adding the timeline cache.
-    assert "_chatOrderCache" in body
-    assert "_chatOrderEventsLen" in body
+    # v16.0.0a1: chatOrder() now routes through the shared
+    # `cachedGetter` helper. The deps-only invalidation behaviour is
+    # preserved (events.length is the sole dep, no ttlMs).
+    assert "cachedGetter(this, 'chatOrder'" in body
+    assert "deps: [this.events.length]" in body

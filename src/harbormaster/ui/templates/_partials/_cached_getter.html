@@ -1,0 +1,58 @@
+<script>
+  // v16.0.0a1: shared deps + TTL cache helper for Alpine getters.
+  //
+  // Two patterns from the v11/v15 surfaces collapse into one shape:
+  //
+  //   1. v11.0.0a6 chatOrder() — invalidate when an array length
+  //      changes. (deps-only)
+  //   2. v15.0.0a3 timelineBuckets — invalidate when (a) any of a
+  //      small dep tuple changes OR (b) more than ttl_ms have elapsed.
+  //
+  // Usage in an Alpine component:
+  //
+  //     get chatOrder() {
+  //       return cachedGetter(this, 'chatOrder',
+  //         { deps: [this.events.length] },
+  //         () => [...this.events].reverse());
+  //     }
+  //
+  //     get timelineBuckets() {
+  //       return cachedGetter(this, 'timeline',
+  //         { deps: [this.timelineWindow, this.events.length],
+  //           ttlMs: 1000,
+  //           tick: this._timelineTick },
+  //         () => this._buildBuckets());
+  //     }
+  //
+  // The cache lives on `host._gc` (Getter Cache), keyed by `name`.
+  // `tick` lets a parent timer bump a reactivity sentinel — Alpine
+  // tracks the read on the getter regardless of whether `tick` itself
+  // is consulted in the freshness check (it is, transitively).
+  //
+  // Returns the cached value when ALL of:
+  //   - cache exists for the name
+  //   - every dep matches the previous tuple element-wise
+  //   - if ttlMs is set: now - stamp < ttlMs
+  //
+  // Otherwise calls `compute()`, stores, and returns.
+  window.cachedGetter = function(host, name, opts, compute) {
+    if (!host._gc) host._gc = {};
+    const slot = host._gc[name];
+    const deps = opts.deps || [];
+    const ttlMs = opts.ttlMs || 0;
+    const now = Date.now();
+    if (slot) {
+      let depsMatch = slot.deps.length === deps.length;
+      if (depsMatch) {
+        for (let i = 0; i < deps.length; i++) {
+          if (slot.deps[i] !== deps[i]) { depsMatch = false; break; }
+        }
+      }
+      const fresh = ttlMs === 0 ? true : (now - slot.stamp) < ttlMs;
+      if (depsMatch && fresh) return slot.value;
+    }
+    const value = compute();
+    host._gc[name] = { value, deps: [...deps], stamp: now };
+    return value;
+  };
+</script>
