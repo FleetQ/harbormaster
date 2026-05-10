@@ -359,10 +359,38 @@
           Run now
         </button>
       </div>
+      <!-- v17.0.0a3: N-way compare action bar — appears above the
+           table once ≥2 rows are selected via the new checkbox column.
+           Compare uses /api/history/reembed/runs/compare (v15.a4) and
+           renders the result side-by-side with sparklines wired to
+           the v16.a4 sparklineHtml helper. -->
+      <div x-show="!runsLoading && runs.length > 1 && selectedRunIndices.length > 0"
+           data-reembed-compare-bar
+           class="mt-1 mb-2 flex items-center justify-between gap-2 text-[11px] text-foreground-muted">
+        <span x-text="`${selectedRunIndices.length} selected (max 4)`"></span>
+        <span class="flex gap-2">
+          <button type="button"
+                  @click="loadCompareSelected()"
+                  :disabled="selectedRunIndices.length < 2 || compareLoading"
+                  data-reembed-compare-trigger
+                  aria-label="Compare selected reembed runs side-by-side"
+                  class="px-1.5 py-0.5 rounded border border-accent-strong text-accent hover:bg-cyan-900/30 disabled:border-border disabled:text-foreground-subtle disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+            Compare selected
+          </button>
+          <button type="button"
+                  @click="clearCompareSelection()"
+                  class="px-1.5 py-0.5 rounded border border-border text-foreground-muted hover:text-accent">
+            Clear
+          </button>
+        </span>
+      </div>
       <table x-show="!runsLoading && runs.length > 0"
              class="w-full text-left border-collapse">
         <thead class="text-foreground-subtle">
           <tr>
+            <!-- v17.0.0a3: per-row select checkbox for N-way compare -->
+            <th class="pr-2 py-0.5 font-normal w-6"
+                aria-label="select for compare"></th>
             <th class="pr-2 py-0.5 font-normal">finished</th>
             <th class="pr-2 py-0.5 font-normal">duration</th>
             <th class="pr-2 py-0.5 font-normal text-success">ok</th>
@@ -377,6 +405,20 @@
           <template x-for="r in runs.slice(-5).reverse()"
                     :key="r.started_at">
             <tr class="border-t border-border">
+              <!-- v17.0.0a3: select checkbox. The absolute index is
+                   computed against `runs` (chronological list); the
+                   /api/history/reembed/runs/compare endpoint accepts
+                   absolute indices. Cap of 4 enforced in the @click
+                   handler so the user gets immediate feedback. -->
+              <td class="pr-2 py-0.5">
+                <input type="checkbox"
+                       :checked="selectedRunIndices.includes(runs.indexOf(r))"
+                       :disabled="!selectedRunIndices.includes(runs.indexOf(r)) && selectedRunIndices.length >= 4"
+                       @change="toggleCompareSelection(runs.indexOf(r))"
+                       data-reembed-compare-checkbox
+                       :aria-label="`Select reembed run finished at ${formatRelative(r.finished_at)} for comparison`"
+                       class="h-3 w-3 accent-cyan-500" />
+              </td>
               <td class="pr-2 py-0.5 text-foreground-muted"
                   x-text="formatRelative(r.finished_at)"></td>
               <td class="pr-2 py-0.5 text-foreground-muted"
@@ -442,6 +484,57 @@
           <dd :class="runDiff.delta?.model_changed ? 'text-warning' : 'text-foreground-subtle'"
               x-text="runDiff.delta?.model_changed ? 'yes' : 'no'"></dd>
         </dl>
+      </div>
+      <!-- v17.0.0a3: N-way reembed comparison panel.
+           Renders /api/history/reembed/runs/compare result as a
+           field × run grid; numeric fields get a sparkline cell
+           (sparklineHtml from v16.a4 _tiny_sparkline.html). -->
+      <div x-show="compareOpen"
+           data-reembed-compare-panel
+           class="mt-3 border border-cyan-900/40 rounded bg-surface-1 p-2 text-xs">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-accent">
+            Compare:
+            <span x-text="compareData.indices ? compareData.indices.map(i => '#' + i).join(', ') : ''"></span>
+          </span>
+          <button type="button" @click="compareOpen = false"
+                  aria-label="Close run compare panel"
+                  class="text-foreground-muted hover:text-accent text-[11px] px-1.5 py-0 rounded border border-border">
+            close
+          </button>
+        </div>
+        <p x-show="compareError" role="alert" class="text-danger" x-text="compareError"></p>
+        <table x-show="!compareError && compareData.fields"
+               class="w-full text-left border-collapse"
+               data-reembed-compare-table>
+          <thead class="text-foreground-subtle">
+            <tr>
+              <th class="pr-2 py-0.5 font-normal">field</th>
+              <template x-for="(idx, i) in (compareData.indices || [])" :key="'cmp-h-' + idx">
+                <th class="pr-2 py-0.5 font-normal text-right"
+                    x-text="`#${idx}`"></th>
+              </template>
+              <th class="pr-2 py-0.5 font-normal">trend</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="f in (compareData.fields || [])" :key="'cmp-f-' + f.name">
+              <tr class="border-t border-border">
+                <td class="pr-2 py-0.5 text-foreground-subtle font-mono"
+                    x-text="f.name"></td>
+                <template x-for="(v, i) in f.values" :key="'cmp-c-' + f.name + '-' + i">
+                  <td class="pr-2 py-0.5 text-right text-foreground"
+                      x-text="formatCompareCell(f.name, v)"></td>
+                </template>
+                <!-- Sparkline cell — only numeric fields render a
+                     sparkline; string fields (model) render '—'. -->
+                <td class="pr-2 py-0.5 text-accent"
+                    data-reembed-compare-sparkline
+                    x-html="sparklineCell(f)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
       </div>
     </div>
   </details>
@@ -1376,6 +1469,16 @@
       runDiff: { from_index: null, to_index: null, delta: null, from: null, to: null },
       runDiffError: '',
       runDiffOpen: false,
+      // v17.0.0a3: N-way reembed compare state. selectedRunIndices is
+      // stored as an array (not a Set) so Alpine reactivity tracks it
+      // and the checkbox `:checked` bindings re-evaluate correctly.
+      // The /api/history/reembed/runs/compare endpoint accepts up to
+      // 4 absolute indices into `runs` (chronological list).
+      selectedRunIndices: [],
+      compareOpen: false,
+      compareLoading: false,
+      compareData: { indices: [], runs: [], fields: [] },
+      compareError: '',
 
       async loadOnce() {
         await this.fetchState();
@@ -1469,6 +1572,81 @@
       formatDelta(n) {
         if (n === undefined || n === null) return '';
         return (n > 0 ? '+' : '') + n;
+      },
+
+      // v17.0.0a3 — N-way compare helpers ----------------------------------
+
+      // Toggle a run's absolute index in/out of the selection.
+      // Cap at 4 (matches the /api/history/reembed/runs/compare
+      // server-side limit). Adding when full is a silent no-op
+      // because the checkbox is disabled at that point too.
+      toggleCompareSelection(absIdx) {
+        const i = this.selectedRunIndices.indexOf(absIdx);
+        if (i >= 0) {
+          // Splice (don't filter) so the same array reference stays
+          // — Alpine's reactivity tracks the same proxy.
+          this.selectedRunIndices.splice(i, 1);
+          return;
+        }
+        if (this.selectedRunIndices.length >= 4) return;
+        this.selectedRunIndices.push(absIdx);
+      },
+
+      clearCompareSelection() {
+        this.selectedRunIndices.splice(0, this.selectedRunIndices.length);
+        this.compareOpen = false;
+      },
+
+      // Fetch /api/history/reembed/runs/compare for the selected
+      // indices. Endpoint already dedupes + caps server-side; we
+      // sort here so the comparison columns render oldest-first
+      // (matching the chronological `runs` order).
+      async loadCompareSelected() {
+        if (this.selectedRunIndices.length < 2) return;
+        const sorted = [...this.selectedRunIndices].sort((a, b) => a - b);
+        this.compareError = '';
+        this.compareLoading = true;
+        this.compareOpen = true;
+        try {
+          const url = `/api/history/reembed/runs/compare`
+                    + `?indices=${sorted.join(',')}`;
+          const r = await hmFetch(url);
+          if (!r.ok) {
+            let detail = 'HTTP ' + r.status;
+            try { const j = await r.json(); detail = j.detail || detail; } catch (_) {}
+            throw new Error(detail);
+          }
+          this.compareData = await r.json();
+        } catch (e) {
+          this.compareError = 'failed to load compare: ' + e.message;
+        } finally {
+          this.compareLoading = false;
+        }
+      },
+
+      // Per-cell formatter — numeric fields keep precision sane,
+      // string fields (model) pass through, undefined → '—'.
+      formatCompareCell(field, value) {
+        if (value === undefined || value === null || value === '') return '—';
+        if (field === 'duration_seconds') {
+          return Number(value).toFixed(1);
+        }
+        return value;
+      },
+
+      // Sparkline cell HTML — only numeric fields render a sparkline.
+      // Returns an SVG snippet via the global sparklineHtml helper
+      // (defined in _partials/_tiny_sparkline.html, loaded by
+      // base.html). Non-numeric fields render an em-dash placeholder.
+      sparklineCell(field) {
+        if (!field || !Array.isArray(field.values)) return '—';
+        const NUMERIC = new Set([
+          'duration_seconds', 'total', 'succeeded', 'failed', 'cancelled',
+        ]);
+        if (!NUMERIC.has(field.name)) return '—';
+        try {
+          return window.sparklineHtml(field.values, { width: 60, height: 14 });
+        } catch (_) { return '—'; }
       },
 
       async triggerManual() {
