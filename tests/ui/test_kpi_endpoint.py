@@ -73,8 +73,14 @@ def test_kpi_bridge_disabled_when_fleetq_off(kpi_client: TestClient) -> None:
 
 
 def test_kpi_dispatcher_placeholder_ready(kpi_client: TestClient) -> None:
+    # v8.0.0a5 shipped this as the hardcoded "ready" placeholder; v9.0.0a2
+    # replaced it with a derived state from /api/dispatcher/status.
+    # Reset the singleton so this test sees a cold dispatcher (other tests
+    # in the suite share the process-wide stats singleton).
+    from harbormaster.fleetq import get_dispatcher_stats
+
+    get_dispatcher_stats().reset()
     body = kpi_client.get("/api/kpi").json()
-    # v8.0.0a5 ships dispatcher as a placeholder until the v9 waterfall.
     assert body["dispatcher"] == "ready"
 
 
