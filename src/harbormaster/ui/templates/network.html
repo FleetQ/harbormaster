@@ -341,10 +341,25 @@
           this.applyFilters();
         });
         this._readFilterUrl();
+        // v14.0.0a2: derive source dropdown from real distinct values.
+        await this._loadSourceOptions();
         await this._loadInitial();
         this._subscribe();
         if (this.view === 'graph' && this.events.length > 0) this._renderGraph();
         this.initialized = true;
+      },
+
+      // v14.0.0a2: GET /api/network/sources returns distinct caller
+      // values from the most recent 1000 events. Replaces the empty /
+      // hardcoded sourceOptions list. Failure is non-fatal — the
+      // dropdown just stays empty (the "(any)" option still works).
+      async _loadSourceOptions() {
+        try {
+          const r = await hmFetch('/api/network/sources?scan_limit=1000');
+          if (!r.ok) return;
+          const data = await r.json();
+          if (Array.isArray(data.sources)) this.sourceOptions = data.sources;
+        } catch (_) { /* non-fatal */ }
       },
 
       // v10.0.0a8: chat view shows newest-first so the latest

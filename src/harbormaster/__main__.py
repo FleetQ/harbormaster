@@ -277,6 +277,12 @@ def main(argv: list[str] | None = None) -> int:
 
         return dispatcher_main(raw_args[1:])
 
+    if raw_args and raw_args[0] == "config":
+        # v14.0.0a2: `harbormaster-mcp config check` validation report.
+        from harbormaster.config_cli import main as config_main
+
+        return config_main(raw_args[1:])
+
     parser = _build_parser()
     args = parser.parse_args(raw_args)
 

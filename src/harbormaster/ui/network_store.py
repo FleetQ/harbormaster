@@ -271,6 +271,28 @@ class NetworkStore:
             for r in rows
         ]
 
+    def distinct_sources(self, *, scan_limit: int = 1000) -> list[str]:
+        """v14.0.0a2: distinct caller (source) values across the most
+        recent ``scan_limit`` events, sorted alphabetically.
+
+        Used by the network page's source-filter dropdown to replace
+        the previously-hardcoded option list with real values from the
+        store. ``scan_limit`` caps the inner subselect so a multi-day
+        store with thousands of rows doesn't pay a full-table scan on
+        every dropdown render.
+        """
+        if scan_limit <= 0:
+            raise ValueError("scan_limit must be > 0")
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT source FROM ("
+                "  SELECT source FROM mcp_calls "
+                "  ORDER BY id DESC LIMIT ?"
+                ") ORDER BY source ASC",
+                (scan_limit,),
+            ).fetchall()
+        return [str(r[0]) for r in rows if r[0] is not None]
+
     def subscribe(self) -> asyncio.Queue[NetworkEvent]:
         q: asyncio.Queue[NetworkEvent] = asyncio.Queue(maxsize=128)
         self._subscribers.append(q)

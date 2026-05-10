@@ -138,29 +138,34 @@ fi
 
 REMOTE="${REMOTE:-origin}"
 
-if [ "$DRY_RUN" = "1" ]; then
+if [ "${DRY_RUN}" = "1" ]; then
   echo "wt-merge: DRY RUN — invariants OK"
-  echo "wt-merge: would push  $BRANCH -> $REMOTE"
-  echo "wt-merge: would merge $BRANCH into main at $PARENT (--no-ff)"
+  echo "wt-merge: would push  ${BRANCH} -> ${REMOTE}"
+  echo "wt-merge: would merge ${BRANCH} into main at ${PARENT} (--no-ff)"
   echo "wt-merge: no changes made."
   exit 0
 fi
 
-echo "wt-merge: pushing $BRANCH to $REMOTE (backup)…"
-if ! git push "$REMOTE" "$BRANCH"; then
+# NOTE: under `set -u`, bash parses `$VAR…` (variable adjacent to a
+# non-ASCII char) as a single identifier `VAR…` in some locales,
+# triggering "unbound variable" even when VAR is set. Always brace
+# the variable when it touches a multi-byte char (v14.0.0a2 fix —
+# this is the bug the v13 retro half-flagged).
+echo "wt-merge: pushing ${BRANCH} to ${REMOTE} (backup)..."
+if ! git push "${REMOTE}" "${BRANCH}"; then
   echo "wt-merge: push failed" >&2
   exit 2
 fi
 
-echo "wt-merge: merging $BRANCH into main at $PARENT…"
+echo "wt-merge: merging ${BRANCH} into main at ${PARENT}..."
 # Use a subshell so the cd doesn't leak even if the script is sourced.
 (
-  cd "$PARENT"
-  if ! git merge --no-ff "$BRANCH" \
-       -m "Merge $BRANCH"; then
-    echo "wt-merge: merge into $PARENT failed — resolve manually" >&2
+  cd "${PARENT}"
+  if ! git merge --no-ff "${BRANCH}" \
+       -m "Merge ${BRANCH}"; then
+    echo "wt-merge: merge into ${PARENT} failed — resolve manually" >&2
     exit 2
   fi
 ) || exit 2
 
-echo "wt-merge: done. Now bump __version__ + write retro + tag in $PARENT."
+echo "wt-merge: done. Now bump __version__ + write retro + tag in ${PARENT}."
