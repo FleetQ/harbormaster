@@ -6,11 +6,89 @@ import shlex
 import subprocess
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from harbormaster.backends.base import BackendError, BackendResult
 from harbormaster.config import BackendConfig
 from harbormaster.ssh import SshTimeoutError, diagnose_ssh_failure, run_ssh
+
+
+@dataclass
+class StreamUsage:
+    """v11.0.0a5: real backend-reported usage captured from
+    `claude --output-format stream-json` per-message metadata.
+
+    Populated as the stream emits assistant + result messages. After
+    the iterator is fully drained, this object holds final values.
+    Callers (e.g. the SSE `usage` event emitter) read fields on
+    completion; mid-stream reads return whatever was reported up to
+    that point.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    model: str | None = None
+    # Set True once we've extracted at least one real usage record from
+    # the backend stream. Distinguishes "backend gave no metadata"
+    # (callers fall back to approximate) from "backend reported zero".
+    has_real_usage: bool = field(default=False)
+
+    def merge_message_usage(self, msg: dict[str, object]) -> None:
+        """Pull usage fields from one parsed stream-json line.
+
+        Both `assistant` messages (incremental) and the final `result`
+        summary include a `usage` block. The result summary is the
+        authoritative final tally; assistant messages are interim.
+        """
+        message = msg.get("message")
+        if isinstance(message, dict):
+            usage = message.get("usage")
+            if isinstance(usage, dict):
+                self._absorb_usage_block(usage)
+            model = message.get("model")
+            if isinstance(model, str):
+                self.model = model
+        # `result` summary line — top-level usage block.
+        usage = msg.get("usage")
+        if isinstance(usage, dict):
+            self._absorb_usage_block(usage)
+
+    def _absorb_usage_block(self, usage: dict[str, object]) -> None:
+        for key in (
+            "input_tokens",
+            "output_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+        ):
+            v = usage.get(key)
+            if isinstance(v, int):
+                setattr(self, key, v)
+                self.has_real_usage = True
+
+
+class _StreamWithUsage(Iterator[str]):
+    """Wrap a text-delta iterator + a side-channel `StreamUsage`.
+
+    Iterating yields the underlying text deltas. Once the wrapped
+    iterator is exhausted, `self.usage` holds the final captured
+    usage (if the backend reported any). Callers who don't care
+    about usage iterate as if it were a plain `Iterator[str]`.
+    """
+
+    def __init__(
+        self, source: Iterator[str], usage: StreamUsage,
+    ) -> None:
+        self._source = source
+        self.usage = usage
+
+    def __iter__(self) -> Iterator[str]:
+        return self
+
+    def __next__(self) -> str:
+        return next(self._source)
 
 
 class ClaudeBackend:
@@ -103,7 +181,14 @@ class ClaudeBackend:
         Uses `--output-format stream-json` which emits one JSON object
         per line on stdout. Each object has a `type` field; we forward
         the text contents of `assistant` messages and ignore everything
-        else (tool calls, system messages, the final `result` summary).
+        else (tool calls, system messages).
+
+        v11.0.0a5: also captures per-message + final `result` usage
+        blocks into a `StreamUsage` exposed on the returned iterator
+        as `.usage`. The SSE `usage` event emitter reads this after
+        iteration completes; backends that don't report a usage block
+        (older claude versions) leave `has_real_usage = False` and the
+        emitter falls back to chunk-count approximation.
 
         Failure modes match ask_local:
           - timeout → BackendError(code='timeout') after killing the subprocess
@@ -121,6 +206,7 @@ class ClaudeBackend:
             "--verbose",  # stream-json requires --verbose in current claude-code
             prompt,
         ]
+        usage = StreamUsage()
         proc = subprocess.Popen(
             cmd, cwd=str(cwd),
             stdout=subprocess.PIPE,
@@ -131,46 +217,56 @@ class ClaudeBackend:
         deadline = time.monotonic() + self.cfg.timeout_local
         assert proc.stdout is not None  # noqa: S101 - PIPE was requested
 
-        try:
-            for line in proc.stdout:
-                if time.monotonic() > deadline:
-                    proc.kill()
-                    proc.wait(timeout=2)
-                    raise BackendError(
-                        f"timeout: claude -p exceeded {self.cfg.timeout_local}s",
-                        code="timeout",
-                    )
-                line = line.strip()
-                if not line:
-                    continue
-                yield from self._extract_assistant_text(line)
-        finally:
-            # Always drain stderr + reap the subprocess so we don't leak
-            # zombies even when the caller stops iterating early.
-            stderr_tail = ""
-            if proc.stderr is not None:
-                stderr_tail = (proc.stderr.read() or "")[-500:]
-                proc.stderr.close()
-            proc.stdout.close()
+        def _gen() -> Iterator[str]:
             try:
-                rc = proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                rc = proc.wait()
-            if rc != 0:
-                raise BackendError(
-                    f"claude -p exit {rc}: {stderr_tail or '(no stderr)'}",
-                    code="exit_nonzero",
-                )
+                assert proc.stdout is not None  # noqa: S101
+                for line in proc.stdout:
+                    if time.monotonic() > deadline:
+                        proc.kill()
+                        proc.wait(timeout=2)
+                        raise BackendError(
+                            f"timeout: claude -p exceeded {self.cfg.timeout_local}s",
+                            code="timeout",
+                        )
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    yield from self._extract_assistant_text(stripped, usage=usage)
+            finally:
+                # Always drain stderr + reap the subprocess so we don't
+                # leak zombies even when the caller stops iterating early.
+                stderr_tail = ""
+                if proc.stderr is not None:
+                    stderr_tail = (proc.stderr.read() or "")[-500:]
+                    proc.stderr.close()
+                if proc.stdout is not None:
+                    proc.stdout.close()
+                try:
+                    rc = proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    rc = proc.wait()
+                if rc != 0:
+                    raise BackendError(
+                        f"claude -p exit {rc}: {stderr_tail or '(no stderr)'}",
+                        code="exit_nonzero",
+                    )
+
+        return _StreamWithUsage(_gen(), usage)
 
     @staticmethod
-    def _extract_assistant_text(line: str) -> Iterator[str]:
+    def _extract_assistant_text(
+        line: str, *, usage: StreamUsage | None = None,
+    ) -> Iterator[str]:
         """Parse one stream-json line and yield text deltas if it is an
         assistant message. Anything else (system, tool_use, result) is
-        silently skipped — those are not user-facing tokens.
+        silently skipped for text purposes — those don't carry
+        user-facing tokens — but `result` lines DO carry the
+        authoritative final usage block, which we feed into the
+        passed-in `StreamUsage` (v11.0.0a5).
 
-        Tolerates malformed lines (logs warnings via BackendError only
-        when the upstream contract is clearly broken).
+        Tolerates malformed lines (raises BackendError only when the
+        upstream contract is clearly broken).
         """
         try:
             msg = json.loads(line)
@@ -181,6 +277,8 @@ class ClaudeBackend:
             ) from e
         if not isinstance(msg, dict):
             return
+        if usage is not None:
+            usage.merge_message_usage(msg)
         if msg.get("type") != "assistant":
             return
         message = msg.get("message")
@@ -251,6 +349,7 @@ class ClaudeBackend:
         ssh_idx = argv.index("ssh")
         argv = [*argv[:ssh_idx + 1], "-T", "-q", *argv[ssh_idx + 1:]]
 
+        usage = StreamUsage()
         proc = subprocess.Popen(
             argv,
             stdout=subprocess.PIPE,
@@ -261,51 +360,56 @@ class ClaudeBackend:
         deadline = time.monotonic() + total_timeout
         assert proc.stdout is not None  # noqa: S101 - PIPE was requested
 
-        try:
-            for line in proc.stdout:
-                if time.monotonic() > deadline:
-                    proc.kill()
-                    proc.wait(timeout=2)
-                    raise BackendError(
-                        f"timeout: ssh+claude exceeded {total_timeout}s",
-                        code="timeout",
-                    )
-                line = line.strip()
-                if not line:
-                    continue
-                # Tolerate non-JSON lines (login banner / shell prompt
-                # / ssh status messages). Only assistant text deltas
-                # reach the caller.
-                try:
-                    yield from self._extract_assistant_text(line)
-                except BackendError as e:
-                    if e.code == "parse_failure":
-                        # Non-JSON noise; skip silently.
-                        continue
-                    raise
-        finally:
-            stderr_tail = ""
-            if proc.stderr is not None:
-                stderr_tail = (proc.stderr.read() or "")[-500:]
-                proc.stderr.close()
-            proc.stdout.close()
+        def _gen() -> Iterator[str]:
             try:
-                rc = proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                rc = proc.wait()
-            if rc == 255:
-                # ssh's own non-zero exit — connection refused, auth,
-                # host key verification, etc.
-                raise BackendError(
-                    f"ssh to {host!r} failed (rc=255): {stderr_tail or '(no stderr)'}",
-                    code="ssh_error",
-                )
-            if rc != 0:
-                raise BackendError(
-                    f"remote claude -p exit {rc}: {stderr_tail or '(no stderr)'}",
-                    code="exit_nonzero",
-                )
+                assert proc.stdout is not None  # noqa: S101
+                for line in proc.stdout:
+                    if time.monotonic() > deadline:
+                        proc.kill()
+                        proc.wait(timeout=2)
+                        raise BackendError(
+                            f"timeout: ssh+claude exceeded {total_timeout}s",
+                            code="timeout",
+                        )
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    # Tolerate non-JSON lines (login banner / shell
+                    # prompt / ssh status messages). Only assistant
+                    # text deltas reach the caller; usage blocks (v11)
+                    # land in `usage` via _extract_assistant_text.
+                    try:
+                        yield from self._extract_assistant_text(
+                            stripped, usage=usage,
+                        )
+                    except BackendError as e:
+                        if e.code == "parse_failure":
+                            continue
+                        raise
+            finally:
+                stderr_tail = ""
+                if proc.stderr is not None:
+                    stderr_tail = (proc.stderr.read() or "")[-500:]
+                    proc.stderr.close()
+                if proc.stdout is not None:
+                    proc.stdout.close()
+                try:
+                    rc = proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    rc = proc.wait()
+                if rc == 255:
+                    raise BackendError(
+                        f"ssh to {host!r} failed (rc=255): {stderr_tail or '(no stderr)'}",
+                        code="ssh_error",
+                    )
+                if rc != 0:
+                    raise BackendError(
+                        f"remote claude -p exit {rc}: {stderr_tail or '(no stderr)'}",
+                        code="exit_nonzero",
+                    )
+
+        return _StreamWithUsage(_gen(), usage)
 
     # ----- private helpers --------------------------------------------------
 
