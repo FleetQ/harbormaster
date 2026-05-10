@@ -109,7 +109,7 @@ remote_htdocs = "/var/www"
 
 A per-project override at `./.harbormaster.toml` in your cwd takes precedence over the user-level config.
 
-Full schema and all options: [`docs/architecture-harbormaster.md` §3](docs/architecture-harbormaster.md).
+Full schema and all options: **[`docs/operator-config-reference.md`](docs/operator-config-reference.md)** — canonical reference for every TOML section, key, type, default, and valid range.
 
 ## Remote hosts
 
