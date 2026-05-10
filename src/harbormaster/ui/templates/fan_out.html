@@ -233,3 +233,27 @@
 </script>
 
 {% endblock %}
+
+{# v19.0.0a3: fan-out inspector — minimal contextual help. The main
+   column is dominated by the form itself; the inspector reminds the
+   operator what fan-out does and links to related tools. #}
+{% block inspector %}
+<div class="p-3 text-xs" data-tour-step="inspector-content">
+  <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">About fan-out</h3>
+  <p class="text-foreground-muted mb-3">
+    Asks the same question across multiple projects in parallel. Each
+    target replies independently; results stream in as they finish.
+  </p>
+  <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2 border-t border-border pt-3">Related</h3>
+  <ul class="space-y-1">
+    <li>
+      <a href="/dispatcher" class="text-accent hover:underline">→ Dispatcher trace</a>
+      <p class="text-foreground-subtle text-[10px]">watch spans as they fire</p>
+    </li>
+    <li>
+      <a href="/network" class="text-accent hover:underline">→ Network view</a>
+      <p class="text-foreground-subtle text-[10px]">see the cross-project call graph</p>
+    </li>
+  </ul>
+</div>
+{% endblock %}

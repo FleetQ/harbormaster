@@ -2302,3 +2302,94 @@
 </script>
 
 {% endblock %}
+
+{# v19.0.0a3: inspector pane — slim KPI summary + recent MCP activity.
+   Mirrors the main strip's numbers in a vertical dl + tails the last 10
+   network events. Auto-refreshes every 10s; soft-fails when /api/kpi or
+   /api/network/events is unreachable so the inspector never blocks. #}
+{% block inspector %}
+<div class="p-3" data-tour-step="inspector-content">
+  <section x-data="kpiInspector()" x-init="load(); start()" class="mb-4">
+    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Summary</h3>
+    <dl class="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
+      <dt class="text-foreground-muted">Projects</dt>
+      <dd class="text-foreground font-mono" x-text="kpi.projects ?? '—'"></dd>
+      <dt class="text-foreground-muted">Active embeds</dt>
+      <dd class="text-foreground font-mono" x-text="embedsLabel()"></dd>
+      <dt class="text-foreground-muted">1h queries</dt>
+      <dd class="text-foreground font-mono" x-text="kpi.recent_queries ?? '—'"></dd>
+      <dt class="text-foreground-muted">Bridge</dt>
+      <dd class="text-foreground font-mono truncate" x-text="kpi.bridge ?? '—'"></dd>
+    </dl>
+  </section>
+  <section x-data="activityFeed()" x-init="load(); start()"
+           class="border-t border-border pt-3">
+    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Recent activity</h3>
+    <ul class="text-xs space-y-1" data-inspector-activity>
+      <template x-for="ev in events" :key="'ev:' + ev.timestamp_ms + ':' + ev.tool + ':' + ev.target">
+        <li class="font-mono text-foreground-muted truncate">
+          <span class="text-foreground-subtle" x-text="ev.time"></span>
+          <span class="text-accent" x-text="ev.tool"></span>
+          <span class="text-foreground-muted" x-text="ev.target"></span>
+        </li>
+      </template>
+      <li x-show="!events.length" class="text-foreground-subtle">no recent calls</li>
+    </ul>
+  </section>
+</div>
+<script>
+  // v19.0.0a3: kpiInspector — slim mirror of /api/kpi for the right pane.
+  function kpiInspector() {
+    return {
+      kpi: {},
+      _interval: null,
+      async load() {
+        try {
+          const r = await hmFetch('/api/kpi');
+          if (!r.ok) return;
+          this.kpi = await r.json();
+        } catch (_) { /* soft-fail */ }
+      },
+      start() {
+        if (this._interval) return;
+        this._interval = setInterval(() => this.load(), 10000);
+      },
+      embedsLabel() {
+        const e = this.kpi.active_embeds;
+        if (!e || !e.phase) return '—';
+        if (e.processed != null && e.total != null) {
+          return e.phase + ' ' + e.processed + '/' + e.total;
+        }
+        return e.phase;
+      },
+    };
+  }
+  // v19.0.0a3: activityFeed — last 10 MCP-call events from /api/network/events.
+  function activityFeed() {
+    return {
+      events: [],
+      _interval: null,
+      async load() {
+        try {
+          const r = await hmFetch('/api/network/events?limit=10');
+          if (!r.ok) return;
+          const body = await r.json();
+          const list = Array.isArray(body.events) ? body.events : [];
+          this.events = list.map(e => ({
+            timestamp_ms: e.timestamp_ms,
+            tool: e.tool,
+            target: e.target,
+            time: new Date(e.timestamp_ms).toLocaleTimeString([], {
+              hour: '2-digit', minute: '2-digit', second: '2-digit'
+            }),
+          }));
+        } catch (_) { /* soft-fail */ }
+      },
+      start() {
+        if (this._interval) return;
+        this._interval = setInterval(() => this.load(), 10000);
+      },
+    };
+  }
+</script>
+{% endblock %}
