@@ -61,6 +61,233 @@
 <main class="px-6 py-6 max-w-7xl mx-auto">
   {% block content %}{% endblock %}
 </main>
+
+<!-- v8.0.0a4: Cmd-K command palette. Global mount so every page
+     can summon it. Lazy-loads /api/projects on first open so empty
+     installs don't pay the network cost on page paint. -->
+<div x-data="commandPalette()" x-init="bindKeyboard()" x-cloak>
+  <div x-show="open" @click.self="close()"
+       role="dialog" aria-modal="true" aria-label="Command palette"
+       class="fixed inset-0 z-40 bg-gray-950/80 backdrop-blur-sm flex items-start justify-center pt-24"
+       @keydown.escape.window="if (open) close()">
+    <div class="w-full max-w-xl mx-4 bg-gray-900 border border-gray-700 rounded-lg shadow-2xl overflow-hidden"
+         @click.stop>
+      <header class="flex items-center gap-2 border-b border-gray-800 px-3 py-2">
+        <span class="text-cyan-400" aria-hidden="true">⌘</span>
+        <input x-ref="cmdkInput"
+               type="text"
+               x-model="query"
+               @input="updateResults()"
+               @keydown.arrow-down.prevent="moveSelection(1)"
+               @keydown.arrow-up.prevent="moveSelection(-1)"
+               @keydown.enter.prevent="activate()"
+               aria-label="Search projects, tools, and shortcuts"
+               placeholder="Type to search projects, tools, shortcuts…"
+               class="flex-1 bg-transparent text-sm text-gray-100 placeholder-gray-500 focus:outline-none">
+        <kbd class="bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-cyan-300 font-mono text-[10px]">Esc</kbd>
+      </header>
+      <ul x-show="results.length > 0"
+          role="listbox"
+          aria-label="Command palette results"
+          class="max-h-[60vh] overflow-y-auto py-1">
+        <template x-for="(r, i) in results" :key="r.kind + ':' + r.id">
+          <li role="option"
+              :aria-selected="i === selectedIndex"
+              @mouseenter="selectedIndex = i"
+              @click="activate()"
+              :class="i === selectedIndex ? 'bg-cyan-900/40 text-cyan-100' : 'text-gray-200 hover:bg-gray-800/60'"
+              class="px-3 py-1.5 text-sm flex items-center gap-2 cursor-pointer">
+            <span class="text-[10px] uppercase tracking-wide text-gray-500 w-16 shrink-0"
+                  x-text="r.category"></span>
+            <span class="flex-1 truncate" x-text="r.label"></span>
+            <span x-show="r.shortcut"
+                  class="text-[10px] text-gray-500 font-mono shrink-0"
+                  x-text="r.shortcut"></span>
+          </li>
+        </template>
+      </ul>
+      <div x-show="results.length === 0 && query"
+           role="status"
+           class="px-3 py-6 text-center text-xs text-gray-400">
+        No results for <code class="text-cyan-400" x-text="query"></code>
+      </div>
+      <footer class="border-t border-gray-800 px-3 py-1.5 text-[10px] text-gray-500 flex justify-between">
+        <span>
+          <kbd class="bg-gray-800 border border-gray-700 rounded px-1 font-mono">↑↓</kbd>
+          to navigate ·
+          <kbd class="bg-gray-800 border border-gray-700 rounded px-1 font-mono">Enter</kbd>
+          to select
+        </span>
+        <span x-text="`${results.length} result${results.length === 1 ? '' : 's'}`"></span>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<script>
+  // v8.0.0a4: command palette Alpine scope.
+  // Lazy projects fetch on first open; in-memory after that.
+  // Bigram fuzzy match — small, no CDN dep, plenty good for ≤200
+  // candidates (we top out at projects + tools, both small lists).
+  function commandPalette() {
+    return {
+      open: false,
+      query: '',
+      projects: [],
+      projectsLoaded: false,
+      results: [],
+      selectedIndex: 0,
+
+      // Static catalog: tools + settings/help. Project entries are
+      // appended dynamically once /api/projects has loaded.
+      _tools: [
+        { kind: 'tool', id: 'fan-out', category: 'Tool',
+          label: 'Fan-out ask (multi-project query)',
+          shortcut: '/tools/fan-out',
+          href: '/tools/fan-out' },
+        { kind: 'tool', id: 'recall', category: 'Tool',
+          label: 'Recall Q&A history (semantic search)',
+          shortcut: 'scroll to recall',
+          action: () => document.querySelector('[x-data^="recallPanel"]')?.scrollIntoView({ behavior: 'smooth' }) },
+        { kind: 'tool', id: 'graph', category: 'Tool',
+          label: 'Project graph',
+          shortcut: 'scroll to graph',
+          action: () => document.querySelector('[x-data^="graphPanel"]')?.scrollIntoView({ behavior: 'smooth' }) },
+        { kind: 'tool', id: 'reembed', category: 'Tool',
+          label: 'Auto-reembed status',
+          shortcut: 'scroll to reembed',
+          action: () => document.querySelector('[x-data^="reembedPanel"]')?.scrollIntoView({ behavior: 'smooth' }) },
+        { kind: 'tool', id: 'dashboard', category: 'Page',
+          label: 'Dashboard',
+          shortcut: '/',
+          href: '/' },
+        { kind: 'help', id: 'shortcuts', category: 'Help',
+          label: 'Open keyboard shortcuts help',
+          shortcut: '?',
+          action: () => {
+            // Mirror the helpPopover toggle.
+            const evt = new KeyboardEvent('keydown', { key: '?', bubbles: true });
+            window.dispatchEvent(evt);
+          },
+        },
+      ],
+
+      bindKeyboard() {
+        window.addEventListener('keydown', (e) => {
+          // Cmd+K (Mac) or Ctrl+K (everywhere else).
+          if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+            e.preventDefault();
+            this.toggle();
+          }
+        });
+      },
+
+      async toggle() {
+        if (this.open) {
+          this.close();
+        } else {
+          await this.openPalette();
+        }
+      },
+
+      async openPalette() {
+        this.open = true;
+        this.query = '';
+        this.selectedIndex = 0;
+        await this._ensureProjects();
+        this.updateResults();
+        this.$nextTick(() => this.$refs.cmdkInput?.focus());
+      },
+
+      close() {
+        this.open = false;
+      },
+
+      async _ensureProjects() {
+        if (this.projectsLoaded) return;
+        try {
+          const r = await hmFetch('/api/projects');
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const data = await r.json();
+          this.projects = (data.projects || []).map(p => ({
+            kind: 'project',
+            id: p.name,
+            category: 'Project',
+            label: p.name,
+            shortcut: p.language || '',
+            href: '/projects/' + encodeURIComponent(p.name),
+          }));
+          this.projectsLoaded = true;
+        } catch (_) {
+          // Network failure shouldn't break the palette — tools still work.
+          this.projects = [];
+          this.projectsLoaded = true;
+        }
+      },
+
+      updateResults() {
+        const q = (this.query || '').trim().toLowerCase();
+        const all = this.projects.concat(this._tools);
+        if (!q) {
+          // Empty query: show top tools first, then the first 10 projects.
+          const tools = this._tools.slice(0, 6);
+          const projects = this.projects.slice(0, 10);
+          this.results = tools.concat(projects);
+        } else {
+          this.results = all
+            .map(item => ({ item, score: this._score(q, item.label.toLowerCase()) }))
+            .filter(x => x.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 20)
+            .map(x => x.item);
+        }
+        this.selectedIndex = 0;
+      },
+
+      _score(q, candidate) {
+        if (!q) return 0;
+        // Fast exact-substring path: huge boost.
+        if (candidate.includes(q)) {
+          return 1000 - candidate.indexOf(q) - candidate.length * 0.1;
+        }
+        // Bigram overlap fallback.
+        const qBigrams = this._bigrams(q);
+        const cBigrams = this._bigrams(candidate);
+        if (qBigrams.size === 0 || cBigrams.size === 0) return 0;
+        let intersect = 0;
+        for (const bg of qBigrams) if (cBigrams.has(bg)) intersect++;
+        const score = intersect / qBigrams.size;
+        return score > 0.4 ? score * 100 : 0;
+      },
+
+      _bigrams(s) {
+        const out = new Set();
+        for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2));
+        return out;
+      },
+
+      moveSelection(delta) {
+        if (this.results.length === 0) return;
+        this.selectedIndex = (this.selectedIndex + delta + this.results.length) % this.results.length;
+      },
+
+      activate() {
+        const r = this.results[this.selectedIndex];
+        if (!r) return;
+        this.close();
+        // Wait one tick so the dialog backdrop closes before navigation,
+        // otherwise the scroll-into-view happens against the backdrop.
+        this.$nextTick(() => {
+          if (r.href) {
+            window.location.href = r.href;
+          } else if (r.action) {
+            r.action();
+          }
+        });
+      },
+    };
+  }
+</script>
 <footer class="border-t border-gray-800 px-6 py-3 text-xs text-gray-500">
   Part of the <a href="https://fleetq.net" class="text-cyan-500 hover:text-cyan-400">FleetQ</a> ecosystem · MIT
 </footer>
