@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Network · Harbormaster{% endblock %}
+{% block content %}
+
+<nav class="mb-4 text-sm text-gray-400">
+  <a href="/" class="hover:text-cyan-400">← Dashboard</a>
+  <span class="mx-2 text-gray-700">/</span>
+  <span class="text-gray-300">Network</span>
+</nav>
+
+<header class="mb-4 flex items-center justify-between gap-3 flex-wrap">
+  <div>
+    <h2 class="text-xl font-bold text-cyan-400">Inter-project network</h2>
+    <p class="text-xs text-gray-500 mt-1">
+      Live MCP-call events. Edges thicken with call frequency.
+    </p>
+  </div>
+  <div class="flex items-center gap-2 text-xs">
+    <span class="text-gray-500">view:</span>
+    <button type="button" id="hm-network-view-graph"
+            x-data
+            @click="$dispatch('hm:network:view', 'graph')"
+            aria-label="Switch to graph view"
+            class="px-2 py-0.5 rounded border border-gray-700 hover:border-cyan-700 text-gray-300 hover:text-cyan-300">
+      Graph
+    </button>
+    <button type="button" id="hm-network-view-chat"
+            x-data
+            @click="$dispatch('hm:network:view', 'chat')"
+            aria-label="Switch to chat view"
+            class="px-2 py-0.5 rounded border border-gray-700 hover:border-cyan-700 text-gray-300 hover:text-cyan-300">
+      Chat
+    </button>
+  </div>
+</header>
+
+<section x-data="networkPanel()" x-init="init()"
+         class="border border-gray-800 rounded-lg p-3 bg-gray-900/40">
+  <div class="flex items-baseline justify-between gap-2 mb-2 text-xs">
+    <span class="text-gray-500" x-text="`${events.length} event${events.length === 1 ? '' : 's'} recorded`"></span>
+    <span class="text-gray-500" x-show="connected">live</span>
+    <span class="text-amber-400" x-show="!connected && initialized">offline</span>
+  </div>
+  <p x-show="error" :aria-hidden="!error" role="alert"
+     class="text-xs text-red-400 mb-2" x-text="error"></p>
+  <p x-show="!error && events.length === 0" role="status"
+     data-empty-state="network.no-events"
+     class="text-xs text-gray-400 px-4 py-6 text-center">
+    No MCP calls recorded yet — ask a project something and watch this fill in.
+  </p>
+
+  <!-- Graph view -->
+  <div x-show="view === 'graph' && events.length > 0"
+       id="hm-network-graph"
+       class="border border-gray-800 rounded bg-gray-950"
+       style="width: 100%; height: 60vh;"></div>
+</section>
+
+<script src="/static/vendor/cytoscape.min.js"></script>
+<script>
+  function networkPanel() {
+    return {
+      view: 'graph',          // toggled by hm:network:view dispatch from header
+      events: [],
+      cy: null,
+      connected: false,
+      initialized: false,
+      error: '',
+      _eventSource: null,
+
+      async init() {
+        // Listen for the header view-toggle.
+        window.addEventListener('hm:network:view', (e) => {
+          this.view = e.detail || 'graph';
+          if (this.view === 'graph' && this.events.length > 0) {
+            this._renderGraph();
+          }
+        });
+        await this._loadInitial();
+        this._subscribe();
+        if (this.events.length > 0) this._renderGraph();
+        this.initialized = true;
+      },
+
+      async _loadInitial() {
+        try {
+          const r = await hmFetch('/api/network/events?limit=500');
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const data = await r.json();
+          this.events = Array.isArray(data.events) ? data.events : [];
+        } catch (e) {
+          this.error = 'failed to load: ' + e.message;
+        }
+      },
+
+      _subscribe() {
+        // EventSource doesn't support custom headers, so the SSE
+        // stream is bearer-protected via cookies/IP scope rather than
+        // the bearer-token header. Acceptable for v10 (operator
+        // reachable on loopback / private network).
+        try {
+          this._eventSource = new EventSource('/api/network/stream');
+          this._eventSource.addEventListener('event', (msg) => {
+            try {
+              const ev = JSON.parse(msg.data);
+              this.events.push(ev);
+              if (this.events.length > 500) this.events.shift();
+              if (this.view === 'graph' && this.cy) this._addEventToGraph(ev);
+            } catch (_) { /* drop malformed */ }
+          });
+          this._eventSource.addEventListener('open', () => {
+            this.connected = true;
+          });
+          this._eventSource.addEventListener('error', () => {
+            this.connected = false;
+          });
+        } catch (e) {
+          this.error = 'stream subscribe failed: ' + e.message;
+        }
+      },
+
+      _renderGraph() {
+        if (!window.cytoscape) {
+          this.error = 'cytoscape failed to load';
+          return;
+        }
+        // Aggregate events into nodes + weighted edges.
+        const nodes = new Map();   // id → {data:{id,label}}
+        const edges = new Map();   // edgeKey → {data:{source,target,tool,weight}}
+        for (const ev of this.events) {
+          for (const n of [ev.caller, ev.target]) {
+            if (!nodes.has(n)) nodes.set(n, { data: { id: n, label: n } });
+          }
+          const key = ev.caller + '|' + ev.target + '|' + ev.tool;
+          const existing = edges.get(key);
+          if (existing) {
+            existing.data.weight += 1;
+          } else {
+            edges.set(key, {
+              data: {
+                source: ev.caller,
+                target: ev.target,
+                tool: ev.tool,
+                weight: 1,
+              },
+            });
+          }
+        }
+        const elements = [...nodes.values(), ...edges.values()];
+        if (this.cy) this.cy.destroy();
+        this.cy = window.cytoscape({
+          container: document.getElementById('hm-network-graph'),
+          elements: elements,
+          style: [
+            {
+              selector: 'node',
+              style: {
+                'background-color': '#0e7490',
+                'label': 'data(label)',
+                'color': '#e2e8f0',
+                'font-size': '11px',
+                'text-valign': 'center',
+                'text-halign': 'center',
+                'text-outline-color': '#0f172a',
+                'text-outline-width': 2,
+              },
+            },
+            {
+              selector: 'edge',
+              style: {
+                'curve-style': 'bezier',
+                'target-arrow-shape': 'triangle',
+                'width': 'mapData(weight, 1, 20, 1, 8)',
+                'line-color': '#475569',
+                'target-arrow-color': '#475569',
+              },
+            },
+            // v10.0.0a7: tool-color edges.
+            { selector: 'edge[tool = "ask_project"]',
+              style: { 'line-color': '#22d3ee', 'target-arrow-color': '#22d3ee' } },
+            { selector: 'edge[tool = "delegate_task"]',
+              style: { 'line-color': '#a78bfa', 'target-arrow-color': '#a78bfa' } },
+            { selector: 'edge[tool = "fan_out_ask"]',
+              style: { 'line-color': '#67e8f9', 'target-arrow-color': '#67e8f9' } },
+            { selector: 'edge[tool = "recall_qa"]',
+              style: { 'line-color': '#34d399', 'target-arrow-color': '#34d399' } },
+          ],
+          layout: { name: 'cose', idealEdgeLength: 100, animate: false },
+        });
+      },
+
+      _addEventToGraph(ev) {
+        // Cheap incremental update: bump or create the edge, add new
+        // nodes, then run a quick layout step. Full re-render is
+        // reserved for the initial mount.
+        if (!this.cy) return;
+        for (const n of [ev.caller, ev.target]) {
+          if (!this.cy.getElementById(n).length) {
+            this.cy.add({ data: { id: n, label: n } });
+          }
+        }
+        const id = `${ev.caller}__${ev.target}__${ev.tool}`;
+        const existing = this.cy.getElementById(id);
+        if (existing.length) {
+          existing.data('weight', (existing.data('weight') || 1) + 1);
+        } else {
+          this.cy.add({
+            data: {
+              id,
+              source: ev.caller,
+              target: ev.target,
+              tool: ev.tool,
+              weight: 1,
+            },
+          });
+        }
+      },
+    };
+  }
+</script>
+{% endblock %}

@@ -142,6 +142,60 @@ def register_routes(
             },
         )
 
+    @app.get("/network", response_class=HTMLResponse)
+    async def network_page(request: Request) -> HTMLResponse:
+        """v10.0.0a7: inter-project network graph view.
+
+        Renders Cytoscape from the vendored `/static/vendor/cytoscape.min.js`
+        and feeds it the recent MCP-call events from the in-process
+        ring buffer (see `harbormaster.ui.network_log`). New events
+        stream in via `/api/network/stream` SSE.
+        """
+        return _render(request, "network.html", {})
+
+    @app.get("/api/network/events")
+    async def list_network_events(limit: int = 500) -> dict[str, object]:
+        from harbormaster.ui.network_log import network_log
+
+        if limit < 1 or limit > 5000:
+            raise HTTPException(400, "limit must be between 1 and 5000")
+        events = network_log.recent(limit=limit)
+        return {
+            "count": len(events),
+            "events": [e.as_dict() for e in events],
+        }
+
+    @app.get("/api/network/stream")
+    async def stream_network_events() -> EventSourceResponse:
+        """SSE stream of new MCPCallLog events as they're recorded.
+
+        Subscribers receive an `event: event` frame per new entry
+        plus a periodic heartbeat so intermediate proxies don't
+        idle-time-out the connection.
+        """
+        from harbormaster.ui.network_log import network_log
+
+        async def gen() -> AsyncIterator[dict[str, str]]:
+            queue = network_log.subscribe()
+            try:
+                while True:
+                    try:
+                        ev = await asyncio.wait_for(
+                            queue.get(),
+                            timeout=_HEARTBEAT_INTERVAL_S,
+                        )
+                    except TimeoutError:
+                        yield {"event": "heartbeat", "data": "{}"}
+                        continue
+                    yield {
+                        "event": "event",
+                        "data": json.dumps(ev.as_dict()),
+                    }
+            finally:
+                network_log.unsubscribe(queue)
+
+        return EventSourceResponse(gen())
+
     @app.get("/projects/{name}", response_class=HTMLResponse)
     async def project_detail(
         name: str, request: Request, host: str | None = None,
@@ -1833,6 +1887,26 @@ async def _emit_chunks_then_result(
         except Exception:  # noqa: BLE001 — never break the stream
             pass
 
+    # v10.0.0a7: record one network event per completed streamed call.
+    # The caller is "operator" today (no parent-project context for
+    # UI-direct calls); a future v11 deferred decoration could pass
+    # the originating project when a delegated tool calls another
+    # tool. Failures swallowed — instrumentation must never break
+    # the stream.
+    if record_ctx is not None:
+        try:
+            from harbormaster.ui.network_log import network_log
+
+            network_log.record(
+                caller="operator",
+                target=str(record_ctx["project_name"]),
+                tool=str(record_ctx["tool"]),
+                status="ok" if assembled else "error",
+                question_preview=str(record_ctx["prompt"]),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     envelope = {
         "result": {
             "content": [{"type": "text", "text": assembled}],
@@ -1877,6 +1951,12 @@ def _dispatch_mcp(mcp: Any, body: McpProxyRequest) -> dict[str, Any]:
     except TypeError as e:
         raise HTTPException(400, f"tool argument error: {e}") from e
     except Exception as e:  # noqa: BLE001 - propagate as MCP error envelope
+        # v10.0.0a7: record the failed call too (status=error).
+        try:
+            from harbormaster.ui.network_log import network_log
+            _record_mcp_dispatch(network_log, name, arguments, status="error")
+        except Exception:  # noqa: BLE001
+            pass
         return {
             "result": {
                 "isError": True,
@@ -1886,7 +1966,71 @@ def _dispatch_mcp(mcp: Any, body: McpProxyRequest) -> dict[str, Any]:
             }
         }
 
+    # v10.0.0a7: instrument the legacy heartbeat-path tools too —
+    # recall_qa, fan_out_ask, project_status, etc. Streaming-path
+    # tools (ask_project, delegate_task) are recorded inside
+    # `_emit_chunks_then_result` instead.
+    try:
+        from harbormaster.ui.network_log import network_log
+        _record_mcp_dispatch(network_log, name, arguments, status="ok")
+    except Exception:  # noqa: BLE001
+        pass
+
     return {"result": {"content": [_serialize_tool_result(result)]}}
+
+
+def _record_mcp_dispatch(
+    network_log: Any,
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    status: str,
+) -> None:
+    """v10.0.0a7: route a single tool/call into the network log.
+
+    For `fan_out_ask` we record one event per resolved target so
+    each fan-out leg appears as a distinct edge in the graph. For
+    everything else, a single event with `target = arguments.name`
+    (or "operator" if absent — e.g. recall_qa with host="all").
+    """
+    if tool_name in {"ask_project", "delegate_task"}:
+        # Already recorded inside the streaming dispatcher.
+        return
+    args_target = arguments.get("name") or arguments.get("project")
+    question = (
+        arguments.get("question")
+        or arguments.get("task")
+        or arguments.get("query")
+        or ""
+    )
+    preview = question if isinstance(question, str) else ""
+    if tool_name == "fan_out_ask":
+        projects = arguments.get("projects") or []
+        if isinstance(projects, list) and projects:
+            for proj in projects:
+                if not isinstance(proj, str) or not proj:
+                    continue
+                network_log.record(
+                    caller="operator", target=proj,
+                    tool=tool_name, status=status,
+                    question_preview=preview,
+                )
+            return
+        # No project list → record an aggregate event so the chat
+        # view still shows the fan-out happened.
+        network_log.record(
+            caller="operator", target="(all)",
+            tool=tool_name, status=status,
+            question_preview=preview,
+        )
+        return
+    network_log.record(
+        caller="operator",
+        target=str(args_target) if isinstance(args_target, str) else "(unknown)",
+        tool=tool_name,
+        status=status,
+        question_preview=preview,
+    )
 
 
 def _serialize_tool_result(result: Any) -> dict[str, Any]:
