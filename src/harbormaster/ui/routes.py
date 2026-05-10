@@ -1443,15 +1443,29 @@ def register_routes(
                 "alongside, or update your launcher to pass mcp=build_server(config).",
             )
 
+        # v11.0.0a1: caller-project propagation. When the HTTP-tunnel
+        # client (e.g. agent-fleet's BridgeController) declares which
+        # project owns the originating session, record that as the
+        # network event's caller. Falls back to "operator" when the
+        # header is absent, matching pre-v11 behaviour.
+        caller_header = request.headers.get("x-caller-project", "").strip()
+        caller = caller_header or None
+
         accept = request.headers.get("accept", "")
         if "text/event-stream" in accept.lower():
-            return EventSourceResponse(_stream_dispatch(mcp, body, config))
+            return EventSourceResponse(
+                _stream_dispatch(mcp, body, config, caller=caller),
+            )
 
-        return _dispatch_mcp(mcp, body)
+        return _dispatch_mcp(mcp, body, caller=caller)
 
 
 async def _stream_dispatch(
-    mcp: Any, body: McpProxyRequest, config: HarbormasterConfig | None = None,
+    mcp: Any,
+    body: McpProxyRequest,
+    config: HarbormasterConfig | None = None,
+    *,
+    caller: str | None = None,
 ) -> AsyncIterator[dict[str, str]]:
     """SSE event generator for the streaming `/mcp/{server}` path.
 
@@ -1491,19 +1505,23 @@ async def _stream_dispatch(
             host = args.get("host")
             if host in (None, "local"):
                 async for evt in _stream_local_tool(
-                    config, args, prompt_builder, max_turns_default=5,
+                    config, args, prompt_builder,
+                    max_turns_default=5, caller=caller,
                 ):
                     yield evt
                 return
             if isinstance(host, str) and host:
                 async for evt in _stream_remote_tool(
-                    config, args, host, prompt_builder, max_turns_default=5,
+                    config, args, host, prompt_builder,
+                    max_turns_default=5, caller=caller,
                 ):
                     yield evt
                 return
 
     start = time.monotonic()
-    task = asyncio.create_task(asyncio.to_thread(_dispatch_mcp, mcp, body))
+    task = asyncio.create_task(
+        asyncio.to_thread(_dispatch_mcp, mcp, body, caller=caller),
+    )
     # v9.0.0a4: per-stream monotonic event id. EventSource records the
     # most recent id as `lastEventId`; on reconnect the browser sends it
     # back as `Last-Event-ID`. The /mcp/* path is request-scoped so
@@ -1616,6 +1634,7 @@ async def _stream_local_tool(
     prompt_builder: PromptBuilder,
     *,
     max_turns_default: int,
+    caller: str | None = None,
 ) -> AsyncIterator[dict[str, str]]:
     """Generic local-streaming SSE dispatcher.
 
@@ -1686,6 +1705,7 @@ async def _stream_local_tool(
             "host": None,
             "prompt": full_prompt,
             "tool": _tool_name_for_builder(prompt_builder),
+            "caller": caller,
         },
     ):
         yield evt
@@ -1698,6 +1718,7 @@ async def _stream_remote_tool(
     prompt_builder: PromptBuilder,
     *,
     max_turns_default: int,
+    caller: str | None = None,
 ) -> AsyncIterator[dict[str, str]]:
     """SSH counterpart to `_stream_local_tool`. Identical structure
     modulo the make_remote_backend_stream call + host parameter."""
@@ -1754,6 +1775,7 @@ async def _stream_remote_tool(
             "host": host,
             "prompt": full_prompt,
             "tool": _tool_name_for_builder(prompt_builder),
+            "caller": caller,
         },
     ):
         yield evt
@@ -1898,7 +1920,7 @@ async def _emit_chunks_then_result(
             from harbormaster.ui.network_log import network_log
 
             network_log.record(
-                caller="operator",
+                caller=str(record_ctx.get("caller") or "operator"),
                 target=str(record_ctx["project_name"]),
                 tool=str(record_ctx["tool"]),
                 status="ok" if assembled else "error",
@@ -1915,7 +1937,9 @@ async def _emit_chunks_then_result(
     yield {"event": "result", "id": next_id.next(), "data": json.dumps(envelope)}
 
 
-def _dispatch_mcp(mcp: Any, body: McpProxyRequest) -> dict[str, Any]:
+def _dispatch_mcp(
+    mcp: Any, body: McpProxyRequest, *, caller: str | None = None,
+) -> dict[str, Any]:
     """Translate body.method + body.params into a tool call against
     FastMCP's tool manager and return an MCP JSON-RPC-shaped response."""
     if body.method == "tools/list":
@@ -1954,7 +1978,10 @@ def _dispatch_mcp(mcp: Any, body: McpProxyRequest) -> dict[str, Any]:
         # v10.0.0a7: record the failed call too (status=error).
         try:
             from harbormaster.ui.network_log import network_log
-            _record_mcp_dispatch(network_log, name, arguments, status="error")
+            _record_mcp_dispatch(
+                network_log, name, arguments,
+                status="error", caller=caller,
+            )
         except Exception:  # noqa: BLE001
             pass
         return {
@@ -1972,7 +1999,9 @@ def _dispatch_mcp(mcp: Any, body: McpProxyRequest) -> dict[str, Any]:
     # `_emit_chunks_then_result` instead.
     try:
         from harbormaster.ui.network_log import network_log
-        _record_mcp_dispatch(network_log, name, arguments, status="ok")
+        _record_mcp_dispatch(
+            network_log, name, arguments, status="ok", caller=caller,
+        )
     except Exception:  # noqa: BLE001
         pass
 
@@ -1985,6 +2014,7 @@ def _record_mcp_dispatch(
     arguments: dict[str, Any],
     *,
     status: str,
+    caller: str | None = None,
 ) -> None:
     """v10.0.0a7: route a single tool/call into the network log.
 
@@ -1992,6 +2022,11 @@ def _record_mcp_dispatch(
     each fan-out leg appears as a distinct edge in the graph. For
     everything else, a single event with `target = arguments.name`
     (or "operator" if absent — e.g. recall_qa with host="all").
+
+    v11.0.0a1: `caller` defaults to "operator" when absent. When the
+    HTTP-tunnel client passed an `X-Caller-Project` header, the
+    routing layer threads the project name through; the network log
+    then surfaces a real cross-project edge in the graph.
     """
     if tool_name in {"ask_project", "delegate_task"}:
         # Already recorded inside the streaming dispatcher.
@@ -2004,6 +2039,7 @@ def _record_mcp_dispatch(
         or ""
     )
     preview = question if isinstance(question, str) else ""
+    caller_name = caller or "operator"
     if tool_name == "fan_out_ask":
         projects = arguments.get("projects") or []
         if isinstance(projects, list) and projects:
@@ -2011,7 +2047,7 @@ def _record_mcp_dispatch(
                 if not isinstance(proj, str) or not proj:
                     continue
                 network_log.record(
-                    caller="operator", target=proj,
+                    caller=caller_name, target=proj,
                     tool=tool_name, status=status,
                     question_preview=preview,
                 )
@@ -2019,13 +2055,13 @@ def _record_mcp_dispatch(
         # No project list → record an aggregate event so the chat
         # view still shows the fan-out happened.
         network_log.record(
-            caller="operator", target="(all)",
+            caller=caller_name, target="(all)",
             tool=tool_name, status=status,
             question_preview=preview,
         )
         return
     network_log.record(
-        caller="operator",
+        caller=caller_name,
         target=str(args_target) if isinstance(args_target, str) else "(unknown)",
         tool=tool_name,
         status=status,
