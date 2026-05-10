@@ -70,6 +70,23 @@
           </label>
         </template>
       </div>
+      <!-- v8.0.0a3: canonical 3-part empty state for fan-out no-selection. -->
+      <div x-show="selected.length === 0"
+           :aria-hidden="selected.length !== 0"
+           role="status"
+           data-empty-state="fanout.no-selection"
+           class="mt-2 border border-gray-800 bg-gray-900/40 text-gray-400 px-3 py-3 rounded text-center">
+        <p class="text-xs font-bold text-gray-200 mb-1">Pick at least one project</p>
+        <p class="text-[11px] text-gray-400 mb-2">
+          Click <span class="text-cyan-400">all</span> above to select every visible project,
+          or tick individual checkboxes.
+        </p>
+        <button type="button" @click="selectAll()"
+                aria-label="Select all projects"
+                class="text-[11px] px-2 py-0.5 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+          Select all
+        </button>
+      </div>
     </div>
     <div class="flex items-center gap-3">
       <button type="submit"

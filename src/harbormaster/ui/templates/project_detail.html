@@ -81,11 +81,24 @@
   </header>
   <p x-show="message" :aria-hidden="!message" role="status" aria-live="polite" class="text-xs text-amber-400" x-text="message"></p>
   <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="error"></p>
-  <p x-show="!message && !error && trajectories.length === 0"
-     :aria-hidden="!(!message && !error && trajectories.length === 0)"
-     class="text-xs text-gray-400">
-    No prior trajectories yet — ask or delegate something above and it will record here.
-  </p>
+  <!-- v8.0.0a3: canonical 3-part empty state for trajectory list. -->
+  <div x-show="!message && !error && trajectories.length === 0"
+       :aria-hidden="!(!message && !error && trajectories.length === 0)"
+       role="status"
+       data-empty-state="trajectory.no-entries"
+       class="border border-gray-800 bg-gray-900/40 text-gray-400 px-4 py-6 rounded text-center">
+    <p class="text-sm font-bold text-gray-200 mb-1">No questions asked yet</p>
+    <p class="text-xs text-gray-400 mb-3">
+      Use the <span class="text-cyan-400">Ask</span> form above to query this project.
+      Each question + answer pair lands here as a trajectory.
+    </p>
+    <button type="button"
+            @click="document.querySelector(`section[x-data^='askForm'] textarea`)?.focus()"
+            aria-label="Focus the ask textarea"
+            class="text-xs px-3 py-1 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+      Focus ask form
+    </button>
+  </div>
   <ul class="space-y-2">
     <!-- v5.0.0a4: keyed by content tuple instead of t.id so the
          optimistic→real reconciliation preserves the DOM node and the

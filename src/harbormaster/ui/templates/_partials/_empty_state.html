@@ -1,0 +1,37 @@
+{# v8.0.0a3: canonical empty-state partial.
+
+   The same 3-part layout for every "nothing yet" surface in the
+   dashboard so operators see a consistent affordance: headline +
+   one-line explanation + optional CTA. Reduces cognitive load and
+   makes adding a new empty state cheap.
+
+   Usage (Jinja `with` block):
+       {% include "_partials/_empty_state.html" %}
+       Surrounding scope must define:
+         - es_headline (str)        — one-line summary
+         - es_body     (str)        — secondary explanation
+         - es_cta_label (str)       — optional button text
+         - es_cta_action (str)      — optional Alpine `@click=` payload
+         - es_cta_href  (str)       — optional `<a href=>` instead of button
+
+   Usage (Alpine slot — render inline without Jinja `with`):
+     If you want a per-section empty state defined inline, copy this
+     markup directly. The partial-include pattern works best when
+     the empty state is reused across templates.
+#}
+<div class="border border-gray-800 bg-gray-900/40 text-gray-400 px-4 py-6 rounded text-center"
+     role="status">
+  <p class="text-sm font-bold text-gray-200 mb-1">{{ es_headline }}</p>
+  <p class="text-xs text-gray-400 mb-3">{{ es_body }}</p>
+  {% if es_cta_action %}
+    <button type="button" @click="{{ es_cta_action }}"
+            class="text-xs px-3 py-1 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+      {{ es_cta_label }}
+    </button>
+  {% elif es_cta_href %}
+    <a href="{{ es_cta_href }}"
+       class="text-xs px-3 py-1 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 transition inline-block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+      {{ es_cta_label }}
+    </a>
+  {% endif %}
+</div>
