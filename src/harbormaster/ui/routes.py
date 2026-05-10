@@ -599,6 +599,101 @@ def register_routes(
             "mermaid": graph_to_mermaid(graph),
         }
 
+    @app.get("/api/kpi")
+    async def api_kpi(since_seconds: int = 3600) -> dict[str, object]:
+        """KPI strip aggregator (v8.0.0a5).
+
+        Returns the 5 numbers the dashboard's top strip displays in
+        a single round-trip so the UI doesn't have to fan out 5
+        polls. Cheap — projects count uses the v7.0.0a6 cache,
+        recent-queries count is a covering-index scan, reembed
+        state and bridge state are already in-memory.
+
+        Soft-fails per cell — a missing [history] extra returns
+        `{recent_queries: null, ...}` rather than 500ing the whole
+        endpoint. Operators always see *some* numbers.
+        """
+        nonlocal _last_dirs
+
+        # Projects count — reuse the same cache the project list uses.
+        def _build_for_count() -> list[dict[str, object]]:
+            nonlocal _last_dirs
+            infos = discover_projects(config.projects)
+            _last_dirs = project_dirs_from_infos(infos)
+            return [p.as_dict() for p in infos]
+
+        projects = projects_cache.get(_build_for_count, _last_dirs)
+
+        # Reembed state — same source of truth as /api/history/state.
+        reembed_phase: str | None = None
+        reembed_processed: int | None = None
+        reembed_total: int | None = None
+        if config.history.enabled:
+            try:
+                from harbormaster.history import read_reembed_state
+
+                state = read_reembed_state()
+                reembed_phase = state.phase
+                reembed_processed = state.processed
+                reembed_total = state.total
+            except ImportError:
+                pass
+
+        # Recent queries — sum across hosts is overkill for v8.0.0a5;
+        # local-only is the dashboard's primary surface and the v9
+        # waterfall surface will surface multi-host counts separately.
+        recent_queries: int | None = None
+        if config.history.enabled:
+            try:
+                from harbormaster.history import (
+                    QAStore,
+                    get_embedding_backend,
+                )
+
+                backend = get_embedding_backend(config)
+                store = QAStore.open(
+                    db_dir=config.history.db_dir,
+                    host=None,
+                    embedding_backend=backend,
+                    embedding_dim=config.history.embedding_dim,
+                )
+                try:
+                    cutoff = int(time.time() - max(60, since_seconds))
+                    recent_queries = store.count_since(cutoff)
+                finally:
+                    store.close()
+            except (ImportError, Exception):  # noqa: BLE001 — soft-fail
+                recent_queries = None
+
+        # Bridge — same shape as /api/bridge/status's status pill.
+        bridge_state = "disabled"
+        if config.fleetq.enabled:
+            import os as _os
+            api_token_present = bool(
+                _os.environ.get(config.fleetq.api_token_env, "").strip()
+            )
+            # Runtime detail lives in /api/bridge/status; here we
+            # only need a coarse pill state.
+            bridge_state = "configured" if api_token_present else "token missing"
+
+        # Dispatcher — placeholder until v9 waterfall ships. Always
+        # `ready` for now (matches the v8 plan's "or hard-coded
+        # 'ready' until v9 waterfall ships" provision).
+        dispatcher_state = "ready"
+
+        return {
+            "projects": len(projects),
+            "active_embeds": {
+                "phase": reembed_phase,
+                "processed": reembed_processed,
+                "total": reembed_total,
+            },
+            "recent_queries": recent_queries,
+            "since_seconds": since_seconds,
+            "bridge": bridge_state,
+            "dispatcher": dispatcher_state,
+        }
+
     @app.get("/health")
     async def fleetq_health() -> dict[str, str]:
         """Alias of /api/health using the path FleetQ Bridge expects when

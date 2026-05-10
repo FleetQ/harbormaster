@@ -53,6 +53,53 @@
   </div>
 </div>
 
+<!-- v8.0.0a5: KPI strip. 5-cell at-a-glance summary atop the
+     dashboard so operators see the project / embed / query / bridge
+     / dispatcher state without scanning the body. Auto-refreshes
+     every 30s; soft-fails per cell if the underlying source is
+     missing. -->
+<section x-data="kpiStrip()" x-init="loadKpi(); startPolling()"
+         aria-label="Dashboard at-a-glance metrics"
+         class="mb-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+  <div class="border border-gray-800 rounded-lg p-3 bg-gray-900/40"
+       data-kpi-cell="projects">
+    <p class="text-[10px] uppercase tracking-wide text-gray-400">Projects</p>
+    <p class="text-2xl font-bold text-gray-100"
+       x-text="kpi.projects ?? '—'"
+       :aria-label="`${kpi.projects ?? 0} projects discovered`"></p>
+  </div>
+  <div class="border border-gray-800 rounded-lg p-3 bg-gray-900/40"
+       data-kpi-cell="active-embeds">
+    <p class="text-[10px] uppercase tracking-wide text-gray-400">Active embeds</p>
+    <p class="text-2xl font-bold"
+       :class="activeEmbedsClass()"
+       x-text="activeEmbedsLabel()"
+       :aria-label="`Reembed phase ${kpi.active_embeds?.phase || 'unknown'}`"></p>
+  </div>
+  <div class="border border-gray-800 rounded-lg p-3 bg-gray-900/40"
+       data-kpi-cell="recent-queries">
+    <p class="text-[10px] uppercase tracking-wide text-gray-400">Recent queries (1h)</p>
+    <p class="text-2xl font-bold text-gray-100"
+       x-text="kpi.recent_queries ?? '—'"
+       :aria-label="`${kpi.recent_queries ?? 0} queries in the last hour`"></p>
+  </div>
+  <div class="border border-gray-800 rounded-lg p-3 bg-gray-900/40"
+       data-kpi-cell="bridge">
+    <p class="text-[10px] uppercase tracking-wide text-gray-400">Bridge</p>
+    <p class="text-sm font-bold pt-1.5"
+       :class="bridgeClass()"
+       x-text="kpi.bridge ?? '—'"
+       :aria-label="`Bridge ${kpi.bridge || 'unknown'}`"></p>
+  </div>
+  <div class="border border-gray-800 rounded-lg p-3 bg-gray-900/40"
+       data-kpi-cell="dispatcher">
+    <p class="text-[10px] uppercase tracking-wide text-gray-400">Dispatcher</p>
+    <p class="text-sm font-bold pt-1.5 text-emerald-400"
+       x-text="kpi.dispatcher ?? '—'"
+       :aria-label="`Dispatcher ${kpi.dispatcher || 'unknown'}`"></p>
+  </div>
+</section>
+
 <!-- v2.1.0a1: bridge + plugin status strip. Sticky on desktop,
      collapsible on mobile. Loads async, doesn't block project grid. -->
 <section x-data="statusStrip()" x-init="loadAll()"
@@ -574,6 +621,66 @@
 {% include "_partials/_ask_form_script.html" %}
 
 <script>
+  // v8.0.0a5: KPI strip Alpine scope. Single /api/kpi fetch on
+  // mount + every 30s. Per-cell helpers compute label + color so
+  // the template is presentational only.
+  function kpiStrip() {
+    return {
+      kpi: {},
+      _interval: null,
+
+      async loadKpi() {
+        try {
+          const r = await hmFetch('/api/kpi');
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          this.kpi = await r.json();
+        } catch (_) {
+          // Soft-fail — leave kpi = {} so cells fall back to '—'.
+        }
+      },
+
+      startPolling() {
+        this._interval = setInterval(() => this.loadKpi(), 30000);
+      },
+
+      activeEmbedsLabel() {
+        const ae = this.kpi.active_embeds || {};
+        if (!ae.phase || ae.phase === 'idle') return 'idle';
+        if (ae.phase === 'running') {
+          const p = ae.processed ?? 0;
+          const t = ae.total ?? 0;
+          return t ? `${p}/${t}` : 'running';
+        }
+        return ae.phase;
+      },
+
+      activeEmbedsClass() {
+        const phase = (this.kpi.active_embeds || {}).phase || 'idle';
+        const map = {
+          running: 'text-cyan-300',
+          done: 'text-emerald-300',
+          failed: 'text-rose-300',
+          cancelled: 'text-amber-300',
+          idle: 'text-gray-400',
+        };
+        return map[phase] || 'text-gray-400';
+      },
+
+      bridgeClass() {
+        const state = this.kpi.bridge;
+        const map = {
+          configured: 'text-emerald-300',
+          'token missing': 'text-amber-300',
+          disabled: 'text-gray-400',
+          connected: 'text-emerald-300',
+          stale: 'text-amber-300',
+          disconnected: 'text-rose-300',
+        };
+        return map[state] || 'text-gray-400';
+      },
+    };
+  }
+
   function statusStrip() {
     return {
       bridge: {}, bridgeError: null,
