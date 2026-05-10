@@ -114,11 +114,33 @@
        :class="hostBudgetClass()"
        x-text="hostBudgetLabel()"
        :aria-label="hostBudgetAriaLabel()"></p>
-    <!-- v15.0.0a4: per-tool breakdown on hover. -->
+    <!-- v15.0.0a4: per-tool breakdown on hover.
+         v17.0.0a4: also surface tightest-cap axis breakdown
+         (per-host / per-tool / per-project) so operators see
+         which axis is bottlenecking without opening the projects-
+         budget endpoint. The tightest axis is highlighted. -->
     <div x-show="toolsBudgetHover && (toolsBudget.tools || []).length > 0"
          x-cloak
+         data-kpi-tightest-tooltip
          class="absolute left-0 right-0 top-full mt-1 z-10 border border-border rounded bg-gray-950/95 p-2 text-[10px] space-y-0.5 shadow-lg">
-      <p class="text-foreground-subtle uppercase tracking-wide">Per-tool · 24h</p>
+      <!-- v17.0.0a4: tightest-cap breakdown for the worst-usage host. -->
+      <p class="text-foreground-subtle uppercase tracking-wide"
+         x-show="tightestBreakdown.host">
+        Tightest cap
+        <span class="text-foreground" x-text="tightestBreakdown.host || ''"></span>
+      </p>
+      <template x-for="row in tightestBreakdown.axes"
+                :key="'ta:' + row.axis + ':' + (row.label || '')">
+        <div class="flex items-baseline gap-2"
+             data-tightest-axis-row
+             :data-tightest-axis="row.axis"
+             :data-tightest-axis-winner="row.is_tightest ? 'true' : 'false'"
+             :class="row.is_tightest ? 'text-warning font-bold' : 'text-foreground-muted'">
+          <span class="font-mono truncate" x-text="row.label"></span>
+          <span x-text="row.usage_pct == null ? '—' : `${row.usage_pct}%`"></span>
+        </div>
+      </template>
+      <p class="text-foreground-subtle uppercase tracking-wide pt-1">Per-tool · 24h</p>
       <template x-for="t in (toolsBudget.tools || [])" :key="'tb:' + t.tool">
         <div class="flex items-baseline gap-2">
           <span class="font-mono text-foreground-muted truncate" x-text="t.tool"></span>
@@ -857,6 +879,17 @@
       toolsBudget: { tools: [] },
       toolsBudgetHover: false,
       _toolsBudgetLoaded: false,
+      // v17.0.0a4: tightest-cap breakdown for the worst-usage host.
+      // Lazy-loaded on first hover (mirrors the v15.a4 pattern).
+      // Shape:
+      //   { host: <name>,
+      //     axes: [
+      //       { axis: 'host', label: 'per-host', usage_pct, is_tightest },
+      //       { axis: 'tool', label: 'per-tool ask_project', usage_pct, ... },
+      //       { axis: 'project', label: 'per-project <name>', usage_pct, ... },
+      //     ] }
+      tightestBreakdown: { host: '', axes: [] },
+      _tightestLoadedFor: null,
       _interval: null,
 
       async loadKpi() {
@@ -886,6 +919,84 @@
         if (!this._toolsBudgetLoaded) {
           await this.loadToolsBudget();
         }
+        // v17.0.0a4: lazy-load the tightest-cap breakdown for the
+        // currently-worst host. Re-fetch when the worst host changes
+        // (e.g. after a 30s poll bumps another host above the
+        // previous worst).
+        const worst = this._worstBudgetUsage();
+        if (worst && this._tightestLoadedFor !== worst.host) {
+          await this._loadTightestBreakdown(worst.host);
+        }
+      },
+
+      // v17.0.0a4: build the per-axis breakdown for `host` from
+      // existing kpiStrip state + a single /api/projects/budget
+      // fetch. `tightest_cap_axis` is computed server-side per
+      // project; we surface the project with the highest usage_pct
+      // (the natural "what's at risk" pick) and pull the per-host
+      // + per-tool axes from the data we already have.
+      async _loadTightestBreakdown(host) {
+        const axes = [];
+        // Per-host axis — already in `hostBudget.hosts`.
+        const hostRow = (this.hostBudget.hosts || [])
+          .find(h => h.host === host);
+        if (hostRow && hostRow.usage_pct != null) {
+          axes.push({
+            axis: 'host',
+            label: 'per-host',
+            usage_pct: hostRow.usage_pct,
+            is_tightest: false,
+          });
+        }
+        // Per-tool axis — `toolsBudget.tools` is already loaded.
+        // The project-targeting tools are ask_project + delegate_task;
+        // surface each with a usage percentage.
+        const projectTools = (this.toolsBudget.tools || [])
+          .filter(t => (t.tool === 'ask_project'
+                     || t.tool === 'delegate_task')
+                    && t.usage_pct != null);
+        for (const t of projectTools) {
+          axes.push({
+            axis: 'tool',
+            label: `per-tool ${t.tool}`,
+            usage_pct: t.usage_pct,
+            is_tightest: false,
+          });
+        }
+        // Per-project axis — fetch /api/projects/budget for this host.
+        try {
+          const r = await hmFetch(
+            `/api/projects/budget?host=${encodeURIComponent(host)}`
+          );
+          if (r.ok) {
+            const body = await r.json();
+            const projects = (body.projects || [])
+              .filter(p => p.usage_pct != null);
+            if (projects.length > 0) {
+              // Worst-usage project is the natural pick to surface.
+              let worstP = projects[0];
+              for (const p of projects) {
+                if (p.usage_pct > worstP.usage_pct) worstP = p;
+              }
+              axes.push({
+                axis: 'project',
+                label: `per-project ${worstP.project}`,
+                usage_pct: worstP.usage_pct,
+                is_tightest: false,
+              });
+            }
+          }
+        } catch (_) { /* soft-fail */ }
+        // Mark the tightest axis (highest usage_pct = closest to cap).
+        if (axes.length > 0) {
+          let topIdx = 0;
+          for (let i = 1; i < axes.length; i += 1) {
+            if (axes[i].usage_pct > axes[topIdx].usage_pct) topIdx = i;
+          }
+          axes[topIdx].is_tightest = true;
+        }
+        this.tightestBreakdown = { host, axes };
+        this._tightestLoadedFor = host;
       },
 
       // v14.0.0a4: hits /api/hosts/budget every 30s alongside the
