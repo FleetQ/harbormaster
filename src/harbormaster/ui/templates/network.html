@@ -835,3 +835,75 @@
 </script>
 
 {% endblock %}
+
+{# v19.0.0a3: network inspector — compact 1h stats summary.
+   The full stats panel (5-column grid, by-tool / by-source / top-projects
+   breakdowns + filter controls) stays in the main column where it has
+   room to breathe. The inspector mirrors the headline numbers
+   (total_calls / error_rate / by_tool top entries) over the last 1h
+   so the operator gets a glance at network health regardless of which
+   view (graph / chat / timeline) is selected in main. #}
+{% block inspector %}
+<div class="p-3" x-data="networkInspector()" x-init="load(); start()"
+     data-tour-step="inspector-content">
+  <section>
+    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Last 1h</h3>
+    <dl class="grid grid-cols-2 gap-x-2 gap-y-1 text-xs mb-3">
+      <dt class="text-foreground-muted">total calls</dt>
+      <dd class="text-accent font-mono font-bold" x-text="stats?.total_calls ?? '—'"></dd>
+      <dt class="text-foreground-muted">error rate</dt>
+      <dd class="text-warning font-mono font-bold"
+          x-text="((stats?.error_rate ?? 0) * 100).toFixed(1) + '%'"></dd>
+    </dl>
+  </section>
+  <section class="border-t border-border pt-3 mb-3">
+    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">By tool</h3>
+    <ul class="text-xs space-y-1">
+      <template x-for="(count, tool) in (stats?.by_tool ?? {})" :key="'i-tool:' + tool">
+        <li class="font-mono text-foreground-muted truncate">
+          <span class="text-accent" x-text="tool"></span>
+          <span class="text-foreground-subtle">×</span>
+          <span x-text="count"></span>
+        </li>
+      </template>
+      <li x-show="!stats || Object.keys(stats?.by_tool ?? {}).length === 0"
+          class="text-foreground-subtle">no calls in window</li>
+    </ul>
+  </section>
+  <section class="border-t border-border pt-3">
+    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Top projects</h3>
+    <ul class="text-xs space-y-1">
+      <template x-for="row in (stats?.top_projects_by_calls ?? []).slice(0, 5)" :key="'i-p:' + row.project">
+        <li class="font-mono text-foreground-muted truncate">
+          <span class="text-accent" x-text="row.project"></span>
+          <span class="text-foreground-subtle ml-1" x-text="'×' + row.count"></span>
+        </li>
+      </template>
+      <li x-show="(stats?.top_projects_by_calls ?? []).length === 0"
+          class="text-foreground-subtle">no projects active</li>
+    </ul>
+  </section>
+</div>
+<script>
+  // v19.0.0a3: networkInspector — compact /api/network/stats summary
+  // pinned to the 1h window. Independent of the main panel's window
+  // selector so the inspector stays consistent across views.
+  function networkInspector() {
+    return {
+      stats: null,
+      _interval: null,
+      async load() {
+        try {
+          const r = await hmFetch('/api/network/stats?window=1h');
+          if (!r.ok) return;
+          this.stats = await r.json();
+        } catch (_) { /* soft-fail */ }
+      },
+      start() {
+        if (this._interval) return;
+        this._interval = setInterval(() => this.load(), 10000);
+      },
+    };
+  }
+</script>
+{% endblock %}

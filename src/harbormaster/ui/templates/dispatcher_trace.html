@@ -424,3 +424,76 @@
   }
 </script>
 {% endblock %}
+
+{# v19.0.0a3: dispatcher inspector — in-flight count + per-tool counter
+   summary from /api/dispatcher/status. The full waterfall stays in main;
+   the inspector mirrors the headline counters so the operator can see
+   "is anything happening right now?" at a glance. #}
+{% block inspector %}
+<div class="p-3" x-data="dispatcherInspector()" x-init="load(); start()"
+     data-tour-step="inspector-content">
+  <section class="mb-4">
+    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">In-flight</h3>
+    <dl class="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
+      <dt class="text-foreground-muted">active workers</dt>
+      <dd class="text-accent font-mono font-bold" x-text="status?.active_workers ?? 0"></dd>
+      <dt class="text-foreground-muted">queue depth</dt>
+      <dd class="text-foreground font-mono" x-text="status?.queue_depth ?? 0"></dd>
+      <dt class="text-foreground-muted">last dispatch</dt>
+      <dd class="text-foreground-subtle font-mono text-[10px]" x-text="lastDispatchLabel()"></dd>
+    </dl>
+  </section>
+  <section class="border-t border-border pt-3">
+    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">By tool</h3>
+    <ul class="text-xs space-y-1">
+      <template x-for="row in toolRows()" :key="'i-d:' + row.tool">
+        <li class="font-mono text-foreground-muted truncate">
+          <span class="text-accent" x-text="row.tool"></span>
+          <span class="text-foreground-subtle ml-1"
+                x-text="'in_flight ' + row.in_flight + ' · done ' + row.total_completed + (row.total_failed ? ' · fail ' + row.total_failed : '')"></span>
+        </li>
+      </template>
+      <li x-show="toolRows().length === 0" class="text-foreground-subtle">
+        no tool activity yet
+      </li>
+    </ul>
+  </section>
+</div>
+<script>
+  // v19.0.0a3: dispatcherInspector — pulls /api/dispatcher/status every
+  // 5s. Independent from the SSE waterfall in the main column so the
+  // inspector stays populated even before the first span arrives.
+  function dispatcherInspector() {
+    return {
+      status: null,
+      _interval: null,
+      async load() {
+        try {
+          const r = await hmFetch('/api/dispatcher/status');
+          if (!r.ok) return;
+          this.status = await r.json();
+        } catch (_) { /* soft-fail */ }
+      },
+      start() {
+        if (this._interval) return;
+        this._interval = setInterval(() => this.load(), 5000);
+      },
+      toolRows() {
+        const t = this.status?.tools || {};
+        return Object.keys(t)
+          .map(k => ({ tool: k, ...t[k] }))
+          .sort((a, b) => b.in_flight - a.in_flight
+            || b.total_completed - a.total_completed);
+      },
+      lastDispatchLabel() {
+        const ts = this.status?.last_dispatched_at;
+        if (!ts) return 'never';
+        const ageS = Math.max(0, Date.now() / 1000 - ts);
+        if (ageS < 60) return Math.round(ageS) + 's ago';
+        if (ageS < 3600) return Math.round(ageS / 60) + 'm ago';
+        return Math.round(ageS / 3600) + 'h ago';
+      },
+    };
+  }
+</script>
+{% endblock %}

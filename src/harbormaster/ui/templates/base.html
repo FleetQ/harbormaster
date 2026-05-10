@@ -199,9 +199,13 @@
               class="text-sm opacity-60 hover:opacity-100"
               aria-label="Collapse inspector">«</button>
     </div>
-    <div class="p-3 text-xs opacity-50">
-      Context-aware widgets land in v19.0.0a3.
+    {# v19.0.0a3: each page defines its own inspector content via this
+       block. Default placeholder shows when a page declines to override. #}
+    {% block inspector %}
+    <div class="p-3 text-xs text-foreground-subtle">
+      No inspector widgets for this page.
     </div>
+    {% endblock %}
   </aside>
 
   <!-- Floating expand button when inspector is collapsed. -->

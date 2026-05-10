@@ -1280,3 +1280,133 @@
 </script>
 
 {% endblock %}
+
+{# v19.0.0a3: project inspector — metadata pulled from the existing
+   `project` context dict (last_commit, language, path) + a budget
+   summary fetched from /api/projects/budget?host=<host>. No new
+   endpoint; data the page already owns is rendered inline. #}
+{% block inspector %}
+<div class="p-3"
+     x-data='projectInspector({
+       project: {{ project | tojson if project else "null" }},
+       host: {{ host | tojson }},
+     })'
+     x-init="loadBudget()"
+     data-tour-step="inspector-content">
+  <section class="mb-4">
+    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Metadata</h3>
+    <dl class="grid grid-cols-1 gap-y-1 text-xs">
+      <div>
+        <span class="text-foreground-muted">last commit:</span>
+        <code class="text-accent" x-text="lastCommitShort()"></code>
+        <span class="text-foreground-subtle" x-text="lastCommitAge()"></span>
+      </div>
+      <div>
+        <span class="text-foreground-muted">language:</span>
+        <code class="text-accent" x-text="meta.language || 'unknown'"></code>
+      </div>
+      <div>
+        <span class="text-foreground-muted">host:</span>
+        <code class="text-accent" x-text="meta.host || 'local'"></code>
+      </div>
+      <div class="truncate">
+        <span class="text-foreground-muted">path:</span>
+        <code class="text-foreground-subtle text-[10px]" x-text="meta.path || '—'"></code>
+      </div>
+      <div>
+        <span class="text-foreground-muted">serena memories:</span>
+        <code class="text-accent" x-text="meta.has_serena ? 'yes' : 'no'"></code>
+      </div>
+      <div>
+        <span class="text-foreground-muted">CLAUDE.md:</span>
+        <code class="text-accent" x-text="meta.has_claude_md ? 'yes' : 'no'"></code>
+      </div>
+    </dl>
+  </section>
+  <section class="border-t border-border pt-3">
+    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Budget (24h)</h3>
+    <ul x-show="budget" class="text-xs space-y-1 text-foreground-muted">
+      <li>
+        <span>calls:</span>
+        <code class="text-accent" x-text="(budget?.calls_24h ?? 0) + '/' + (budget?.budget ?? '∞')"></code>
+      </li>
+      <li x-show="budget?.usage_pct != null">
+        <span>usage:</span>
+        <code class="text-accent" x-text="(budget?.usage_pct ?? 0) + '%'"></code>
+      </li>
+      <li x-show="budget?.tightest_cap_axis">
+        <span>tightest cap:</span>
+        <code class="text-accent" x-text="budget?.tightest_cap_axis + ' (' + budget?.tightest_cap + ')'"></code>
+      </li>
+    </ul>
+    <p x-show="!budget && !budgetError" class="text-[10px] text-foreground-subtle">
+      no budget configured
+    </p>
+    <p x-show="budgetError" class="text-[10px] text-foreground-subtle mt-1"
+       x-text="budgetError"></p>
+  </section>
+</div>
+<script>
+  // v19.0.0a3: projectInspector — surfaces ProjectInfo + a single
+  // /api/projects/budget call. `meta` is hydrated from the page's
+  // own template context so first paint shows real data without a
+  // round-trip; budget arrives shortly after.
+  function projectInspector(opts) {
+    const project = opts.project || {};
+    return {
+      meta: {
+        last_commit: project.last_commit || null,
+        last_commit_age_days: project.last_commit_age_days,
+        language: project.language || 'unknown',
+        path: project.path || '',
+        has_serena: !!project.has_serena,
+        has_claude_md: !!project.has_claude_md,
+        host: opts.host || 'local',
+      },
+      // budget — populated from /api/projects/budget for this host,
+      // narrowed to this project's row. Shape:
+      //   { calls_24h, budget, usage_pct, tightest_cap, tightest_cap_axis }
+      budget: null,
+      budgetError: '',
+      lastCommitShort() {
+        const c = this.meta.last_commit;
+        if (!c) return '—';
+        // ProjectInfo's last_commit dict uses `hash` (short %h from git);
+        // fall back to legacy `sha` in case anyone re-keys it later.
+        const h = c.hash || c.sha || '';
+        return h ? String(h).slice(0, 12) : '—';
+      },
+      lastCommitAge() {
+        const d = this.meta.last_commit_age_days;
+        if (d == null) return '';
+        if (d === 0) return ' (today)';
+        if (d === 1) return ' (1d ago)';
+        return ' (' + d + 'd ago)';
+      },
+      async loadBudget() {
+        const host = encodeURIComponent(this.meta.host);
+        const projectName = (project && project.name) || '';
+        if (!projectName) return;
+        try {
+          const r = await hmFetch('/api/projects/budget?host=' + host);
+          if (r.status === 404) {
+            this.budgetError = 'host not in [hosts.*]';
+            return;
+          }
+          if (!r.ok) {
+            this.budgetError = 'budget unavailable';
+            return;
+          }
+          const body = await r.json();
+          const row = (body.projects || []).find(p => p.project === projectName);
+          if (row) {
+            this.budget = row;
+          }
+        } catch (_) {
+          this.budgetError = 'budget unavailable';
+        }
+      },
+    };
+  }
+</script>
+{% endblock %}
