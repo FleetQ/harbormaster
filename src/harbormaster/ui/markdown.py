@@ -83,18 +83,24 @@ _ALLOWED_ATTRIBUTES: dict[str, list[str]] = {
 _ALLOWED_PROTOCOLS: list[str] = ["http", "https", "mailto"]
 
 
+# v16.0.0a1: parser construction is identical except for the ``html``
+# flag, so funnel both call sites through one helper. Strict still uses
+# ``html=False``; non-strict uses ``html=True`` and lets bleach do the
+# tag-allowlist enforcement on the way out.
+def _make_parser(*, html: bool) -> MarkdownIt:
+    return MarkdownIt(
+        "commonmark", {"html": html, "linkify": True}
+    ).enable("table")
+
+
 # Module-scope MarkdownIt instances — cheap to reuse, the parsers are
 # stateless across `render` calls. v15.0.0a6: a second instance with
 # `html=True` is used when [markdown] strict = false so operators can
 # embed `<span>`, `<kbd>`, `<mark>`, `<figure>`, `<figcaption>` inline.
 # Bleach still strips anything outside the allowlist on the way out;
 # the html flag only governs whether markdown-it preserves raw HTML.
-_md = MarkdownIt("commonmark", {"html": False, "linkify": True}).enable(
-    "table",
-)
-_md_html = MarkdownIt("commonmark", {"html": True, "linkify": True}).enable(
-    "table",
-)
+_md = _make_parser(html=False)
+_md_html = _make_parser(html=True)
 
 
 def render_safe(md_text: str, *, strict: bool = True) -> str:

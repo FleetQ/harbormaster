@@ -183,7 +183,10 @@ def test_network_template_uses_chatorder_cache(tmp_path: Path) -> None:
     client = TestClient(create_app(HarbormasterConfig()))
     r = client.get("/network")
     body = r.text
-    # Cache state vars + invalidation logic.
-    assert "_chatOrderCache" in body
-    assert "_chatOrderEventsLen" in body
+    # v16.0.0a1: chatOrder() routes through the shared cachedGetter
+    # helper. The deps tuple still keys on events.length so SSE pushes
+    # invalidate exactly as before. The helper itself comes in via
+    # base.html → _partials/_cached_getter.html.
+    assert "cachedGetter(this, 'chatOrder'" in body
     assert "this.events.length" in body
+    assert "window.cachedGetter" in body
