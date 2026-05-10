@@ -223,6 +223,50 @@ def register_routes(
         stats = network_log.stats(since_ms=since_ms)
         return {"window": window, **stats}
 
+    @app.get("/api/hosts/budget")
+    async def api_hosts_budget() -> dict[str, object]:
+        """v14.0.0a4: per-host call counts (last 24h) vs configured
+        ``daily_call_budget`` from ``[hosts.*]`` config.
+
+        Response shape::
+
+            {
+                "window_hours": 24,
+                "hosts": [
+                    {"host": "alpha", "calls_24h": 12, "budget": 100,
+                     "usage_pct": 12.0},
+                    {"host": "beta",  "calls_24h": 0,  "budget": null,
+                     "usage_pct": null}
+                ]
+            }
+
+        Hosts with no ``daily_call_budget`` set still appear (with
+        ``budget = null``) so the operator can see all configured
+        hosts in one place. Hosts NOT in config but seen as a target
+        in the network_log are NOT reported — the budget is a per-
+        configured-host concept.
+        """
+        from harbormaster.ui.network_log import network_log
+
+        window_ms = 24 * 60 * 60 * 1000
+        since_ms = int(time.time() * 1000) - window_ms
+        counts = network_log.count_by_target(since_ms=since_ms)
+
+        items: list[dict[str, object]] = []
+        for host_name, host_cfg in sorted(config.hosts.items()):
+            calls = counts.get(host_name, 0)
+            budget = host_cfg.daily_call_budget
+            usage_pct: float | None = (
+                None if budget is None else round(calls / budget * 100, 1)
+            )
+            items.append({
+                "host": host_name,
+                "calls_24h": calls,
+                "budget": budget,
+                "usage_pct": usage_pct,
+            })
+        return {"window_hours": 24, "hosts": items}
+
     @app.get("/api/network/sources")
     async def network_sources(
         scan_limit: int = 1000,

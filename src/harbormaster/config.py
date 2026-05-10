@@ -48,6 +48,11 @@ class HostConfig(BaseModel):
     backend: str = "claude"
     connect_timeout: int = Field(default=10, gt=0)
     total_timeout: int = Field(default=120, gt=0)
+    # v14.0.0a4: optional soft budget — MCP calls routed TO this host
+    # per 24h. Surfaced via GET /api/hosts/budget which counts events
+    # in network_log targeting this host vs the cap. None = no budget
+    # tracked (host appears with budget=null in the report).
+    daily_call_budget: int | None = Field(default=None, gt=0)
 
 
 class ServerConfig(BaseModel):

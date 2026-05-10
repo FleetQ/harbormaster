@@ -271,6 +271,35 @@ class NetworkStore:
             for r in rows
         ]
 
+    def count_by_target(
+        self, *, since_ms: int | None = None,
+    ) -> dict[str, int]:
+        """v14.0.0a4: per-target call counts in the given time window.
+
+        Used by /api/hosts/budget to compare per-host call volume
+        against the optional ``daily_call_budget`` from
+        ``[hosts.*]`` config. ``since_ms`` is unix-ms; ``None`` means
+        all rows.
+
+        Note: the ``target`` value is whatever the routing layer
+        recorded (typically a project name, "operator", or "host:NAME"
+        for cross-host fan_out). The caller is responsible for
+        mapping the budget config keys onto the recorded target
+        format — see harbormaster.ui.routes.api_hosts_budget.
+        """
+        params: list[object] = []
+        where = ""
+        if since_ms is not None:
+            where = "WHERE timestamp >= ?"
+            params.append(since_ms)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT target, COUNT(*) AS c FROM mcp_calls {where} "
+                "GROUP BY target",
+                params,
+            ).fetchall()
+        return {str(r[0]): int(r[1]) for r in rows}
+
     def distinct_sources(self, *, scan_limit: int = 1000) -> list[str]:
         """v14.0.0a2: distinct caller (source) values across the most
         recent ``scan_limit`` events, sorted alphabetically.
