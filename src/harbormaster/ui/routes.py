@@ -222,6 +222,44 @@ def register_routes(
     async def api_health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
+    @app.get("/api/dispatcher/status")
+    async def api_dispatcher_status() -> dict[str, object]:
+        """Live runtime metrics for the in-process MCP dispatcher (v9.0.0a2).
+
+        Replaces the v8.0.0a5 KPI placeholder ``"ready"`` with a real
+        counters payload so the dashboard's KPI strip + the v9 trace
+        waterfall can both read from the same source.
+
+        Schema:
+        ```
+        {
+          "running": [{"tool": str, "project": str | null, "started_at": float}, ...],
+          "active_workers": int,         # sum of in_flight across tools
+          "queue_depth": int,            # always 0 for in-process dispatcher
+          "last_dispatched_at": float | null,
+          "tools": {
+            "<tool_name>": {"in_flight": int, "total_completed": int, "total_failed": int},
+            ...
+          }
+        }
+        ```
+
+        The endpoint is always available — when the [fleetq] extra is
+        absent the import fails and the response is the canonical
+        empty shape (zero counters across the board).
+        """
+        try:
+            from harbormaster.fleetq import get_dispatcher_stats
+        except ImportError:
+            return {
+                "running": [],
+                "active_workers": 0,
+                "queue_depth": 0,
+                "last_dispatched_at": None,
+                "tools": {},
+            }
+        return get_dispatcher_stats().snapshot()
+
     @app.get("/api/bridge/status")
     async def api_bridge_status() -> dict[str, object]:
         """FleetQ bridge status — config + live runtime (v3.0.0a2).
@@ -734,10 +772,34 @@ def register_routes(
             # only need a coarse pill state.
             bridge_state = "configured" if api_token_present else "token missing"
 
-        # Dispatcher — placeholder until v9 waterfall ships. Always
-        # `ready` for now (matches the v8 plan's "or hard-coded
-        # 'ready' until v9 waterfall ships" provision).
+        # Dispatcher — v9.0.0a2: derive a coarse pill state from the
+        # live counters now exposed by /api/dispatcher/status. The
+        # KPI-strip cell stays a single string for backwards-compat
+        # (existing template binds plain text); operators who want the
+        # full counters point at /api/dispatcher/status directly.
         dispatcher_state = "ready"
+        try:
+            from harbormaster.fleetq import get_dispatcher_stats
+
+            stats = get_dispatcher_stats().snapshot()
+            active = int(stats.get("active_workers", 0))
+            if active > 0:
+                dispatcher_state = f"{active} active"
+            else:
+                # Surface failure-rate when no work is in flight: if
+                # the most recent dispatches all failed, the operator
+                # should see something other than "idle".
+                tools = stats.get("tools", {})
+                if isinstance(tools, dict) and tools:
+                    total_done = sum(
+                        int(v.get("total_completed", 0))
+                        + int(v.get("total_failed", 0))
+                        for v in tools.values()
+                        if isinstance(v, dict)
+                    )
+                    dispatcher_state = "idle" if total_done > 0 else "ready"
+        except ImportError:
+            pass
 
         return {
             "projects": len(projects),

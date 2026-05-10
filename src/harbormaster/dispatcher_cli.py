@@ -76,6 +76,19 @@ def _build_parser() -> argparse.ArgumentParser:
             "preserved byte-for-byte without this flag."
         ),
     )
+    p_status.add_argument(
+        "--url",
+        type=str,
+        default=None,
+        help=(
+            "Optional HTTP base URL of a running harbormaster-ui "
+            "instance (e.g. http://127.0.0.1:8765). When provided, "
+            "the CLI fetches GET <url>/api/dispatcher/status and "
+            "merges the live runtime counters (running, "
+            "active_workers, queue_depth, last_dispatched_at, tools) "
+            "into the JSON output. v9.0.0a2."
+        ),
+    )
     return parser
 
 
@@ -138,6 +151,22 @@ def _print_status_text(payload: dict[str, object]) -> None:
         print(f"  ✓ {name}")
 
 
+def _fetch_runtime_status(url: str) -> dict[str, Any] | None:
+    """GET <url>/api/dispatcher/status. None when fetch fails (best-effort)."""
+    import urllib.error
+    import urllib.request
+
+    endpoint = url.rstrip("/") + "/api/dispatcher/status"
+    try:
+        with urllib.request.urlopen(endpoint, timeout=5) as resp:  # noqa: S310
+            data = json.loads(resp.read().decode("utf-8"))
+            if isinstance(data, dict):
+                return data
+    except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
+        return None
+    return None
+
+
 def _print_status(args: argparse.Namespace) -> int:
     try:
         config_path = Path(args.config) if args.config else None
@@ -146,14 +175,52 @@ def _print_status(args: argparse.Namespace) -> int:
         print(f"Error loading config: {e}", file=sys.stderr)
         return 1
 
-    payload = _status_payload(config)
+    payload: dict[str, Any] = dict(_status_payload(config))
+
+    runtime: dict[str, Any] | None = None
+    url = getattr(args, "url", None)
+    if url:
+        runtime = _fetch_runtime_status(url)
+        if runtime is None:
+            print(
+                f"Warning: could not fetch runtime status from {url} "
+                "— falling back to config-only output.",
+                file=sys.stderr,
+            )
+        else:
+            payload["runtime"] = runtime
+
     if getattr(args, "json_output", False):
         # Single-line JSON keeps it grep/jq-friendly. Indent=None
         # avoids needless whitespace in scripted pipelines.
         print(json.dumps(payload, sort_keys=True))
     else:
         _print_status_text(payload)
+        if runtime is not None:
+            _print_runtime_text(runtime)
     return 0
+
+
+def _print_runtime_text(runtime: dict[str, Any]) -> None:
+    print()
+    active = runtime.get("active_workers", 0)
+    queue = runtime.get("queue_depth", 0)
+    print(f"Live runtime (v9.0.0a2): active_workers={active}, queue_depth={queue}")
+    last = runtime.get("last_dispatched_at")
+    if last is not None:
+        print(f"  last_dispatched_at: {last}")
+    tools = runtime.get("tools") or {}
+    if isinstance(tools, dict) and tools:
+        print(f"  per-tool counters ({len(tools)}):")
+        for name in sorted(tools):
+            c = tools[name] if isinstance(tools[name], dict) else {}
+            in_flight = c.get("in_flight", 0)
+            done = c.get("total_completed", 0)
+            failed = c.get("total_failed", 0)
+            print(
+                f"    {name}: in_flight={in_flight} "
+                f"completed={done} failed={failed}"
+            )
 
 
 def main(argv: list[str] | None = None) -> int:
