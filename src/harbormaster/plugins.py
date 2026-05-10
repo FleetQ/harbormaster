@@ -33,15 +33,16 @@ harbormaster-plugin-foo`).
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from importlib.metadata import EntryPoint, entry_points
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from harbormaster.config import HarbormasterConfig
+    from harbormaster.config import HarbormasterConfig, HostConfig
 
 logger = logging.getLogger("harbormaster.plugins")
 
@@ -160,3 +161,87 @@ def load_plugins(
         )
 
     return loaded
+
+
+def query_remote_plugins(host_cfg: HostConfig) -> dict[str, Any]:
+    """v14.0.0a6: SSH to ``host_cfg.ssh_host`` and ask the remote
+    ``harbormaster-mcp`` for its plugin discovery JSON.
+
+    Returns the same shape as the local ``GET /api/plugins`` endpoint:
+
+        {
+            "enabled": bool,
+            "allow": [str, ...],
+            "discovered_count": int,
+            "plugins": [{"status": str, "dist_name": str|None,
+                         "entry_point": str|None}, ...]
+        }
+
+    On any SSH or parse failure, returns an envelope with
+    ``"error": <message>`` and an empty ``"plugins": []`` so the
+    caller can render a degraded card without exception handling.
+
+    Mirrors the SSH timeout knobs from ``backends/claude.py``
+    (``connect_timeout`` / ``total_timeout``) and uses ``BatchMode=yes``
+    via :func:`harbormaster.ssh.run_ssh`.
+    """
+    from harbormaster.ssh import (
+        SshTimeoutError,
+        diagnose_ssh_failure,
+        run_ssh,
+    )
+
+    # Run the same `plugins list --json` the local CLI exposes. We
+    # explicitly do NOT pass --config — the remote host uses ITS own
+    # config (its own [plugins].allow, etc.), which is the expected
+    # semantic for "what plugins does host X have."
+    remote_cmd = "harbormaster-mcp plugins list --json"
+    try:
+        proc = run_ssh(
+            host_cfg.ssh_host,
+            remote_cmd,
+            connect_timeout=host_cfg.connect_timeout,
+            total_timeout=host_cfg.total_timeout,
+        )
+    except SshTimeoutError as exc:
+        return {
+            "enabled": False, "allow": [], "discovered_count": 0,
+            "plugins": [], "error": str(exc),
+        }
+    ssh_err = diagnose_ssh_failure(host_cfg.ssh_host, proc)
+    if ssh_err is not None:
+        return {
+            "enabled": False, "allow": [], "discovered_count": 0,
+            "plugins": [], "error": ssh_err,
+        }
+    if proc.returncode != 0:
+        # SSH succeeded but the remote CLI returned non-zero — usually
+        # means the binary isn't installed or python errored out.
+        stderr = (proc.stderr or "").strip().splitlines()
+        last = stderr[-1] if stderr else f"exit {proc.returncode}"
+        return {
+            "enabled": False, "allow": [], "discovered_count": 0,
+            "plugins": [],
+            "error": (
+                f"remote `harbormaster-mcp plugins list --json` failed "
+                f"(rc={proc.returncode}): {last}"
+            ),
+        }
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        return {
+            "enabled": False, "allow": [], "discovered_count": 0,
+            "plugins": [],
+            "error": (
+                "remote `harbormaster-mcp plugins list --json` returned "
+                f"non-JSON output: {exc}"
+            ),
+        }
+    if not isinstance(data, dict):
+        return {
+            "enabled": False, "allow": [], "discovered_count": 0,
+            "plugins": [],
+            "error": "remote response was not a JSON object",
+        }
+    return data

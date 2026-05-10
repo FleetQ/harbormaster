@@ -153,11 +153,29 @@
   </article>
 
   <article class="border border-border rounded-lg p-4 bg-gray-900/40">
-    <header class="flex items-center justify-between mb-2">
+    <header class="flex items-center justify-between mb-2 gap-2 flex-wrap">
       <h3 class="text-sm font-bold text-foreground-muted">Plugins</h3>
-      <!-- v12.0.0a2: migrated to shared stateBadgeHtml helper. -->
-      <span x-html="window.harbormaster.stateBadgeHtml(pluginsBadgeProps())"></span>
+      <div class="flex items-center gap-2">
+        <!-- v14.0.0a6: host filter — defaults to "local". When set to a
+             configured host name, the card refetches from
+             /api/plugins?host=NAME (SSH-based remote discovery). -->
+        <select x-model="pluginHost"
+                @change="loadPlugins()"
+                aria-label="Plugin host filter"
+                x-show="(pluginHosts || []).length > 0"
+                class="text-[10px] bg-surface-1 border border-border rounded px-1 py-0.5 text-foreground-muted">
+          <option value="local">local</option>
+          <template x-for="h in pluginHosts" :key="'ph:' + h">
+            <option :value="h" x-text="h"></option>
+          </template>
+        </select>
+        <!-- v12.0.0a2: migrated to shared stateBadgeHtml helper. -->
+        <span x-html="window.harbormaster.stateBadgeHtml(pluginsBadgeProps())"></span>
+      </div>
     </header>
+    <p x-show="plugins.error"
+       class="text-xs text-warning mb-2"
+       x-text="plugins.error"></p>
     <div x-show="!pluginsError" class="text-xs space-y-1">
       <p class="text-foreground-subtle" x-show="(plugins.plugins || []).length === 0">
         No entry points discovered.
@@ -774,9 +792,19 @@
     return {
       bridge: {}, bridgeError: null,
       plugins: {}, pluginsError: null,
+      // v14.0.0a6: cross-host plugin discovery state. `pluginHost` is
+      // either "local" (default) or a configured host name; loadPlugins
+      // forwards it to /api/plugins?host=…. `pluginHosts` is populated
+      // once from /api/hosts so the dropdown shows configured names.
+      pluginHost: 'local',
+      pluginHosts: [],
 
       async loadAll() {
-        await Promise.all([this.loadBridge(), this.loadPlugins()]);
+        await Promise.all([
+          this.loadBridge(),
+          this.loadPlugins(),
+          this.loadPluginHosts(),
+        ]);
       },
       async loadBridge() {
         try {
@@ -787,10 +815,28 @@
       },
       async loadPlugins() {
         try {
-          const r = await hmFetch('/api/plugins');
+          // v14.0.0a6: append host filter when not "local".
+          const url = this.pluginHost && this.pluginHost !== 'local'
+            ? `/api/plugins?host=${encodeURIComponent(this.pluginHost)}`
+            : '/api/plugins';
+          const r = await hmFetch(url);
           if (!r.ok) throw new Error('HTTP ' + r.status);
           this.plugins = await r.json();
+          this.pluginsError = null;
         } catch (e) { this.pluginsError = e.message; }
+      },
+      // v14.0.0a6: populate the host filter dropdown from the v14.a4
+      // /api/hosts/budget endpoint, which already returns the list of
+      // configured hosts. Soft-fail — if the endpoint is unavailable
+      // the dropdown stays hidden (only "local" path remains).
+      async loadPluginHosts() {
+        try {
+          const r = await hmFetch('/api/hosts/budget');
+          if (!r.ok) return;
+          const body = await r.json();
+          const hosts = (body.hosts || []).map(h => h.host).filter(Boolean);
+          this.pluginHosts = hosts;
+        } catch (_) { /* soft-fail */ }
       },
       bridgeStateLabel() {
         if (!this.bridge.fleetq_enabled) return 'disabled';

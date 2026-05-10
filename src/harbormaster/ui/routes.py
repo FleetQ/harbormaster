@@ -1026,7 +1026,7 @@ def register_routes(
         }
 
     @app.get("/api/plugins")
-    async def api_plugins() -> dict[str, object]:
+    async def api_plugins(host: str | None = None) -> dict[str, object]:
         """Plugin discovery + status (v2.1.0a1).
 
         Mirrors `harbormaster-mcp plugins list` for browser consumption.
@@ -1037,7 +1037,26 @@ def register_routes(
           - "disabled"        : ep discovered but [plugins].enabled = false
           - "no-dist-name"    : ep present but legacy metadata
           - "missing"         : dist in allowlist but NO ep discovered
+
+        v14.0.0a6: optional ``?host=<name>`` SSHs to that host (must be
+        in ``[hosts.*]``) and returns its discovery result. The remote
+        host runs ``harbormaster-mcp plugins list --json`` over SSH;
+        any SSH/parse failure is returned as ``{..., "error": "<msg>"}``
+        with empty plugins. ``host=local`` and missing host both keep
+        the existing local-discovery behavior.
         """
+        # v14.0.0a6: cross-host shortcut. Local fallback when host is
+        # unset / "local" — preserves the v2.1.0a1 behavior byte-for-byte.
+        if host is not None and host != "local":
+            host_cfg = config.hosts.get(host)
+            if host_cfg is None:
+                raise HTTPException(
+                    404,
+                    f"host {host!r} is not in [hosts.*] config",
+                )
+            from harbormaster.plugins import query_remote_plugins
+            return query_remote_plugins(host_cfg)
+
         from harbormaster.plugins import (
             _entry_point_distribution_name,
             discover_entry_points,
