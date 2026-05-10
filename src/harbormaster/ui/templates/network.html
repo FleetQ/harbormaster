@@ -54,12 +54,57 @@
        id="hm-network-graph"
        class="border border-gray-800 rounded bg-gray-950"
        style="width: 100%; height: 60vh;"></div>
+
+  <!-- v10.0.0a8: chat view (chronological event log).
+       Each row: [time] caller → tool(target) "<truncated question>"
+       Click a row to expand to the full preview text. -->
+  <ul x-show="view === 'chat' && events.length > 0"
+      id="hm-network-chat"
+      class="border border-gray-800 rounded bg-gray-950 divide-y divide-gray-900 overflow-y-auto"
+      style="max-height: 60vh;">
+    <template x-for="(ev, i) in chatOrder()" :key="'ce:' + i + ':' + ev.timestamp_ms">
+      <li x-data="{ open: false }"
+          class="px-3 py-1.5 text-xs hover:bg-gray-900/30">
+        <button type="button"
+                @click="open = !open"
+                :aria-expanded="open"
+                aria-label="Toggle event details"
+                class="w-full text-left flex items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+          <span class="font-mono text-gray-500 shrink-0"
+                x-text="new Date(ev.timestamp_ms).toLocaleTimeString()"></span>
+          <span class="text-gray-400" x-text="ev.caller"></span>
+          <span class="text-gray-600" aria-hidden="true">→</span>
+          <span :class="{
+                  'text-cyan-300': ev.tool === 'ask_project',
+                  'text-purple-300': ev.tool === 'delegate_task',
+                  'text-cyan-200': ev.tool === 'fan_out_ask',
+                  'text-emerald-300': ev.tool === 'recall_qa',
+                }"
+                class="text-gray-300 font-mono"
+                x-text="ev.tool"></span>
+          <span class="text-gray-600" aria-hidden="true">(</span>
+          <span class="text-cyan-400" x-text="ev.target"></span>
+          <span class="text-gray-600" aria-hidden="true">)</span>
+          <span class="truncate text-gray-400 italic"
+                x-show="!open"
+                x-text="ev.question_preview ? `“${ev.question_preview.slice(0, 80)}${ev.question_preview.length > 80 ? '…' : ''}”` : ''"></span>
+          <span x-show="ev.status === 'error'"
+                class="ml-auto text-rose-400 shrink-0">err</span>
+        </button>
+        <div x-show="open" class="mt-1 ml-12 text-[11px] text-gray-300 whitespace-pre-wrap"
+             x-text="ev.question_preview || '(no preview)'"></div>
+      </li>
+    </template>
+  </ul>
 </section>
 
 <script src="/static/vendor/cytoscape.min.js"></script>
 <script>
   function networkPanel() {
     return {
+      // v10.0.0a8: localStorage-backed view preference. Defaults
+      // to 'graph' on first visit; subsequent loads pick up the
+      // operator's last toggle.
       view: 'graph',          // toggled by hm:network:view dispatch from header
       events: [],
       cy: null,
@@ -69,17 +114,31 @@
       _eventSource: null,
 
       async init() {
-        // Listen for the header view-toggle.
+        // v10.0.0a8: restore the last-used view.
+        try {
+          const saved = localStorage.getItem('hm:network:view');
+          if (saved === 'chat' || saved === 'graph') this.view = saved;
+        } catch (_) { /* default 'graph' */ }
+        // Listen for the header view-toggle. Persist on change.
         window.addEventListener('hm:network:view', (e) => {
           this.view = e.detail || 'graph';
+          try { localStorage.setItem('hm:network:view', this.view); } catch (_) {}
           if (this.view === 'graph' && this.events.length > 0) {
-            this._renderGraph();
+            // Re-render after a tick — the container becomes visible
+            // again and Cytoscape needs the layout pass to re-fit.
+            requestAnimationFrame(() => this._renderGraph());
           }
         });
         await this._loadInitial();
         this._subscribe();
-        if (this.events.length > 0) this._renderGraph();
+        if (this.view === 'graph' && this.events.length > 0) this._renderGraph();
         this.initialized = true;
+      },
+
+      // v10.0.0a8: chat view shows newest-first so the latest
+      // activity is at the top without scrolling.
+      chatOrder() {
+        return [...this.events].reverse();
       },
 
       async _loadInitial() {
