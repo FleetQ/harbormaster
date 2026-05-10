@@ -46,7 +46,15 @@
 <body class="min-h-screen">
 <header class="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
   <div class="flex items-baseline gap-3">
-    <span class="text-2xl">⚓</span>
+    <!-- v8.0.0a6: hamburger toggle for the sidebar (mobile only). -->
+    <button type="button"
+            x-data
+            @click="$dispatch('hm:sidebar:toggle')"
+            aria-label="Toggle navigation sidebar"
+            class="md:hidden text-gray-300 hover:text-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950 px-1">
+      <span aria-hidden="true">☰</span>
+    </button>
+    <span class="text-2xl" aria-hidden="true">⚓</span>
     <h1 class="text-xl font-bold">Harbormaster</h1>
     <span class="text-gray-500 text-sm">v{{ version }}</span>
   </div>
@@ -58,9 +66,244 @@
     <a href="https://github.com/FleetQ/harbormaster" class="text-gray-300 hover:text-cyan-400">GitHub</a>
   </nav>
 </header>
-<main class="px-6 py-6 max-w-7xl mx-auto">
-  {% block content %}{% endblock %}
-</main>
+
+<!-- v8.0.0a6: project navigation sidebar.
+     Desktop: 240px fixed-left, always visible.
+     Mobile: hidden by default, hamburger toggles. Backdrop closes.
+     State (collapsed/expanded, pinned projects) persisted in
+     localStorage so operator preference survives reloads. -->
+<div x-data="projectSidebar()"
+     x-init="init()"
+     @hm:sidebar:toggle.window="mobileOpen = !mobileOpen"
+     class="flex">
+  <!-- Backdrop (mobile). Click closes. -->
+  <div x-show="mobileOpen" x-cloak
+       @click="mobileOpen = false"
+       class="fixed inset-0 z-30 bg-gray-950/70 md:hidden"
+       aria-hidden="true"></div>
+
+  <!-- Sidebar rail. -->
+  <aside :class="mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
+         class="fixed top-[57px] bottom-0 left-0 z-30 w-60 md:w-60 bg-gray-950 border-r border-gray-800 transform transition-transform overflow-y-auto"
+         role="navigation"
+         aria-label="Project navigation">
+    <div class="p-3">
+      <!-- Search-within-sidebar. -->
+      <input type="text"
+             x-model="filter"
+             aria-label="Filter projects in sidebar"
+             placeholder="Filter projects…"
+             class="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:border-cyan-700 focus:outline-none mb-3">
+
+      <!-- Pinned. -->
+      <section x-show="visiblePinned().length > 0"
+               data-sidebar-group="pinned"
+               class="mb-3">
+        <h3 class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Pinned</h3>
+        <ul class="space-y-0.5">
+          <template x-for="p in visiblePinned()" :key="'pin:' + p.name">
+            <li>
+              <a :href="`/projects/${encodeURIComponent(p.name)}`"
+                 class="flex items-center gap-1.5 text-xs text-gray-300 hover:bg-gray-800/50 hover:text-cyan-300 px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                <span aria-hidden="true" class="text-amber-400">★</span>
+                <span class="truncate" x-text="p.name"></span>
+              </a>
+            </li>
+          </template>
+        </ul>
+      </section>
+
+      <!-- Recently asked. -->
+      <section x-show="visibleRecent().length > 0"
+               data-sidebar-group="recent"
+               class="mb-3">
+        <h3 class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Recently asked</h3>
+        <ul class="space-y-0.5">
+          <template x-for="p in visibleRecent()" :key="'recent:' + p.name">
+            <li>
+              <a :href="`/projects/${encodeURIComponent(p.name)}`"
+                 class="flex items-center gap-1.5 text-xs text-gray-300 hover:bg-gray-800/50 hover:text-cyan-300 px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                <span class="truncate" x-text="p.name"></span>
+              </a>
+            </li>
+          </template>
+        </ul>
+      </section>
+
+      <!-- By language. -->
+      <section data-sidebar-group="by-language">
+        <template x-for="lang in sortedLanguages()" :key="'lang:' + lang">
+          <div class="mb-3">
+            <button type="button"
+                    @click="toggleLanguage(lang)"
+                    :aria-expanded="!languageCollapsed[lang]"
+                    :aria-label="`Toggle ${lang} group`"
+                    class="text-[10px] uppercase tracking-wide text-gray-500 hover:text-gray-300 mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+              <span aria-hidden="true" x-text="languageCollapsed[lang] ? '▸' : '▾'"></span>
+              <span x-text="lang + ' (' + projectsByLanguage()[lang].length + ')'"></span>
+            </button>
+            <ul x-show="!languageCollapsed[lang]" class="space-y-0.5">
+              <template x-for="p in visibleProjectsForLanguage(lang)" :key="lang + ':' + p.name">
+                <li class="flex items-center group">
+                  <a :href="`/projects/${encodeURIComponent(p.name)}`"
+                     class="flex-1 text-xs text-gray-300 hover:bg-gray-800/50 hover:text-cyan-300 px-2 py-1 rounded truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+                     x-text="p.name"></a>
+                  <button type="button" @click="togglePin(p.name)"
+                          :aria-label="`${isPinned(p.name) ? 'Unpin' : 'Pin'} ${p.name}`"
+                          :class="isPinned(p.name) ? 'text-amber-400' : 'text-gray-700 group-hover:text-gray-500'"
+                          class="text-xs px-1 hover:text-amber-300 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+                    <span aria-hidden="true">★</span>
+                  </button>
+                </li>
+              </template>
+            </ul>
+          </div>
+        </template>
+      </section>
+
+      <p x-show="loading" :aria-hidden="!loading" class="text-xs text-gray-400">loading…</p>
+      <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="error"></p>
+    </div>
+  </aside>
+
+  <!-- Main content area, offset for sidebar on desktop. -->
+  <main class="flex-1 px-6 py-6 max-w-7xl mx-auto md:ml-60">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+<script>
+  // v8.0.0a6: project navigation sidebar Alpine scope.
+  // Lazy-loads /api/projects, persists pinned + collapsed state in
+  // localStorage. Recently-asked group reads /api/trajectories.
+  function projectSidebar() {
+    return {
+      projects: [],
+      recentProjects: [], // last-N project names from trajectories
+      pinned: [], // localStorage-backed
+      languageCollapsed: {}, // {python: false, ...}
+      filter: '',
+      mobileOpen: false,
+      loading: true,
+      error: '',
+
+      async init() {
+        this._loadPersisted();
+        await Promise.all([this._loadProjects(), this._loadRecent()]);
+      },
+
+      _loadPersisted() {
+        try {
+          const raw = localStorage.getItem('hm:sidebar:pinned');
+          this.pinned = raw ? JSON.parse(raw) : [];
+        } catch (_) { this.pinned = []; }
+        try {
+          const raw = localStorage.getItem('hm:sidebar:lang-collapsed');
+          this.languageCollapsed = raw ? JSON.parse(raw) : {};
+        } catch (_) { this.languageCollapsed = {}; }
+      },
+
+      _persistPinned() {
+        try { localStorage.setItem('hm:sidebar:pinned', JSON.stringify(this.pinned)); } catch (_) {}
+      },
+
+      _persistCollapsed() {
+        try { localStorage.setItem('hm:sidebar:lang-collapsed', JSON.stringify(this.languageCollapsed)); } catch (_) {}
+      },
+
+      async _loadProjects() {
+        try {
+          const r = await hmFetch('/api/projects');
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          // /api/projects returns a bare JSON list of project dicts
+          // (see src/harbormaster/ui/routes.py).
+          this.projects = await r.json();
+        } catch (e) { this.error = e.message; }
+        finally { this.loading = false; }
+      },
+
+      async _loadRecent() {
+        try {
+          const r = await hmFetch('/api/trajectories?limit=20');
+          if (!r.ok) return;
+          const data = await r.json();
+          const seen = new Set();
+          const names = [];
+          for (const t of (data.trajectories || [])) {
+            if (seen.has(t.project)) continue;
+            seen.add(t.project);
+            names.push(t.project);
+            if (names.length >= 5) break;
+          }
+          this.recentProjects = names;
+        } catch (_) { /* silent — sidebar still useful */ }
+      },
+
+      isPinned(name) { return this.pinned.includes(name); },
+
+      togglePin(name) {
+        if (this.isPinned(name)) {
+          this.pinned = this.pinned.filter(n => n !== name);
+        } else {
+          this.pinned = [...this.pinned, name];
+        }
+        this._persistPinned();
+      },
+
+      toggleLanguage(lang) {
+        this.languageCollapsed = {
+          ...this.languageCollapsed,
+          [lang]: !this.languageCollapsed[lang],
+        };
+        this._persistCollapsed();
+      },
+
+      _matchesFilter(p) {
+        const q = (this.filter || '').trim().toLowerCase();
+        if (!q) return true;
+        return p.name.toLowerCase().includes(q);
+      },
+
+      visiblePinned() {
+        return this.projects
+          .filter(p => this.isPinned(p.name))
+          .filter(p => this._matchesFilter(p));
+      },
+
+      visibleRecent() {
+        const pinnedSet = new Set(this.pinned);
+        return this.recentProjects
+          .filter(name => !pinnedSet.has(name))
+          .map(name => this.projects.find(p => p.name === name))
+          .filter(p => p && this._matchesFilter(p));
+      },
+
+      projectsByLanguage() {
+        const groups = {};
+        const pinnedSet = new Set(this.pinned);
+        for (const p of this.projects) {
+          if (pinnedSet.has(p.name)) continue;
+          const lang = p.language || 'unknown';
+          (groups[lang] = groups[lang] || []).push(p);
+        }
+        return groups;
+      },
+
+      sortedLanguages() {
+        const groups = this.projectsByLanguage();
+        // Stable sort: known languages first (alphabetic), 'unknown' last.
+        const keys = Object.keys(groups);
+        const known = keys.filter(k => k !== 'unknown').sort();
+        if (groups['unknown']) known.push('unknown');
+        return known;
+      },
+
+      visibleProjectsForLanguage(lang) {
+        return (this.projectsByLanguage()[lang] || []).filter(p => this._matchesFilter(p));
+      },
+    };
+  }
+</script>
 
 <!-- v8.0.0a4: Cmd-K command palette. Global mount so every page
      can summon it. Lazy-loads /api/projects on first open so empty
@@ -208,8 +451,9 @@
         try {
           const r = await hmFetch('/api/projects');
           if (!r.ok) throw new Error('HTTP ' + r.status);
-          const data = await r.json();
-          this.projects = (data.projects || []).map(p => ({
+          // /api/projects returns a bare list of project dicts.
+          const list = await r.json();
+          this.projects = list.map(p => ({
             kind: 'project',
             id: p.name,
             category: 'Project',
