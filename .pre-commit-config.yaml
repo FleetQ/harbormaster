@@ -1,0 +1,37 @@
+# v15.0.0a5: pre-commit hooks for harbormaster.
+#
+# Two local hooks shipped:
+#
+#   1. config-check — runs `harbormaster-mcp config check` against
+#      the canonical example config. Fails the commit on any schema
+#      error in examples/harbormaster.toml.
+#
+#   2. config-doc-parity — fails the commit if a Pydantic field is
+#      added to harbormaster.config without a matching mention in
+#      docs/operator-config-reference.md.
+#
+# Operators install pre-commit (pipx install pre-commit) and run
+# `pre-commit install` once at clone time. Both hooks run on every
+# commit thereafter.
+#
+# These hooks deliberately DO NOT touch .github/workflows/* — they
+# live entirely at the repo root and inside scripts/.
+
+repos:
+  - repo: local
+    hooks:
+      - id: harbormaster-config-check
+        name: harbormaster-mcp config check
+        entry: harbormaster-mcp config check --config examples/harbormaster.toml
+        language: system
+        # Only re-run when the example config or the schema changes.
+        files: '^(examples/harbormaster\.toml|src/harbormaster/config\.py)$'
+        pass_filenames: false
+
+      - id: harbormaster-config-doc-parity
+        name: config / doc-reference parity
+        entry: python scripts/check_config_doc_parity.py
+        language: system
+        # Re-run when either side of the parity changes.
+        files: '^(src/harbormaster/config\.py|docs/operator-config-reference\.md)$'
+        pass_filenames: false

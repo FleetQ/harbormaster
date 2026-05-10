@@ -1,0 +1,73 @@
+# Harbormaster — annotated example config (v15.0.0a5).
+#
+# This file is the target of the `harbormaster-mcp config check`
+# pre-commit hook. It must be a complete, valid HarbormasterConfig
+# (no schema errors). Operators can copy this as a starting point
+# for ~/.config/harbormaster/config.toml.
+
+[projects]
+glob = ["~/htdocs/*"]
+exclude = []
+
+[ignore]
+# Top-level project ignore patterns. Empty by default.
+patterns = []
+
+# Default backend block — keeps v1 stdio behaviour byte-for-byte.
+[backends.claude]
+enabled = true
+binary = "claude"
+extra_args = ["-p"]
+timeout_local = 60
+timeout_remote = 120
+output_word_cap = 800
+
+# Optional codex backend (non-streaming).
+# [backends.codex]
+# enabled = true
+# binary = "codex"
+
+# Optional remote hosts. Each [hosts.<label>] is reachable via SSH
+# and gets its own per-host call budget.
+# [hosts.alpha]
+# ssh_host = "alpha.local"
+# remote_htdocs = "~/htdocs"
+# daily_call_budget = 1000
+
+[server]
+ui_port = 7531
+mcp_http_port = 7532
+log_level = "info"
+trajectory_retention_days = 90
+
+[storage]
+db_path = "~/.local/share/harbormaster/harbormaster.db"
+enable_dedup = false
+
+[fleetq]
+enabled = false
+base_url = "https://app.fleetq.net"
+api_token_env = "FLEETQ_API_TOKEN"
+write_trajectories = true
+write_kg = false
+
+[history]
+enabled = false
+embedding_backend = "fastembed"
+fastembed_model = "BAAI/bge-small-en-v1.5"
+embedding_dim = 384
+
+[plugins]
+# Deny-by-default. Set enabled = true AND list dist names in `allow`
+# to load any plugins.
+enabled = false
+allow = []
+
+[retention]
+network_log_max_rows = 5000
+memory_revisions_per_file = 20
+
+# v15.0.0a4: per-tool soft call budgets — operator-side warning surface.
+[budget]
+# daily_call_budget_per_tool = { ask_project = 1000, fan_out_ask = 100 }
+daily_call_budget_per_tool = {}

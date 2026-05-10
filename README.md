@@ -222,6 +222,22 @@ Discovered contract reference: [`docs/fleetq-bridge-contract.md`](docs/fleetq-br
 
 PyPI publishing is automated via Trusted Publishing (OIDC) — no API tokens in the repo. Tag-pushes to `v*` trigger `.github/workflows/publish.yml`. Setup steps and the release checklist live in [`docs/publishing.md`](docs/publishing.md).
 
+## Pre-commit hooks (v15.0.0a5)
+
+Two repo-local hooks ship in [`.pre-commit-config.yaml`](.pre-commit-config.yaml):
+
+- **`harbormaster-config-check`** — runs `harbormaster-mcp config check` against [`examples/harbormaster.toml`](examples/harbormaster.toml). Fails the commit on any schema error in the example.
+- **`harbormaster-config-doc-parity`** — fails the commit if a Pydantic field is added to `src/harbormaster/config.py` without a matching mention in [`docs/operator-config-reference.md`](docs/operator-config-reference.md).
+
+Install once:
+
+```sh
+pipx install pre-commit
+pre-commit install
+```
+
+Both hooks then run on every `git commit`.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
