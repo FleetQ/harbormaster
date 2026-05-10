@@ -23,6 +23,51 @@
     return fetch(url, opts);
   };
 
+  // v12.0.0a7: apply the persisted theme class BEFORE Alpine boots
+  // so the page never flashes the wrong theme. Read localStorage,
+  // map to a class on <html>, store on window for the toggle factory.
+  (function applyTheme() {
+    var stored = '';
+    try { stored = window.localStorage.getItem('hm-theme') || 'auto'; }
+    catch (_) { stored = 'auto'; }
+    if (stored !== 'light' && stored !== 'dark' && stored !== 'auto') {
+      stored = 'auto';
+    }
+    var html = document.documentElement;
+    html.classList.remove('theme-light', 'theme-dark');
+    if (stored === 'light') html.classList.add('theme-light');
+    else if (stored === 'dark') html.classList.add('theme-dark');
+    // 'auto' leaves no class — `prefers-color-scheme` media query wins.
+    window.__hmTheme = stored;
+  })();
+
+  // v12.0.0a7: Alpine factory exposed globally (declared before
+  // Alpine boots so x-data="themeToggle()" resolves on first paint).
+  window.themeToggle = function themeToggle() {
+    return {
+      mode: window.__hmTheme || 'auto',
+      cycle() {
+        var next = this.mode === 'auto' ? 'light'
+                  : this.mode === 'light' ? 'dark'
+                  : 'auto';
+        this.mode = next;
+        try { window.localStorage.setItem('hm-theme', next); } catch (_) {}
+        var html = document.documentElement;
+        html.classList.remove('theme-light', 'theme-dark');
+        if (next === 'light') html.classList.add('theme-light');
+        else if (next === 'dark') html.classList.add('theme-dark');
+        window.__hmTheme = next;
+      },
+      icon() {
+        // ☀ = light, ☾ = dark, ◐ = auto. Glyphs reinforce the
+        // mode label for color-vision-aware accessibility.
+        if (this.mode === 'light') return '☀';
+        if (this.mode === 'dark') return '☾';
+        return '◐';
+      },
+    };
+  };
+
   // v12.0.0a6: prime the hm-auth cookie on page load so EventSource
   // streams (which can't carry custom headers) authenticate via the
   // cookie. Idempotent: if the cookie already exists for this origin,
@@ -157,6 +202,18 @@
     <a href="/tools/fan-out" class="text-gray-300 hover:text-cyan-400">Fan-out</a>
     <a href="/dispatcher" class="text-gray-300 hover:text-cyan-400">Dispatcher</a>
     <a href="https://github.com/FleetQ/harbormaster" class="text-gray-300 hover:text-cyan-400">GitHub</a>
+    <!-- v12.0.0a7: theme toggle. Cycles auto → light → dark → auto.
+         Persisted to localStorage so preference survives reloads.
+         The actual class on <html> is applied by an early IIFE in
+         <head> to avoid FOUC. -->
+    <button type="button"
+            x-data="themeToggle()"
+            @click="cycle()"
+            :aria-label="`Theme: ${mode}. Click to cycle.`"
+            :title="`Theme: ${mode} (click to cycle: auto → light → dark)`"
+            class="text-gray-300 hover:text-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 px-1">
+      <span aria-hidden="true" x-text="icon()"></span>
+    </button>
     {% if auth_token %}
     <span class="text-gray-500 text-xs hidden md:inline" title="Authenticated session">🔒</span>
     {% endif %}
