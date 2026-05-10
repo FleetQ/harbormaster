@@ -52,13 +52,21 @@ def test_recent_respects_limit() -> None:
     assert [e.target for e in events] == ["p7", "p8", "p9"]
 
 
-def test_ring_buffer_evicts_oldest() -> None:
-    log = _MCPCallLog(max_events=3)
-    for i in range(5):
+def test_ring_buffer_evicts_oldest(tmp_path: Path) -> None:
+    """v11.0.0a1: in-process ring buffer became a SQLite-backed store
+    with a `max_rows` cap; pruning is opportunistic (every PRUNE_EVERY
+    inserts) so a small-cap test asserts the *post-prune* shape rather
+    than the strict ring-buffer invariant. See test_network_store.py
+    for the persistent-store-specific assertions."""
+    log = _MCPCallLog(db_path=tmp_path / "ring.db", max_rows=3)
+    # Push enough rows to trigger at least one prune (PRUNE_EVERY=100).
+    for i in range(105):
         log.record(caller="operator", target=f"p{i}", tool="ask_project")
     events = log.recent()
-    assert len(events) == 3
-    assert [e.target for e in events] == ["p2", "p3", "p4"]
+    # Cap is 3 but pruning runs once per 100 inserts; the most recent
+    # row is always present.
+    assert len(events) <= 100 + 3
+    assert events[-1].target == "p104"
 
 
 def test_question_preview_is_truncated_to_200_chars() -> None:
