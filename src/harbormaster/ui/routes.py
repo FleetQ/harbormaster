@@ -222,6 +222,74 @@ def register_routes(
     async def api_health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
+    @app.get("/dispatcher", response_class=HTMLResponse)
+    async def dispatcher_page(request: Request) -> HTMLResponse:
+        """v9.0.0a3: trace waterfall surface.
+
+        Single-page view of live + recent dispatcher activity. The page
+        consumes ``GET /api/dispatcher/trace`` (SSE) for live spans and
+        ``GET /api/dispatcher/recent`` for the last-N completed spans
+        on first paint.
+        """
+        return _render(request, "dispatcher_trace.html", {})
+
+    @app.get("/api/dispatcher/recent")
+    async def api_dispatcher_recent(limit: int = 20) -> dict[str, object]:
+        """v9.0.0a3: most-recently completed dispatcher spans.
+
+        Bounded by the singleton's ring buffer (currently 100 spans).
+        Returns up to ``limit`` (clamped to [1, 100]).
+        """
+        try:
+            from harbormaster.fleetq import get_dispatcher_stats
+        except ImportError:
+            return {"spans": []}
+        clamped = max(1, min(int(limit), 100))
+        return {"spans": get_dispatcher_stats().recent_completed(clamped)}
+
+    @app.get("/api/dispatcher/trace")
+    async def api_dispatcher_trace(request: Request) -> EventSourceResponse:
+        """v9.0.0a3: live span_start/span_end SSE stream.
+
+        Each event's ``data`` is a JSON object with the span shape
+        documented in ``DispatcherStats.subscribe`` — at minimum
+        ``{kind, span_id, tool, project, started_at, [ended_at, ok]}``.
+        Heartbeats every ``_HEARTBEAT_INTERVAL_S`` seconds keep the
+        connection alive through nginx/Cloudflare 60s idle timeouts.
+        """
+
+        async def gen() -> AsyncIterator[dict[str, str]]:
+            try:
+                from harbormaster.fleetq import get_dispatcher_stats
+            except ImportError:
+                yield {"event": "ready", "data": json.dumps({"available": False})}
+                return
+            stats = get_dispatcher_stats()
+            sub = stats.subscribe()
+            yield {"event": "ready", "data": json.dumps({"available": True})}
+            last_heartbeat = time.time()
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    events = sub.drain()
+                    for ev in events:
+                        kind = ev.pop("kind")
+                        yield {"event": kind, "data": json.dumps(ev)}
+                    if events:
+                        last_heartbeat = time.time()
+                    elif time.time() - last_heartbeat >= _HEARTBEAT_INTERVAL_S:
+                        yield {
+                            "event": "heartbeat",
+                            "data": json.dumps({"ts": time.time()}),
+                        }
+                        last_heartbeat = time.time()
+                    await asyncio.sleep(0.1)
+            finally:
+                stats.unsubscribe(sub)
+
+        return EventSourceResponse(gen())
+
     @app.get("/api/dispatcher/status")
     async def api_dispatcher_status() -> dict[str, object]:
         """Live runtime metrics for the in-process MCP dispatcher (v9.0.0a2).

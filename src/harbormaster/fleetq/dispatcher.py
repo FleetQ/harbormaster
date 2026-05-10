@@ -71,6 +71,57 @@ class _RunningSpan:
     tool: str
     project: str | None
     started_at: float  # epoch seconds
+    span_id: int = 0  # monotonically incrementing per-process
+
+
+@dataclass
+class _CompletedSpan:
+    """v9.0.0a3: an immutable snapshot of a finished dispatch.
+
+    Lives in DispatcherStats._completed (bounded ring buffer) so the
+    trace waterfall surface can show the last-N completions without
+    a separate persistent store.
+    """
+    span_id: int
+    tool: str
+    project: str | None
+    started_at: float
+    ended_at: float
+    ok: bool
+
+
+# Bounded number of completed spans to retain. Pure UI data — sized to
+# fit one screen of waterfall rows on a typical monitor without paging.
+_COMPLETED_RING_MAX: int = 100
+
+
+class _SpanSubscription:
+    """v9.0.0a3: one SSE consumer's queue of pending span events.
+
+    Each subscription gets its own queue; emit() fans out to every
+    live subscriber. Drops are silent — if a consumer falls more than
+    `maxsize` events behind, the oldest is dropped (the trace surface
+    is best-effort, not a billing system).
+    """
+
+    __slots__ = ("queue", "_lock", "_maxsize")
+
+    def __init__(self, maxsize: int = 256) -> None:
+        from collections import deque
+
+        self.queue: Any = deque(maxlen=maxsize)  # deque drops oldest on overflow
+        self._lock = threading.Lock()
+        self._maxsize = maxsize
+
+    def push(self, event: dict[str, Any]) -> None:
+        with self._lock:
+            self.queue.append(event)
+
+    def drain(self) -> list[dict[str, Any]]:
+        with self._lock:
+            out = list(self.queue)
+            self.queue.clear()
+        return out
 
 
 class DispatcherStats:
@@ -84,23 +135,43 @@ class DispatcherStats:
     """
 
     def __init__(self) -> None:
+        from collections import deque
+
         self._lock = threading.Lock()
         self._tools: dict[str, _ToolCounters] = {}
         self._running: list[_RunningSpan] = []
+        self._completed: Any = deque(maxlen=_COMPLETED_RING_MAX)
         self._last_dispatched_at: float | None = None
+        self._next_span_id: int = 1
+        self._subscribers: list[_SpanSubscription] = []
 
     def record_start(self, tool: str, project: str | None = None) -> _RunningSpan:
         """Note that a tool dispatch has begun. Returns the span the
         caller must pass back to ``record_end``."""
-        span = _RunningSpan(tool=tool, project=project, started_at=time.time())
         with self._lock:
+            span = _RunningSpan(
+                tool=tool,
+                project=project,
+                started_at=time.time(),
+                span_id=self._next_span_id,
+            )
+            self._next_span_id += 1
             counters = self._tools.setdefault(tool, _ToolCounters())
             counters.in_flight += 1
             self._running.append(span)
+            event = {
+                "kind": "span_start",
+                "span_id": span.span_id,
+                "tool": span.tool,
+                "project": span.project,
+                "started_at": span.started_at,
+            }
+            self._fanout_locked(event)
         return span
 
     def record_end(self, span: _RunningSpan, *, ok: bool) -> None:
         """Note that a previously-started dispatch has ended."""
+        ended_at = time.time()
         with self._lock:
             counters = self._tools.setdefault(span.tool, _ToolCounters())
             counters.in_flight = max(0, counters.in_flight - 1)
@@ -112,7 +183,60 @@ class DispatcherStats:
             # ahead of us — counters still update; running list is best-effort.
             with contextlib.suppress(ValueError):
                 self._running.remove(span)
-            self._last_dispatched_at = time.time()
+            self._last_dispatched_at = ended_at
+            completed = _CompletedSpan(
+                span_id=span.span_id,
+                tool=span.tool,
+                project=span.project,
+                started_at=span.started_at,
+                ended_at=ended_at,
+                ok=ok,
+            )
+            self._completed.append(completed)
+            event = {
+                "kind": "span_end",
+                "span_id": span.span_id,
+                "tool": span.tool,
+                "project": span.project,
+                "started_at": span.started_at,
+                "ended_at": ended_at,
+                "ok": ok,
+            }
+            self._fanout_locked(event)
+
+    def _fanout_locked(self, event: dict[str, Any]) -> None:
+        """Push an event to every live subscriber. Caller holds self._lock."""
+        for sub in self._subscribers:
+            sub.push(event)
+
+    def subscribe(self) -> _SpanSubscription:
+        """v9.0.0a3: get a new SSE subscription. Caller must call
+        ``unsubscribe`` when done."""
+        sub = _SpanSubscription()
+        with self._lock:
+            self._subscribers.append(sub)
+        return sub
+
+    def unsubscribe(self, sub: _SpanSubscription) -> None:
+        with self._lock, contextlib.suppress(ValueError):
+            self._subscribers.remove(sub)
+
+    def recent_completed(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Return the most-recently completed spans (newest last)."""
+        with self._lock:
+            spans = list(self._completed)[-max(1, limit):]
+        return [
+            {
+                "span_id": s.span_id,
+                "tool": s.tool,
+                "project": s.project,
+                "started_at": s.started_at,
+                "ended_at": s.ended_at,
+                "duration_ms": int((s.ended_at - s.started_at) * 1000),
+                "ok": s.ok,
+            }
+            for s in spans
+        ]
 
     def snapshot(self) -> dict[str, Any]:
         """Capture a consistent point-in-time view of the current state.
@@ -155,7 +279,12 @@ class DispatcherStats:
         with self._lock:
             self._tools.clear()
             self._running.clear()
+            self._completed.clear()
             self._last_dispatched_at = None
+            self._next_span_id = 1
+            # Subscribers stay attached — tests that assert SSE fan-out
+            # build subscribers BEFORE reset() to capture a deterministic
+            # event sequence.
 
 
 # Process-wide singleton. Tests can grab it via ``get_dispatcher_stats``
