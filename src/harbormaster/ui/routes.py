@@ -1213,9 +1213,9 @@ def register_routes(
         return out
 
     def _extract_memory_tags(path: Path) -> list[str]:
-        """v14.0.0a5: parse a single ``tags:`` line out of YAML frontmatter.
+        """v14.0.0a5: parse a ``tags:`` field out of YAML frontmatter.
 
-        Frontmatter shape we accept (everything else ignored)::
+        Frontmatter shapes we accept (everything else ignored)::
 
             ---
             tags: [foo, bar, baz]
@@ -1227,11 +1227,21 @@ def register_routes(
             tags: ["foo", "bar"]
             ---
 
+        v15.0.0a1: also accept the YAML block-list form::
+
+            ---
+            tags:
+              - foo
+              - bar
+            ---
+
         Reads only the first 4 KiB of the file to bound cost (frontmatter
         always lives at the top). No PyYAML dependency — we look for the
-        opening ``---``, then a single ``tags:`` line whose value is a
-        JSON-style list. Anything more exotic returns an empty list.
-        Failures are silent (operator-side feature, never block listing).
+        opening ``---``, then a single ``tags:`` line; if its inline value
+        is a JSON-style list we parse it; otherwise we walk subsequent
+        lines for ``- item`` block-list entries until indentation breaks.
+        Anything more exotic returns an empty list. Failures are silent
+        (operator-side feature, never block listing).
         """
         try:
             head = path.read_bytes()[:4096].decode("utf-8", errors="replace")
@@ -1244,20 +1254,36 @@ def register_routes(
         if end_marker == -1:
             return []
         block = head[3:end_marker]
-        for raw_line in block.splitlines():
+        lines = block.splitlines()
+        for idx, raw_line in enumerate(lines):
             line = raw_line.strip()
             if not line.lower().startswith("tags:"):
                 continue
             value = line[5:].strip()
-            if not (value.startswith("[") and value.endswith("]")):
-                return []
-            inner = value[1:-1]
-            tags: list[str] = []
-            for tok in inner.split(","):
-                t = tok.strip().strip('"').strip("'")
-                if t:
-                    tags.append(t)
-            return tags
+            if value.startswith("[") and value.endswith("]"):
+                inner = value[1:-1]
+                tags: list[str] = []
+                for tok in inner.split(","):
+                    t = tok.strip().strip('"').strip("'")
+                    if t:
+                        tags.append(t)
+                return tags
+            if value == "":
+                # v15.0.0a1: try YAML block-list form on subsequent lines.
+                tags = []
+                for follow in lines[idx + 1 :]:
+                    stripped = follow.strip()
+                    if not stripped:
+                        # Blank lines inside the list are allowed by YAML;
+                        # we keep going until a non-list line breaks us out.
+                        continue
+                    if not stripped.startswith("-"):
+                        break
+                    item = stripped[1:].strip().strip('"').strip("'")
+                    if item:
+                        tags.append(item)
+                return tags
+            return []
         return []
 
     def _memory_path_for(project_path: Path, file_token: str) -> Path:

@@ -135,7 +135,9 @@ def test_project_detail_renders_tag_pills() -> None:
 def test_project_detail_filtered_files_handles_empty_filter() -> None:
     body = _read("project_detail.html")
     # Empty filter must early-return the unfiltered files array.
-    assert "if (!q) return this.files" in body
+    # v15.0.0a1 generalised this to a comma-split tokens list — the
+    # equivalent guard is "tokens.length === 0 → return this.files".
+    assert "if (tokens.length === 0) return this.files" in body
 
 
 def test_project_detail_textarea_binds_undo_redo_keys() -> None:
