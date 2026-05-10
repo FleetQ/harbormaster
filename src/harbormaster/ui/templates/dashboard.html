@@ -10,17 +10,25 @@
 <div x-data="helpPopover()"
      @keydown.window="onKeyDown($event)">
   <button type="button" @click="open = !open"
-          class="fixed bottom-4 right-4 z-30 bg-gray-900/80 hover:bg-gray-800 border border-gray-700 text-cyan-400 w-9 h-9 rounded-full text-base font-bold transition"
-          :title="open ? 'close help (Esc)' : 'keyboard shortcuts (?)'">
-    <span x-text="open ? '×' : '?'"></span>
+          class="fixed bottom-4 right-4 z-30 bg-gray-900/80 hover:bg-gray-800 border border-gray-700 text-cyan-400 w-9 h-9 rounded-full text-base font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+          :title="open ? 'close help (Esc)' : 'keyboard shortcuts (?)'"
+          :aria-label="open ? 'Close keyboard shortcuts help' : 'Open keyboard shortcuts help'"
+          :aria-expanded="open"
+          aria-controls="hm-help-popover">
+    <span x-text="open ? '×' : '?'" aria-hidden="true"></span>
   </button>
   <div x-show="open" x-cloak
+       id="hm-help-popover"
+       role="dialog"
+       aria-label="Keyboard shortcuts"
+       :aria-hidden="!open"
        @click.away="open = false"
        class="fixed bottom-16 right-4 z-30 w-80 max-h-[70vh] overflow-y-auto bg-gray-950 border border-gray-700 rounded-lg shadow-xl p-4">
     <header class="flex items-baseline justify-between mb-3">
       <h3 class="text-sm font-bold text-gray-200">Keyboard shortcuts</h3>
       <button type="button" @click="open = false"
-              class="text-gray-500 hover:text-gray-300 text-xs">close</button>
+              aria-label="Close keyboard shortcuts help"
+              class="text-gray-400 hover:text-gray-200 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">close</button>
     </header>
     <template x-for="section in shortcuts" :key="section.scope">
       <div class="mb-3">
@@ -82,7 +90,7 @@
         <dd class="inline ml-1" x-text="bridge.runtime && bridge.runtime.last_error"></dd>
       </div>
     </dl>
-    <p x-show="bridgeError" class="text-xs text-red-400" x-text="bridgeError"></p>
+    <p x-show="bridgeError" :aria-hidden="!bridgeError" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="bridgeError"></p>
   </article>
 
   <article class="border border-gray-800 rounded-lg p-4 bg-gray-900/40">
@@ -112,7 +120,7 @@
         </div>
       </template>
     </div>
-    <p x-show="pluginsError" class="text-xs text-red-400" x-text="pluginsError"></p>
+    <p x-show="pluginsError" :aria-hidden="!pluginsError" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="pluginsError"></p>
   </article>
 </section>
 
@@ -127,7 +135,9 @@
       <!-- v6.0.0a1: manual trigger button. Disabled while running. -->
       <button type="button" @click="triggerManual()"
               :disabled="state.phase === 'running' || triggering || cancelling"
-              class="text-xs px-2 py-0.5 rounded border border-gray-700 bg-gray-900/60 hover:bg-gray-800 disabled:bg-gray-900 disabled:text-gray-600 transition"
+              :aria-busy="triggering"
+              aria-label="Run reembed now"
+              class="text-xs px-2 py-0.5 rounded border border-gray-700 bg-gray-900/60 hover:bg-gray-800 disabled:bg-gray-900 disabled:text-gray-500 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
               title="run reembed now (skips the auto_reembed_on_drift gate)">
         <span x-show="!triggering">run now</span>
         <span x-show="triggering">starting…</span>
@@ -137,7 +147,9 @@
       <button type="button" @click="cancelRunning()"
               x-show="state.phase === 'running' && !state.cancel_requested"
               :disabled="cancelling"
-              class="text-xs px-2 py-0.5 rounded border border-amber-700 bg-amber-900/30 hover:bg-amber-900/50 text-amber-200 disabled:opacity-50 transition"
+              :aria-busy="cancelling"
+              aria-label="Cancel running reembed"
+              class="text-xs px-2 py-0.5 rounded border border-amber-700 bg-amber-900/30 hover:bg-amber-900/50 text-amber-200 disabled:opacity-50 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
               title="signal the running reembed to stop after current host">
         <span x-show="!cancelling">cancel</span>
         <span x-show="cancelling">cancelling…</span>
@@ -161,7 +173,7 @@
     <span x-show="state.finished_at" class="text-gray-500"
           x-text="` · ${formatDuration(state.started_at, state.finished_at)}`"></span>
   </div>
-  <div x-show="state.phase === 'failed'" class="text-xs">
+  <div x-show="state.phase === 'failed'" :aria-hidden="state.phase !== 'failed'" role="alert" aria-live="assertive" class="text-xs">
     <p class="text-rose-400 mb-1">Auto-reembed failed.</p>
     <p class="text-gray-400 break-words" x-text="state.error"></p>
   </div>
@@ -176,7 +188,7 @@
     Idle — no embedding drift detected. Auto-reembed runs on next startup
     if the configured embedding model changes.
   </div>
-  <p x-show="error" class="text-xs text-red-400" x-text="error"></p>
+  <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="error"></p>
 
   <!-- v7.0.0a4: collapsible last-5-runs history table.
        Lazy-loads via fetchRuns() the first time the user opens it. -->
@@ -254,13 +266,14 @@
     </select>
     <button type="submit"
             :disabled="loading || question.trim().length < 2"
-            class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold px-4 py-2 rounded text-sm transition">
+            :aria-busy="loading"
+            class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-400 text-white font-bold px-4 py-2 rounded text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
       <span x-show="!loading">Search</span>
-      <span x-show="loading">…</span>
+      <span x-show="loading" aria-hidden="true">…</span>
     </button>
   </form>
-  <div x-show="message" class="text-xs text-amber-400 mb-2" x-text="message"></div>
-  <div x-show="error" class="text-xs text-red-400 mb-2" x-text="error"></div>
+  <div x-show="message" :aria-hidden="!message" role="status" aria-live="polite" class="text-xs text-amber-400 mb-2" x-text="message"></div>
+  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-red-400 mb-2" x-text="error"></div>
   <div x-show="hasResults">
     <p class="text-xs text-gray-500 mb-2"
        x-text="`${matches.length} match${matches.length === 1 ? '' : 'es'} (backend: ${backend})`"></p>
@@ -308,7 +321,7 @@
             x-text="`${graph.projects_discovered} projects · ${(graph.graph?.edges?.length ?? 0)} edges${graph.projects_with_lockfile !== undefined ? ' · ' + graph.projects_with_lockfile + ' with lockfile' : ''}`"></span>
     </div>
   </header>
-  <div x-show="graphError" class="text-xs text-red-400" x-text="graphError"></div>
+  <div x-show="graphError" :aria-hidden="!graphError" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="graphError"></div>
   <div x-show="graphLoading" class="text-xs text-gray-500">Rendering…</div>
   <div x-show="!graphLoading && (graph.graph?.edges?.length ?? 0) === 0"
        class="text-xs text-gray-500">
@@ -328,7 +341,8 @@
        class="relative" tabindex="0">
     <div class="absolute top-2 right-2 z-10 flex gap-1">
       <button type="button" @click="reset()"
-              class="text-xs bg-gray-900/80 hover:bg-gray-800 border border-gray-700 px-2 py-0.5 rounded"
+              aria-label="Reset graph zoom"
+              class="text-xs bg-gray-900/80 hover:bg-gray-800 border border-gray-700 px-2 py-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
               :title="`reset zoom (current: ${scale.toFixed(2)}×) — press Esc or double-tap`">
         reset
       </button>
@@ -379,7 +393,7 @@
 
   <div x-show="loading" class="text-gray-400">Loading projects…</div>
 
-  <div x-show="error" class="border border-red-800 bg-red-950/40 text-red-300 px-4 py-3 rounded">
+  <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="border border-red-800 bg-red-950/40 text-red-300 px-4 py-3 rounded">
     Error loading projects: <span x-text="error"></span>
   </div>
 
@@ -394,10 +408,13 @@
   </div>
 
   <div x-show="!loading && !error && filter && visibleProjects().length === 0"
+       :aria-hidden="!(filter && visibleProjects().length === 0)"
+       role="status"
        class="border border-gray-800 bg-gray-900/40 text-gray-400 px-4 py-6 rounded">
     No projects match <code class="text-cyan-400" x-text="filter"></code>.
     <button type="button" @click="filter = ''; persistToUrl()"
-            class="ml-2 text-cyan-400 hover:text-cyan-300 underline">clear</button>
+            aria-label="Clear project filter"
+            class="ml-2 text-cyan-400 hover:text-cyan-300 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">clear</button>
   </div>
 
   <!-- v6.0.0a3: groupedProjects() returns one entry for flat mode
@@ -440,8 +457,9 @@
           <span class="text-gray-500 truncate font-mono flex-1" x-text="p.path"></span>
           <!-- v3.0.0a7: per-card inline ask form trigger -->
           <button type="button" @click="askExpanded = !askExpanded"
-                  class="ml-auto bg-cyan-900/50 text-cyan-300 px-2 py-0.5 rounded hover:bg-cyan-800/60 transition"
+                  class="ml-auto bg-cyan-900/50 text-cyan-300 px-2 py-0.5 rounded hover:bg-cyan-800/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
                   :aria-expanded="askExpanded"
+                  :aria-label="askExpanded ? 'Close inline ask form for ' + p.name : 'Open inline ask form for ' + p.name"
                   :title="askExpanded ? 'collapse ask form' : 'inline ask without leaving the dashboard'"
                   x-text="askExpanded ? 'close' : 'ask'"></button>
         </footer>
@@ -462,21 +480,28 @@
                 <input type="number" min="1" max="10" x-model.number="maxTurns"
                        class="w-12 bg-gray-950 border border-gray-800 rounded px-1 py-0.5 text-center">
               </label>
-              <span class="text-gray-600" x-show="loading">streaming…</span>
-              <span class="text-gray-500 ml-auto" x-show="!loading && hasResult"
+              <span class="text-gray-400" x-show="loading">streaming…</span>
+              <span class="text-gray-400 ml-auto" x-show="!loading && hasResult"
                     x-text="`${chunks} chunks · ${(elapsedMs/1000).toFixed(1)}s`"></span>
               <button type="submit"
                       :disabled="loading || question.trim().length < 3"
-                      class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold px-2 py-0.5 rounded text-xs">
+                      :aria-busy="loading"
+                      class="bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-400 text-white font-bold px-2 py-0.5 rounded text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
                 <span x-show="!loading">Ask</span>
-                <span x-show="loading">…</span>
+                <span x-show="loading" aria-hidden="true">…</span>
               </button>
               <button type="button" x-show="loading" @click="abort()"
-                      class="text-amber-400 hover:text-amber-300 underline">stop</button>
+                      aria-label="Stop streaming"
+                      :aria-hidden="!loading"
+                      class="text-amber-400 hover:text-amber-300 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">stop</button>
             </div>
           </form>
-          <div x-show="error" class="mt-2 text-xs text-red-400" x-text="error"></div>
+          <div x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="mt-2 text-xs text-red-400" x-text="error"></div>
           <pre x-show="streamText"
+               :aria-hidden="!streamText"
+               aria-live="polite"
+               aria-atomic="false"
+               aria-label="Streaming answer"
                class="mt-2 text-xs whitespace-pre-wrap break-words border border-gray-800 rounded p-2 bg-gray-950/50 text-gray-200 leading-relaxed max-h-48 overflow-y-auto"
                x-text="streamText"></pre>
         </section>
