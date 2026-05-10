@@ -154,11 +154,30 @@ class PluginsConfig(BaseModel):
     allow: list[str] = Field(default_factory=list)
 
 
+class IgnoreConfig(BaseModel):
+    """v10.0.0a4: top-level project ignore patterns.
+
+    Distinct from `ProjectsConfig.exclude` (which has been around since
+    v1 and matches gitignore-style component names): `ignore.patterns`
+    is glob-matched against the project's basename + full path via
+    `fnmatch.fnmatchcase`. Both lists are applied at discovery time;
+    a project is hidden if it matches EITHER list.
+
+    Use ignore.patterns for project-name globs (`*-ui`, `*-archive`)
+    that don't naturally fit the gitignore-style component model.
+    """
+
+    model_config = _FORBID_EXTRA
+
+    patterns: list[str] = Field(default_factory=list)
+
+
 class HarbormasterConfig(BaseModel):
     model_config = _FORBID_EXTRA
 
     server: ServerConfig = Field(default_factory=ServerConfig)
     projects: ProjectsConfig = Field(default_factory=ProjectsConfig)
+    ignore: IgnoreConfig = Field(default_factory=IgnoreConfig)
     backends: dict[str, BackendConfig] = Field(default_factory=lambda: {"claude": BackendConfig()})
     # v2.0.0a3: which backend should be used when no per-project
     # override is specified. Falls through to "claude" so v1

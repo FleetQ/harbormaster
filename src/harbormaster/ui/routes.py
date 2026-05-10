@@ -131,7 +131,7 @@ def register_routes(
         `POST /mcp/harbormaster fan_out_ask` and renders the
         aggregated result.
         """
-        project_names = sorted(p.name for p in discover_projects(config.projects))
+        project_names = sorted(p.name for p in discover_projects(config.projects, ignore_patterns=config.ignore.patterns))
         host_labels = ["local", *sorted(config.hosts.keys())]
         return _render(
             request,
@@ -167,7 +167,7 @@ def register_routes(
         else:
             # Find the project metadata for the header card.
             project_dict = next(
-                (p.as_dict() for p in discover_projects(config.projects)
+                (p.as_dict() for p in discover_projects(config.projects, ignore_patterns=config.ignore.patterns)
                  if p.name == name),
                 None,
             )
@@ -792,11 +792,45 @@ def register_routes(
 
         def _build() -> list[dict[str, object]]:
             nonlocal _last_dirs
-            infos = discover_projects(config.projects)
+            infos = discover_projects(config.projects, ignore_patterns=config.ignore.patterns)
             _last_dirs = project_dirs_from_infos(infos)
             return [p.as_dict() for p in infos]
 
         return projects_cache.get(_build, _last_dirs)
+
+    @app.get("/api/ignored-projects")
+    async def list_ignored_projects() -> dict[str, object]:
+        """v10.0.0a4: surface the projects hidden by `[ignore].patterns`.
+
+        Read-only diagnostic endpoint. Returns:
+          - patterns: the configured ignore patterns (echoed for the
+            sidebar tooltip).
+          - count: integer.
+          - names: sorted list of project basenames that would have
+            been discovered if `[ignore]` were empty but ARE
+            currently hidden.
+
+        Computed by running discovery twice — once with
+        `ignore_patterns=[]` and once with the live patterns — and
+        diffing. O(2 * discovery cost); acceptable because the UI
+        sidebar polls this lazily on expand.
+        """
+        all_names = {
+            p.name for p in discover_projects(
+                config.projects, ignore_patterns=[],
+            )
+        }
+        visible_names = {
+            p.name for p in discover_projects(
+                config.projects, ignore_patterns=config.ignore.patterns,
+            )
+        }
+        ignored = sorted(all_names - visible_names)
+        return {
+            "patterns": list(config.ignore.patterns),
+            "count": len(ignored),
+            "names": ignored,
+        }
 
     # One ManifestCache per UI process — first hit warm-loads, subsequent
     # /api/graph polls hit the cache and stat the manifest file only.
@@ -816,7 +850,7 @@ def register_routes(
         from pathlib import Path
 
         manifests = []
-        for p in discover_projects(config.projects):
+        for p in discover_projects(config.projects, ignore_patterns=config.ignore.patterns):
             m = graph_cache.get(Path(p.path))
             if m is not None:
                 manifests.append(m)
@@ -854,7 +888,7 @@ def register_routes(
         # Projects count — reuse the same cache the project list uses.
         def _build_for_count() -> list[dict[str, object]]:
             nonlocal _last_dirs
-            infos = discover_projects(config.projects)
+            infos = discover_projects(config.projects, ignore_patterns=config.ignore.patterns)
             _last_dirs = project_dirs_from_infos(infos)
             return [p.as_dict() for p in infos]
 
@@ -987,7 +1021,7 @@ def register_routes(
         Implementation: a subset that's stable across A2A v0.3.x —
         we don't claim capabilities we can't actually serve.
         """
-        projects = {p.name: p for p in discover_projects(config.projects)}
+        projects = {p.name: p for p in discover_projects(config.projects, ignore_patterns=config.ignore.patterns)}
         project = projects.get(project_name)
         if project is None:
             raise HTTPException(404, f"unknown project: {project_name!r}")

@@ -86,7 +86,7 @@ def run_backend(
             label = f"{label_prefix}-{host}-{name}"
         else:
             try:
-                cwd = resolve_project(name, config.projects)
+                cwd = resolve_project(name, config.projects, ignore_patterns=config.ignore.patterns)
             except ValueError as e:
                 return f"Error: {e}"
             result = backend.ask_local(cwd=cwd, prompt=prompt, max_turns=max_turns)
@@ -226,7 +226,11 @@ def _maybe_extract_and_writeback_kg(
     try:
         from harbormaster.projects import discover_projects
 
-        known_projects = [p.name for p in discover_projects(config.projects)]
+        known_projects = [
+            p.name for p in discover_projects(
+                config.projects, ignore_patterns=config.ignore.patterns,
+            )
+        ]
     except Exception:
         logger.exception("kg: discover_projects failed; skipping mention extraction")
         known_projects = []
@@ -258,7 +262,7 @@ def _maybe_extract_and_writeback_kg(
             backend = get_backend_for_project(config, project_name)
             cwd: Path | None
             try:
-                cwd = resolve_project(project_name, config.projects)
+                cwd = resolve_project(project_name, config.projects, ignore_patterns=config.ignore.patterns)
             except ValueError:
                 cwd = None
                 backend = None
@@ -428,7 +432,7 @@ def make_local_backend_stream(
             f"backend {backend.name!r} does not support streaming",
             code="config_error",
         )
-    cwd = resolve_project(project_name, config.projects)
+    cwd = resolve_project(project_name, config.projects, ignore_patterns=config.ignore.patterns)
     stream: Iterator[str] = backend.ask_local_stream(
         cwd=cwd,
         prompt=prompt,

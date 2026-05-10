@@ -57,7 +57,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
             edges. Default false.
         """
         manifests = []
-        for p in discover_projects(config.projects):
+        for p in discover_projects(config.projects, ignore_patterns=config.ignore.patterns):
             m = _cache.get(Path(p.path))
             if m is not None:
                 manifests.append(m)
