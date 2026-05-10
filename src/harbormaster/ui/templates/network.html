@@ -50,7 +50,7 @@
     </select>
   </header>
   <p x-show="error" role="alert" class="text-xs text-red-400" x-text="error"></p>
-  <dl x-show="stats" class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+  <dl x-show="stats" class="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
     <div class="border border-gray-800 rounded p-2 bg-gray-950/40">
       <dt class="text-gray-500">total calls</dt>
       <dd class="text-cyan-300 font-bold text-lg" x-text="stats?.total_calls ?? 0"></dd>
@@ -68,6 +68,21 @@
             <span class="text-cyan-400" x-text="tool"></span>
             <span class="text-gray-600">×</span>
             <span x-text="count"></span>
+          </span>
+        </template>
+      </dd>
+    </div>
+    <!-- v12.0.0a5: per-source breakdown — call counts + per-source
+         error rate. Operators can spot a misbehaving project quickly. -->
+    <div class="border border-gray-800 rounded p-2 bg-gray-950/40">
+      <dt class="text-gray-500 mb-1">by source</dt>
+      <dd class="text-gray-300 text-[11px]">
+        <template x-for="(row, source) in stats?.by_source ?? {}" :key="'src:' + source">
+          <span class="block">
+            <span class="text-cyan-400 font-mono" x-text="source"></span>
+            <span class="text-gray-600 ml-1" x-text="'×' + row.calls"></span>
+            <span x-show="row.error_rate > 0" class="text-amber-400 ml-1"
+                  x-text="'(' + (row.error_rate * 100).toFixed(0) + '% err)'"></span>
           </span>
         </template>
       </dd>
