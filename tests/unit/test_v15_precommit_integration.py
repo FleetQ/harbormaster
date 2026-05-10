@@ -118,7 +118,19 @@ def test_parity_script_returns_1_when_doc_missing(tmp_path: Path) -> None:
 
 
 def test_config_check_cli_passes_against_example() -> None:
-    """Replicate what the pre-commit hook does — invoke the CLI."""
+    """Replicate what the pre-commit hook does — invoke the CLI.
+
+    Inject the worktree's ``src/`` to PYTHONPATH so the test sees the
+    same harbormaster module the editor sees, not the venv-installed
+    snapshot (the venv may be a few commits behind a fresh worktree).
+    """
+    import os
+
+    env = os.environ.copy()
+    src_dir = REPO_ROOT / "src"
+    env["PYTHONPATH"] = (
+        f"{src_dir}{os.pathsep}{env.get('PYTHONPATH', '')}".rstrip(os.pathsep)
+    )
     # Always invoke via the module entry point so the venv's actual
     # `harbormaster-mcp` script doesn't have to be on $PATH (it
     # often isn't under pytest). Behaviour is identical — the
@@ -128,7 +140,7 @@ def test_config_check_cli_passes_against_example() -> None:
         "config", "check", "--config", str(EXAMPLE_TOML),
     ]
     proc = subprocess.run(
-        argv, capture_output=True, text=True, cwd=REPO_ROOT,
+        argv, capture_output=True, text=True, cwd=REPO_ROOT, env=env,
     )
     # config check exits 0 on OK, 1 on warning, 2 on error.
     # We accept 0 or 1 — the example may surface "no projects found"

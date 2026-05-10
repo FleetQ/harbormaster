@@ -231,6 +231,38 @@ class BudgetConfig(BaseModel):
         return v
 
 
+
+class MarkdownConfig(BaseModel):
+    """v15.0.0a6 — markdown render allowlist tuning.
+
+    The default ``strict = True`` matches the v11.0.0a3 bleach
+    allowlist exactly: standard markdown tags + tables + footnote
+    markup, no extras. Setting ``strict = false`` widens the allowlist
+    to also accept ``<span>``, ``<kbd>``, ``<mark>``, ``<figure>``,
+    ``<figcaption>`` — useful for memory files that lean on richer
+    semantic markup.
+
+    Per-project override: drop a ``.harbormaster.toml`` at the
+    project root with::
+
+        [markdown]
+        strict = false
+
+    The render endpoint resolves the per-project value first; if no
+    per-project override is present (or no project context is given),
+    the global ``[markdown]`` value applies. Falls through to the
+    default (``True``) when nothing is configured.
+
+    Note: ``strict = false`` is still bleach-sanitised — protocols,
+    attributes, and the broader tag/script-injection rails are
+    unchanged. The flag only widens the tag allowlist.
+    """
+
+    model_config = _FORBID_EXTRA
+
+    strict: bool = True
+
+
 class IgnoreConfig(BaseModel):
     """v10.0.0a4: top-level project ignore patterns.
 
@@ -276,6 +308,9 @@ class HarbormasterConfig(BaseModel):
     # v15.0.0a4: per-tool soft call budgets — operator-side warning
     # surface, not enforcement. Empty by default.
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
+    # v15.0.0a6: markdown render allowlist tuning. Per-project overrides
+    # via <project>/.harbormaster.toml. Defaults to strict.
+    markdown: MarkdownConfig = Field(default_factory=MarkdownConfig)
 
 
 def _expand(p: str) -> Path:
