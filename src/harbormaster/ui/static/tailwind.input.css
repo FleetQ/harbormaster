@@ -76,6 +76,68 @@
     --hm-ring: var(--color-ring);
 }
 
+/* v12.0.0a7: light-mode tokens. Activated by either:
+ *   1. The `auto` user preference + `prefers-color-scheme: light` system pref
+ *   2. The explicit `html.theme-light` class (operator override stored in
+ *      localStorage as `hm-theme = "light"`).
+ *
+ * `html.theme-dark` forces dark even when the system pref is light — same
+ * shape, just the inverse override.
+ *
+ * Light values are derived directly from the dark ones:
+ *   - Surface lightness flipped (0.20→0.98, 0.26→0.95, 0.32→0.92).
+ *   - Foreground lightness inverted (0.96→0.18, 0.74→0.40, 0.60→0.50).
+ *   - Accent + state colors keep their hue + chroma but drop lightness
+ *     slightly (the same color reads "softer" on a dark canvas; on light
+ *     it needs lower lightness to keep contrast).
+ *
+ * The `:root` selector here is layered AFTER the `@theme` block so the
+ * media query / class-toggle overrides win. CSS specificity rules
+ * (`html.theme-light` is more specific than `:root`) are why the explicit
+ * class always beats the media query.
+ */
+@media (prefers-color-scheme: light) {
+    :root {
+        --color-surface-1: oklch(0.98 0 0);
+        --color-surface-2: oklch(0.95 0 0);
+        --color-surface-3: oklch(0.92 0 0);
+        --color-foreground:        oklch(0.18 0 0);
+        --color-foreground-muted:  oklch(0.40 0 0);
+        --color-foreground-subtle: oklch(0.50 0 0);
+        --color-accent:        oklch(0.55 0.13 215);
+        --color-accent-strong: oklch(0.42 0.15 220);
+        --color-border:        oklch(0.85 0 0);
+        --color-border-strong: oklch(0.72 0 0);
+    }
+}
+html.theme-light {
+    color-scheme: light;
+    --color-surface-1: oklch(0.98 0 0);
+    --color-surface-2: oklch(0.95 0 0);
+    --color-surface-3: oklch(0.92 0 0);
+    --color-foreground:        oklch(0.18 0 0);
+    --color-foreground-muted:  oklch(0.40 0 0);
+    --color-foreground-subtle: oklch(0.50 0 0);
+    --color-accent:        oklch(0.55 0.13 215);
+    --color-accent-strong: oklch(0.42 0.15 220);
+    --color-border:        oklch(0.85 0 0);
+    --color-border-strong: oklch(0.72 0 0);
+}
+html.theme-dark {
+    color-scheme: dark;
+    /* Explicit dark — restores @theme defaults even if media-query said light. */
+    --color-surface-1: oklch(0.20 0 0);
+    --color-surface-2: oklch(0.26 0 0);
+    --color-surface-3: oklch(0.32 0 0);
+    --color-foreground:        oklch(0.96 0 0);
+    --color-foreground-muted:  oklch(0.74 0 0);
+    --color-foreground-subtle: oklch(0.60 0 0);
+    --color-accent:        oklch(0.78 0.13 215);
+    --color-accent-strong: oklch(0.62 0.15 220);
+    --color-border:        oklch(0.32 0 0);
+    --color-border-strong: oklch(0.42 0 0);
+}
+
 /* Alpine x-cloak — centralized so every template benefits without
  * inline `<style>` copies. */
 [x-cloak] { display: none !important; }
