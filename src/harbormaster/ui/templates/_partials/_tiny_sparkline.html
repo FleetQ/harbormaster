@@ -1,0 +1,69 @@
+<script>
+  // v16.0.0a4: tiny-sparkline.js — roll-our-own SVG sparkline helper
+  // for the N-way reembed comparison panel (carry-over #11).
+  //
+  // No vendored CDN, no new external dep. ~50 LOC of pure SVG. The
+  // function returns an HTML string suitable for `x-html=` binding
+  // on a per-cell `<span>`:
+  //
+  //     <span x-html="sparklineHtml([12.4, 8.1, 9.0])"></span>
+  //
+  // Options (second arg, all optional):
+  //
+  //   width     — SVG viewport width  (default 80)
+  //   height    — SVG viewport height (default 18)
+  //   stroke    — line color CSS var ref (default 'currentColor')
+  //   strokeW   — stroke width (default 1.5)
+  //   fillBelow — when true, fills the area below the line at 15%
+  //               opacity for a more bar-chart-ish read (default false)
+  //
+  // Behaviour pins:
+  //   - Empty / non-array input returns ''.
+  //   - Single value renders a flat horizontal line at mid-height.
+  //   - Identical values render flat at mid-height.
+  //   - NaN / null / undefined values are coerced to 0.
+  //   - The output is always a `<svg>...</svg>` snippet (no namespaces
+  //     missing — Alpine x-html mounts inline SVG correctly).
+  window.sparklineHtml = function(values, opts) {
+    if (!Array.isArray(values) || values.length === 0) return '';
+    const o = opts || {};
+    const W = o.width || 80;
+    const H = o.height || 18;
+    const stroke = o.stroke || 'currentColor';
+    const strokeW = o.strokeW || 1.5;
+    const fillBelow = !!o.fillBelow;
+    const nums = values.map(v => Number.isFinite(+v) ? +v : 0);
+    const lo = Math.min.apply(null, nums);
+    const hi = Math.max.apply(null, nums);
+    const range = hi - lo;
+    const midY = H / 2;
+    let pts;
+    if (nums.length === 1 || range === 0) {
+      pts = nums.map((_v, i) => {
+        const x = nums.length === 1 ? W / 2 : (i / (nums.length - 1)) * W;
+        return `${x.toFixed(2)},${midY.toFixed(2)}`;
+      });
+    } else {
+      pts = nums.map((v, i) => {
+        const x = (i / (nums.length - 1)) * W;
+        // Normalise so HIGH values draw NEAR THE TOP (y=0).
+        const y = H - ((v - lo) / range) * H;
+        return `${x.toFixed(2)},${y.toFixed(2)}`;
+      });
+    }
+    const polylinePts = pts.join(' ');
+    const fillAttrs = fillBelow
+      ? `<polygon points="0,${H} ${polylinePts} ${W},${H}" fill="${stroke}" fill-opacity="0.15"/>`
+      : '';
+    return (
+      `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" `
+      + `class="hm-sparkline" role="img" aria-label="trend ${nums.join(', ')}" `
+      + `preserveAspectRatio="none">`
+      + fillAttrs
+      + `<polyline fill="none" stroke="${stroke}" `
+      + `stroke-width="${strokeW}" stroke-linejoin="round" stroke-linecap="round" `
+      + `points="${polylinePts}"/>`
+      + `</svg>`
+    );
+  };
+</script>

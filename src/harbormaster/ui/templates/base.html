@@ -105,6 +105,9 @@
 <script defer src="https://unpkg.com/alpinejs@3"></script>
 {# v16.0.0a1: shared deps + TTL cache helper available to every page. #}
 {% include "_partials/_cached_getter.html" %}
+{# v16.0.0a4: tiny SVG sparkline helper for the N-way reembed
+   comparison panel + future per-cell trend cells. #}
+{% include "_partials/_tiny_sparkline.html" %}
 <!-- v2.1.0a1: project-graph render. ESM build of mermaid 10.9.1 so the
      dashboard can render `/api/graph["mermaid"]` markup on demand
      instead of dumping raw text on the user. -->
