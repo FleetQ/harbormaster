@@ -141,20 +141,59 @@
        aria-hidden="true"></div>
 
   <!-- Sidebar rail. -->
-  <aside :class="mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
-         class="fixed top-[57px] bottom-0 left-0 z-30 w-60 md:w-60 bg-gray-950 border-r border-gray-800 transform transition-transform overflow-y-auto"
+  <aside :class="[
+                  mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+                  railCollapsed ? 'md:w-12' : 'md:w-60',
+                ]"
+         class="fixed top-[57px] bottom-0 left-0 z-30 w-60 bg-gray-950 border-r border-gray-800 transform transition-all overflow-y-auto"
          role="navigation"
          aria-label="Project navigation">
-    <div class="p-3">
+    <div :class="railCollapsed ? 'p-2' : 'p-3'">
+      <!-- v9.0.0a6: rail-collapse toggle. Desktop-only; on mobile the
+           hamburger handles open/closed. -->
+      <div class="hidden md:flex items-center justify-between mb-2">
+        <select x-show="!railCollapsed"
+                x-model="hostFilter"
+                aria-label="Filter projects by host"
+                class="text-[11px] bg-gray-900 border border-gray-800 rounded px-1 py-0.5 text-gray-300 focus:outline-none">
+          <template x-for="h in availableHosts" :key="'host:' + h">
+            <option :value="h" x-text="h === '__all__' ? 'all hosts' : h"></option>
+          </template>
+        </select>
+        <button type="button"
+                @click="toggleRail()"
+                :aria-label="railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+                :aria-expanded="!railCollapsed"
+                class="text-gray-500 hover:text-cyan-400 text-xs px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+          <span aria-hidden="true" x-text="railCollapsed ? '»' : '«'"></span>
+        </button>
+      </div>
+
+      <!-- Rail-collapsed mode: just icons. Click an icon to expand. -->
+      <div x-show="railCollapsed" class="flex flex-col items-center gap-3 mt-2">
+        <button type="button" @click="expandRail()" aria-label="Pinned projects"
+                class="text-amber-400 hover:text-amber-300">
+          <span aria-hidden="true">★</span>
+        </button>
+        <button type="button" @click="expandRail()" aria-label="Recently asked projects"
+                class="text-gray-400 hover:text-cyan-400">
+          <span aria-hidden="true">🕒</span>
+        </button>
+        <button type="button" @click="expandRail()" aria-label="Archived projects"
+                class="text-gray-500 hover:text-gray-300">
+          <span aria-hidden="true">📦</span>
+        </button>
+      </div>
+
       <!-- Search-within-sidebar. -->
-      <input type="text"
+      <input x-show="!railCollapsed" type="text"
              x-model="filter"
              aria-label="Filter projects in sidebar"
              placeholder="Filter projects…"
              class="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:border-cyan-700 focus:outline-none mb-3">
 
       <!-- Pinned. -->
-      <section x-show="visiblePinned().length > 0"
+      <section x-show="!railCollapsed && visiblePinned().length > 0"
                data-sidebar-group="pinned"
                class="mb-3">
         <h3 class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Pinned</h3>
@@ -172,7 +211,7 @@
       </section>
 
       <!-- Recently asked. -->
-      <section x-show="visibleRecent().length > 0"
+      <section x-show="!railCollapsed && visibleRecent().length > 0"
                data-sidebar-group="recent"
                class="mb-3">
         <h3 class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Recently asked</h3>
@@ -189,7 +228,7 @@
       </section>
 
       <!-- By language. -->
-      <section data-sidebar-group="by-language">
+      <section x-show="!railCollapsed" data-sidebar-group="by-language">
         <template x-for="lang in sortedLanguages()" :key="'lang:' + lang">
           <div class="mb-3">
             <button type="button"
@@ -219,13 +258,42 @@
         </template>
       </section>
 
+      <!-- v9.0.0a6: Archived. Projects with last_commit_age_days >= 90.
+           Collapsed by default; click the header to expand. -->
+      <section x-show="!railCollapsed && visibleArchived().length > 0"
+               data-sidebar-group="archived"
+               class="mt-3 mb-3">
+        <button type="button"
+                @click="archivedCollapsed = !archivedCollapsed"
+                :aria-expanded="!archivedCollapsed"
+                aria-label="Toggle archived projects group"
+                class="text-[10px] uppercase tracking-wide text-gray-500 hover:text-gray-300 mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950">
+          <span aria-hidden="true" x-text="archivedCollapsed ? '▸' : '▾'"></span>
+          <span x-text="`Archived (${visibleArchived().length})`"></span>
+        </button>
+        <ul x-show="!archivedCollapsed" class="space-y-0.5">
+          <template x-for="p in visibleArchived()" :key="'archived:' + p.name">
+            <li>
+              <a :href="`/projects/${encodeURIComponent(p.name)}`"
+                 class="flex items-center gap-1.5 text-xs text-gray-500 hover:bg-gray-800/50 hover:text-cyan-300 px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950"
+                 :title="`Last commit: ${p.last_commit_age_days} days ago`">
+                <span aria-hidden="true">📦</span>
+                <span class="truncate" x-text="p.name"></span>
+              </a>
+            </li>
+          </template>
+        </ul>
+      </section>
+
       <p x-show="loading" :aria-hidden="!loading" class="text-xs text-gray-400">loading…</p>
       <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-red-400" x-text="error"></p>
     </div>
   </aside>
 
-  <!-- Main content area, offset for sidebar on desktop. -->
-  <main class="flex-1 px-6 py-6 max-w-7xl mx-auto md:ml-60">
+  <!-- Main content area, offset for sidebar on desktop. v9.0.0a6:
+       offset shrinks to 48px when rail is collapsed. -->
+  <main :class="railCollapsed ? 'md:ml-12' : 'md:ml-60'"
+        class="flex-1 px-6 py-6 max-w-7xl mx-auto transition-[margin]">
     {% block content %}{% endblock %}
   </main>
 </div>
@@ -244,9 +312,16 @@
       mobileOpen: false,
       loading: true,
       error: '',
+      // v9.0.0a6: new state
+      railCollapsed: false,           // localStorage-backed; desktop only
+      archivedCollapsed: true,        // archived group collapsed by default
+      hostFilter: '__all__',          // localStorage-backed; '__all__' = no filter
+      availableHosts: ['__all__', 'local'], // populated from /api/projects' "host" or default
 
       async init() {
         this._loadPersisted();
+        // v9.0.0a6: persist hostFilter on change.
+        this.$watch('hostFilter', () => this._persistHost());
         await Promise.all([this._loadProjects(), this._loadRecent()]);
       },
 
@@ -259,6 +334,14 @@
           const raw = localStorage.getItem('hm:sidebar:lang-collapsed');
           this.languageCollapsed = raw ? JSON.parse(raw) : {};
         } catch (_) { this.languageCollapsed = {}; }
+        // v9.0.0a6
+        try {
+          this.railCollapsed = localStorage.getItem('hm:sidebar:rail-collapsed') === '1';
+        } catch (_) { this.railCollapsed = false; }
+        try {
+          const h = localStorage.getItem('hm:sidebar:host-filter');
+          if (h) this.hostFilter = h;
+        } catch (_) { /* default __all__ */ }
       },
 
       _persistPinned() {
@@ -269,6 +352,17 @@
         try { localStorage.setItem('hm:sidebar:lang-collapsed', JSON.stringify(this.languageCollapsed)); } catch (_) {}
       },
 
+      _persistRail() {
+        try { localStorage.setItem('hm:sidebar:rail-collapsed', this.railCollapsed ? '1' : '0'); } catch (_) {}
+      },
+
+      _persistHost() {
+        try { localStorage.setItem('hm:sidebar:host-filter', this.hostFilter); } catch (_) {}
+      },
+
+      toggleRail() { this.railCollapsed = !this.railCollapsed; this._persistRail(); },
+      expandRail() { if (this.railCollapsed) { this.railCollapsed = false; this._persistRail(); } },
+
       async _loadProjects() {
         try {
           const r = await hmFetch('/api/projects');
@@ -276,6 +370,16 @@
           // /api/projects returns a bare JSON list of project dicts
           // (see src/harbormaster/ui/routes.py).
           this.projects = await r.json();
+          // v9.0.0a6: derive available hosts from the project list when
+          // each project carries a `host` field (multi-host installs).
+          // Locally-discovered projects don't carry one — they default
+          // to the implicit "local". The dropdown always offers
+          // "__all__" + "local"; remote labels appear when present.
+          const hosts = new Set(['__all__', 'local']);
+          for (const p of this.projects) {
+            if (typeof p.host === 'string' && p.host) hosts.add(p.host);
+          }
+          this.availableHosts = Array.from(hosts);
         } catch (e) { this.error = e.message; }
         finally { this.loading = false; }
       },
@@ -322,10 +426,28 @@
         return p.name.toLowerCase().includes(q);
       },
 
+      // v9.0.0a6: per-host filter. Projects without a `host` field are
+      // treated as 'local'. '__all__' always passes.
+      _matchesHost(p) {
+        if (this.hostFilter === '__all__') return true;
+        const host = p.host || 'local';
+        // Persist host filter on read so we don't have to wire @change
+        // handlers everywhere — Alpine watches the bound x-model and
+        // re-evaluates these methods on input changes anyway.
+        return host === this.hostFilter;
+      },
+
+      _isArchived(p) {
+        return typeof p.last_commit_age_days === 'number'
+          && p.last_commit_age_days >= 90;
+      },
+
       visiblePinned() {
         return this.projects
           .filter(p => this.isPinned(p.name))
-          .filter(p => this._matchesFilter(p));
+          .filter(p => this._matchesFilter(p))
+          .filter(p => this._matchesHost(p))
+          .filter(p => !this._isArchived(p));
       },
 
       visibleRecent() {
@@ -333,7 +455,20 @@
         return this.recentProjects
           .filter(name => !pinnedSet.has(name))
           .map(name => this.projects.find(p => p.name === name))
-          .filter(p => p && this._matchesFilter(p));
+          .filter(p => p && this._matchesFilter(p) && this._matchesHost(p)
+                       && !this._isArchived(p));
+      },
+
+      // v9.0.0a6: archived = last commit >= 90 days ago. Distinct from
+      // the language groups (archived projects are excluded from those
+      // lists too, so a project doesn't appear twice).
+      visibleArchived() {
+        const pinnedSet = new Set(this.pinned);
+        return this.projects
+          .filter(p => this._isArchived(p))
+          .filter(p => !pinnedSet.has(p.name))
+          .filter(p => this._matchesFilter(p))
+          .filter(p => this._matchesHost(p));
       },
 
       projectsByLanguage() {
@@ -341,6 +476,10 @@
         const pinnedSet = new Set(this.pinned);
         for (const p of this.projects) {
           if (pinnedSet.has(p.name)) continue;
+          // v9.0.0a6: exclude archived from the by-language groups so
+          // they only appear in the Archived section.
+          if (this._isArchived(p)) continue;
+          if (!this._matchesHost(p)) continue;
           const lang = p.language || 'unknown';
           (groups[lang] = groups[lang] || []).push(p);
         }
@@ -528,20 +667,55 @@
       },
 
       updateResults() {
-        const q = (this.query || '').trim().toLowerCase();
+        const rawQuery = (this.query || '').trim();
+        const q = rawQuery.toLowerCase();
         const all = this.projects.concat(this._tools);
+
+        // v9.0.0a6: dynamic-action — `Ask <project> <question>` directly
+        // composes an ask without leaving the palette. Match the prefix
+        // case-insensitively, then look up the project name in our
+        // discovered list (case-insensitive). The remainder is the
+        // question text (must be non-empty for the action to fire).
+        let dynamicResults = [];
+        const askMatch = rawQuery.match(/^ask\s+(\S+)\s+(.+)$/i);
+        if (askMatch) {
+          const projectName = askMatch[1];
+          const question = askMatch[2].trim();
+          const project = this.projects.find(
+            p => p.label.toLowerCase() === projectName.toLowerCase()
+          );
+          if (project && question) {
+            dynamicResults.push({
+              kind: 'dynamic-action',
+              id: 'ask:' + project.id + ':' + question.slice(0, 40),
+              category: 'Action',
+              label: `Ask ${project.id}: ${question}`,
+              shortcut: '↵ to dispatch',
+              action: () => {
+                // Navigate to the project page with a pre-filled question.
+                const url = '/projects/' + encodeURIComponent(project.id)
+                  + '?q=' + encodeURIComponent(question);
+                window.location.href = url;
+              },
+            });
+          }
+        }
+
         if (!q) {
           // Empty query: show top tools first, then the first 10 projects.
           const tools = this._tools.slice(0, 6);
           const projects = this.projects.slice(0, 10);
-          this.results = tools.concat(projects);
+          this.results = dynamicResults.concat(tools).concat(projects);
         } else {
-          this.results = all
+          const scored = all
             .map(item => ({ item, score: this._score(q, item.label.toLowerCase()) }))
             .filter(x => x.score > 0)
             .sort((a, b) => b.score - a.score)
             .slice(0, 20)
             .map(x => x.item);
+          // Dynamic actions always lead — they're the user's literal
+          // intent, scored matches are best-effort suggestions.
+          this.results = dynamicResults.concat(scored);
         }
         this.selectedIndex = 0;
       },
