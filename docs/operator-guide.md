@@ -18,6 +18,10 @@ If you're just trying it out for the first time, start with the
 6. [Upgrades](#6-upgrades)
 7. [Troubleshooting](#7-troubleshooting)
 8. [systemd / launchd integration](#8-systemd--launchd-integration)
+9. [Daily operator workflows](#9-daily-operator-workflows)
+10. [Budgets and rate limits](#10-budgets-and-rate-limits)
+11. [The `config check` CLI](#11-the-config-check-cli)
+12. [Pre-commit hooks for downstream forks](#12-pre-commit-hooks-for-downstream-forks)
 
 ---
 
@@ -335,7 +339,157 @@ kicked by a system-context "kicker" job.
 
 ---
 
+## 9. Daily operator workflows
+
+The web UI (`harbormaster-ui --port 7531`) is the primary daily
+surface. Each section below names the URL, the underlying API, and
+the alpha that introduced the surface so you can cross-reference
+the [CHANGELOG](../CHANGELOG.md) for behaviour changes.
+
+### Run an ask against a single project
+
+`/projects/<name>` → "Ask this project" form (v2.1.0a4). Submits to
+`POST /api/ask` with SSE streaming back into the page. The same
+form lives inline on every dashboard project card (v3.0.0a7). For
+a non-UI run:
+
+```bash
+curl -N -X POST http://127.0.0.1:7531/mcp/harbormaster \
+  -H "Authorization: Bearer $HARBORMASTER_UI_TOKEN" \
+  -H 'Accept: text/event-stream' \
+  -H 'Content-Type: application/json' \
+  -d '{"method":"tools/call","params":{"name":"ask_project","arguments":{"name":"alpha","question":"summarize"}}}'
+```
+
+### Fan out to many projects
+
+Dashboard "Fan-out" form (v2.1.0a5) or `fan_out_ask(...)` MCP tool.
+Streams a section per target as each completes; one row per target
+with a state badge that flips ready → in-flight → completed →
+failed (using the unified `stateBadge` helper, v11.0.0a4 / a-migration
+v12.0.0a2).
+
+### Recall prior Q&A
+
+`/recall?q=...` (URL pre-fillable, v4.0.0a2 + v11.0.0a4). Calls
+`recall_qa` against the local Q&A history (or `host="all"` for
+cross-host aggregation, v2.0 + v3.0.0a4 thread pool). Disabled by
+default — set `[history] enabled = true` in your config TOML to
+populate the database, then ask a few questions to seed it.
+
+### Browse the inter-project network graph
+
+`/network` (v10.0.0a7). Live SSE-driven graph of MCP calls between
+projects. Filter by host / project / tool / window from the toolbar;
+toggle graph ↔ chat-list view (v10.0.0a8). Aggregate stats for the
+current window are at `GET /api/network/stats?window=…` (v11.0.0a6).
+
+The graph survives daemon restarts — backed by
+`~/.harbormaster/network_log.db` (v11.0.0a1).
+
+### Open the dispatcher trace
+
+`/dispatcher` (v9.0.0a3 → v17.0.0a1 renderer). Live waterfall of
+in-flight + last-100 completed spans. Click a span to expand
+attributes (or hover for the v18.0.0a2 tooltip). Both `claude` and
+`codex` backends emit child spans for the model's own tool use.
+
+### Edit a memory file
+
+`/projects/<name>` → memories tab (v10.0.0a5 / a6). Allowlist:
+per-project `CLAUDE.md` + `.serena/memories/*.md` only. Toggle
+`History` to see the last 20 revisions; pick two and side-by-side
+HTML diff renders (v14.0.0a3). Cmd+Z undoes (v14.0.0a5); the chip
+editor (v15.0.0a1) manages tags inline.
+
+### Run a pre-flight check on your config
+
+```bash
+harbormaster-mcp config check
+# or, for a specific file:
+harbormaster-mcp config check --config ~/.config/harbormaster/config.toml
+```
+
+(See [§11](#11-the-config-check-cli) for output format and exit
+codes.)
+
+---
+
+## 10. Budgets and rate limits
+
+Three independent daily call-budget axes; the **tightest cap wins**
+per incoming MCP call. All three are opt-in (omit a key → no cap on
+that axis).
+
+| Axis | Config TOML | Endpoint | Version |
+|---|---|---|---|
+| Per-host | `[hosts.<host>] daily_call_budget = 200` | `GET /api/hosts/budget` | v14.0.0a4 |
+| Per-tool | `[budget] daily_call_budget_per_tool = { ask_project = 200, … }` | `GET /api/tools/budget` | v15.0.0a4 |
+| Per-project | `[hosts.<host>.projects.<project>] daily_call_budget = 50` | `GET /api/projects/budget?host=…` | v16.0.0a5 |
+
+The dashboard KPI strip surfaces today's headroom for each axis plus
+the tightest-cap value (with a hover tooltip showing which axis is
+the bottleneck — v17.0.0a4).
+
+When a call hits the cap, the daemon returns an MCP error with a
+`budget_exceeded` code naming the axis. Reset is at midnight in the
+host's local timezone.
+
+---
+
+## 11. The `config check` CLI
+
+`harbormaster-mcp config check` (v14.0.0a2) loads the config the
+same way the daemon does, validates against the Pydantic schema,
+and prints either:
+
+- a green `OK` summary listing each section + key count, or
+- a structured error report with file path, section, key, and the
+  Pydantic violation message.
+
+Exit code 0 on OK, 2 on validation failure. Use it as a pre-flight
+in your deployment script:
+
+```bash
+harbormaster-mcp config check --config /etc/harbormaster/config.toml \
+  || { echo "config invalid — refusing to start"; exit 1; }
+```
+
+The same check runs in the `harbormaster-config-check` pre-commit
+hook against `examples/harbormaster.toml` (v15.0.0a5) so the
+example never drifts from the real schema.
+
+---
+
+## 12. Pre-commit hooks for downstream forks
+
+If you fork or extend Harbormaster, install the repo-local hooks
+once after `uv sync`:
+
+```bash
+uv sync --extra dev
+bash scripts/post_sync_install_hooks.sh
+```
+
+The hooks (also referenced from the README):
+
+- **`harbormaster-config-check`** — validates `examples/harbormaster.toml`
+  on every commit.
+- **`harbormaster-config-doc-parity`** — fails the commit if a Pydantic
+  field is added to `src/harbormaster/config.py` without a matching
+  mention in [`operator-config-reference.md`](operator-config-reference.md).
+  On failure the hook emits a paste-ready markdown stanza for the
+  field.
+
+Both hooks are fast (<1 s each) and run on every `git commit`.
+
+---
+
 For architectural details (module layout, data flow, threading
 model), see [`architecture-harbormaster.md`](architecture-harbormaster.md).
 For the long-form design rationale, see
 [`design-harbormaster.md`](design-harbormaster.md).
+For the canonical TOML schema reference, see
+[`operator-config-reference.md`](operator-config-reference.md).
+For the user-facing release history, see
+[`../CHANGELOG.md`](../CHANGELOG.md).
