@@ -131,9 +131,17 @@
          class="text-xs text-red-400 mb-2" x-text="saveError"></p>
       <div x-show="selected && !editing" class="prose prose-invert prose-sm max-w-none"
            x-html="rendered"></div>
-      <textarea x-show="editing" x-model="draft"
-                aria-label="Memory file source"
-                class="w-full min-h-[20rem] bg-gray-950 border border-gray-700 rounded p-2 text-xs font-mono text-gray-200"></textarea>
+      <!-- v11.0.0a3: split-pane editor with live (debounced) preview.
+           Raw markdown left, sanitised HTML right. -->
+      <div x-show="editing" class="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <textarea x-model="draft"
+                  @input.debounce.300ms="updatePreview()"
+                  aria-label="Memory file source"
+                  class="w-full min-h-[20rem] bg-gray-950 border border-gray-700 rounded p-2 text-xs font-mono text-gray-200"></textarea>
+        <div class="prose prose-invert prose-sm max-w-none border border-gray-800 rounded p-2 bg-gray-950/40 min-h-[20rem] overflow-auto"
+             aria-live="polite" aria-label="Live preview"
+             x-html="previewHtml"></div>
+      </div>
       <!-- v11.0.0a2: revision history panel -->
       <aside x-show="showHistory" class="mt-3 border-t border-gray-800 pt-3">
         <p class="text-xs text-gray-400 mb-2">Revision history (newest first)</p>
@@ -227,6 +235,8 @@
       historyError: '',
       revisionPreview: '',
       revisionPreviewId: null,
+      // v11.0.0a3: live markdown preview state
+      previewHtml: '',
 
       _fileUrl(filename) {
         return `/api/projects/${encodeURIComponent(this.project)}/memories/`
@@ -249,20 +259,36 @@
         this.editing = false;
         this.saveError = '';
         this.rendered = '<p class="text-xs text-gray-500">loading…</p>';
+        // v11.0.0a3: prefer server-side bleach-sanitised HTML via
+        // ?render=html. Falls back to the v10 client-side marked.js
+        // path when the endpoint is unavailable (older deploys).
         try {
-          const r = await hmFetch(this._fileUrl(f.name));
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          const text = await r.text();
-          this.draft = text;
-          if (window.marked && typeof window.marked.parse === 'function') {
-            this.rendered = window.marked.parse(text);
-          } else {
-            const escaped = text
-              .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            this.rendered = `<pre class="whitespace-pre-wrap text-xs">${escaped}</pre>`;
+          const r = await hmFetch(this._fileUrl(f.name) + '?render=html');
+          if (r.ok) {
+            this.rendered = await r.text();
+            // We still need raw text for the editor draft.
+            const raw = await hmFetch(this._fileUrl(f.name));
+            this.draft = raw.ok ? await raw.text() : '';
+            return;
           }
+          throw new Error('HTTP ' + r.status);
         } catch (e) {
-          this.rendered = `<p class="text-xs text-red-400">failed: ${e.message}</p>`;
+          // Fallback: raw fetch + client-side render.
+          try {
+            const r = await hmFetch(this._fileUrl(f.name));
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const text = await r.text();
+            this.draft = text;
+            if (window.marked && typeof window.marked.parse === 'function') {
+              this.rendered = window.marked.parse(text);
+            } else {
+              const escaped = text
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+              this.rendered = `<pre class="whitespace-pre-wrap text-xs">${escaped}</pre>`;
+            }
+          } catch (e2) {
+            this.rendered = `<p class="text-xs text-red-400">failed: ${e2.message}</p>`;
+          }
         }
       },
 
@@ -270,6 +296,10 @@
         if (!this.selected) return;
         this.editing = true;
         this.saveError = '';
+        // v11.0.0a3: prime the preview pane with the current content
+        // so the operator sees rendered output immediately, not a
+        // blank pane until the first keystroke.
+        this.updatePreview();
       },
 
       cancelEdit() {
@@ -279,6 +309,24 @@
         // if changed locally; the next select() refreshes from disk).
         if (this.selected && window.marked) {
           this.rendered = window.marked.parse(this.draft || '');
+        }
+      },
+
+      // v11.0.0a3: live preview — POST current draft to the
+      // server-side render endpoint (bleach-sanitised HTML).
+      async updatePreview() {
+        if (!this.editing) return;
+        try {
+          const r = await hmFetch('/api/render-markdown', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: this.draft || '' }),
+          });
+          if (r.ok) {
+            this.previewHtml = await r.text();
+          }
+        } catch (_) {
+          // Best-effort; leave the previous preview in place.
         }
       },
 
@@ -300,8 +348,9 @@
           this.editing = false;
           // Refresh the file list to pick up new size/mtime.
           await this.load();
-          // Re-render the new content.
-          if (window.marked) this.rendered = window.marked.parse(this.draft);
+          // v11.0.0a3: re-render via server-side bleach-safe path so
+          // the post-save view matches what other clients will see.
+          await this.select(this.selected);
         } catch (e) {
           this.saveError = 'save failed: ' + e.message;
         } finally {

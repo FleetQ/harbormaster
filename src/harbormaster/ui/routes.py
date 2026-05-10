@@ -1115,7 +1115,7 @@ def register_routes(
 
     @app.get("/api/projects/{name}/memories/{file_token:path}")
     async def get_project_memory(
-        name: str, file_token: str,
+        name: str, file_token: str, render: str | None = None,
     ) -> Response:
         from harbormaster.projects import resolve_project as _resolve_project
         from harbormaster.projects import (
@@ -1152,7 +1152,37 @@ def register_routes(
         except OSError as exc:
             raise HTTPException(500, "read failed") from exc
 
+        # v11.0.0a3: optional server-side render. `?render=html` returns
+        # bleach-sanitised HTML so callers can drop the result straight
+        # into the DOM without needing marked.js or trusting the source.
+        if render == "html":
+            from harbormaster.ui.markdown import render_safe
+            html = render_safe(text)
+            return Response(
+                content=html,
+                media_type="text/html; charset=utf-8",
+            )
+
         return Response(content=text, media_type="text/markdown; charset=utf-8")
+
+    # ----- v11.0.0a3: live markdown preview ---------------------------
+    # POST /api/render-markdown — accepts {text: <raw markdown>} and
+    # returns sanitised HTML. Powers the editor's split-pane preview
+    # (300ms debounce on the front end).
+
+    class _RenderMarkdownBody(BaseModel):
+        text: str = Field(default="")
+
+    @app.post("/api/render-markdown")
+    async def render_markdown_endpoint(
+        body: _RenderMarkdownBody,
+    ) -> Response:
+        from harbormaster.ui.markdown import render_safe
+        html = render_safe(body.text)
+        return Response(
+            content=html,
+            media_type="text/html; charset=utf-8",
+        )
 
     # ----- v11.0.0a2: per-file memory revision history -----------------
     # `GET /api/projects/{name}/memory-history?file=<token>` — returns
