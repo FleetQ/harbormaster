@@ -196,6 +196,21 @@ class NetworkStore:
         )
         self._conn.commit()
 
+    def set_max_rows(self, max_rows: int) -> None:
+        """v12.0.0a3: operator-configurable cap.
+
+        Updates `_max_rows` and immediately prunes so a tightened cap
+        takes effect on the very next `recent()` call instead of
+        waiting for the next PRUNE_EVERY-th insert. Loosening the cap
+        is also safe — no rows are touched on the prune call when the
+        existing row count is below the new ceiling.
+        """
+        if max_rows <= 0:
+            raise ValueError("max_rows must be > 0")
+        with self._lock:
+            self._max_rows = max_rows
+            self._prune_locked()
+
     def recent(self, limit: int | None = None) -> list[NetworkEvent]:
         """Return events in chronological (ASC) order, mirroring v10's
         deque-based ring buffer behaviour. When `limit` is set, returns

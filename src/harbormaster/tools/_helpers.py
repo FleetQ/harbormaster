@@ -380,9 +380,22 @@ def _maybe_record_qa(
         logger.exception("history record failed; swallowing")
     finally:
         try:
+            # v12.0.0a3: `[retention]` overrides the [history] caps
+            # when set, so all retention knobs can live in one place.
+            # Default `None` preserves the historical [history] values.
+            recent_k = (
+                config.retention.qa_log_recent_k
+                if config.retention.qa_log_recent_k is not None
+                else config.history.retain_recent_k
+            )
+            top_r = (
+                config.retention.qa_log_top_recalled_r
+                if config.retention.qa_log_top_recalled_r is not None
+                else config.history.retain_top_recalled_r
+            )
             store.prune(
-                retain_recent_k=config.history.retain_recent_k,
-                retain_top_recalled_r=config.history.retain_top_recalled_r,
+                retain_recent_k=recent_k,
+                retain_top_recalled_r=top_r,
             )
         except Exception:
             logger.exception("history prune failed; swallowing")

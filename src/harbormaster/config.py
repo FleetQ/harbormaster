@@ -157,6 +157,30 @@ class HistoryConfig(BaseModel):
     optimistic_stale_seconds: int = Field(default=5, gt=0, le=600)
 
 
+class RetentionConfig(BaseModel):
+    """v12.0.0a3: operator-configurable retention caps for the UI's
+    persistent stores. Hard-coded defaults from v11 are preserved when
+    the operator doesn't set anything.
+
+    - `network_log_max_rows`: rolling cap on `mcp_calls` rows in
+      `~/.harbormaster/network_log.db`. v11 hard-coded 5000.
+    - `memory_revisions_per_file`: rolling cap on revisions per
+      (project, file) tuple in `memory_revisions.db`. v11 hard-coded 20.
+    - `qa_log_recent_k` / `qa_log_top_recalled_r`: surface the existing
+      `[history] retain_recent_k` / `retain_top_recalled_r` here too
+      so all retention knobs live in one section. When set, these
+      override the values in `[history]` for the QAStore.prune call.
+      Default `None` (use the [history] values unchanged).
+    """
+
+    model_config = _FORBID_EXTRA
+
+    network_log_max_rows: int = Field(default=5000, gt=0)
+    memory_revisions_per_file: int = Field(default=20, gt=0)
+    qa_log_recent_k: int | None = Field(default=None, gt=0)
+    qa_log_top_recalled_r: int | None = Field(default=None, gt=0)
+
+
 class PluginsConfig(BaseModel):
     """v2.0.0a4 — entry-point plugin discovery config."""
 
@@ -207,6 +231,9 @@ class HarbormasterConfig(BaseModel):
     fleetq: FleetQConfig = Field(default_factory=FleetQConfig)
     history: HistoryConfig = Field(default_factory=HistoryConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
+    # v12.0.0a3: surfaces the previously hard-coded retention caps so
+    # large deployments can crank them up without recompiling.
+    retention: RetentionConfig = Field(default_factory=RetentionConfig)
 
 
 def _expand(p: str) -> Path:

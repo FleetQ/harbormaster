@@ -154,6 +154,28 @@ class MemoryRevisionsStore:
         )
         self._conn.commit()
 
+    def set_max_per_file(self, max_per_file: int) -> None:
+        """v12.0.0a3: operator-configurable per-file cap.
+
+        Updates `_max_per_file` and prunes every distinct
+        (project, file) tuple under the new cap so a tightened limit
+        takes effect immediately. Loosening is safe — `_prune_locked`
+        is a no-op when row count is below the cap.
+        """
+        if max_per_file <= 0:
+            raise ValueError("max_per_file must be > 0")
+        with self._lock:
+            self._max_per_file = max_per_file
+            cursor = self._conn.execute(
+                "SELECT DISTINCT project, file FROM memory_revisions",
+            )
+            tuples = cursor.fetchall()
+        # _prune_locked acquires the lock itself per call; iterate
+        # outside the lock so SQLite isn't held over many DELETEs.
+        for project, file in tuples:
+            with self._lock:
+                self._prune_locked(str(project), str(file))
+
     def history(self, project: str, file: str) -> list[MemoryRevision]:
         """Return revisions descending by id (newest first), WITHOUT
         the `content` payload — that's a separate fetch via

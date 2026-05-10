@@ -52,5 +52,14 @@ def create_app(
     from harbormaster.ui.manifest_cache import language_badge_class
 
     templates.env.filters["language_badge"] = language_badge_class
+    # v12.0.0a3: apply operator-configured retention caps to the
+    # module-level singleton stores. Defaults match the v11
+    # hard-coded values, so this is a no-op when the operator hasn't
+    # set [retention] in their config.
+    from harbormaster.ui.memory_revisions import memory_revisions
+    from harbormaster.ui.network_log import network_log
+
+    network_log.set_max_rows(config.retention.network_log_max_rows)
+    memory_revisions.set_max_per_file(config.retention.memory_revisions_per_file)
     register_routes(app, templates, config, mcp=mcp, auth_token=auth_token)
     return app
