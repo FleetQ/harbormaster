@@ -124,7 +124,8 @@
      Filter state is mirrored to the URL so an operator can share /
      bookmark a filtered view. #}
   <div class="flex flex-wrap items-end gap-2 mb-3 text-xs"
-       data-filter-controls>
+       data-filter-controls
+       data-tour-step="network-filter">
     <div class="flex flex-col gap-0.5">
       <label class="text-foreground-subtle" :for="$id('hm-net-filter-tool')">tool</label>
       <select :id="$id('hm-net-filter-tool')" x-model="filters.tool"
@@ -189,6 +190,7 @@
   <!-- Graph view -->
   <div x-show="view === 'graph' && events.length > 0"
        id="hm-network-graph"
+       data-tour-step="network-graph"
        class="border border-border rounded bg-surface-1"
        style="width: 100%; height: 60vh;"></div>
 
@@ -247,7 +249,8 @@
         Event density —
         <span x-text="timelineWindow === '1h' ? 'last hour (1-min buckets)' : 'last 24h (1-hour buckets)'"></span>
       </span>
-      <div class="flex items-center gap-1" role="group" aria-label="Timeline window">
+      <div class="flex items-center gap-1" role="group" aria-label="Timeline window"
+           data-tour-step="network-timeline">
         <button type="button"
                 @click="timelineWindow = '1h'"
                 :aria-pressed="timelineWindow === '1h'"
@@ -700,4 +703,134 @@
     };
   }
 </script>
+
+{# v16.0.0a3: network page tour wizard (carry-over #8). Three-step
+   walkthrough on first /network visit, gated by localStorage
+   `hm-network-tour-completed`. Anchors via `data-tour-step="network-*"`
+   markup attrs (carry-over #6) — resilient to template refactors. #}
+<div x-data="networkTour()"
+     x-init="maybeStart()"
+     x-show="active"
+     x-cloak
+     class="fixed inset-0 z-50 pointer-events-none"
+     role="dialog"
+     :aria-label="`Network tour step ${stepIndex + 1} of ${steps.length}`">
+  <div class="absolute inset-0 bg-gray-950/40 pointer-events-auto"
+       @click="next()"></div>
+  <div x-show="anchorRect"
+       :style="`top: ${popoverTop}px; left: ${popoverLeft}px;`"
+       class="absolute pointer-events-auto bg-surface-2 border border-accent-strong rounded-lg p-4 shadow-2xl max-w-sm">
+    <header class="flex items-center justify-between mb-2 gap-2">
+      <span class="text-[10px] uppercase tracking-wide text-accent"
+            x-text="`Step ${stepIndex + 1} of ${steps.length}`"></span>
+      <button type="button" @click="dismiss()"
+              aria-label="Skip network tour"
+              class="text-xs text-foreground-muted hover:text-danger">
+        Skip
+      </button>
+    </header>
+    <h3 class="text-sm font-bold text-foreground mb-1"
+        x-text="currentStep().title"></h3>
+    <p class="text-xs text-foreground-muted mb-3"
+       x-text="currentStep().body"></p>
+    <div class="flex items-center justify-between gap-2">
+      <button type="button" @click="prev()"
+              :disabled="stepIndex === 0"
+              aria-label="Previous step"
+              class="text-xs px-2 py-1 rounded border border-border text-foreground-muted hover:text-accent disabled:opacity-30">
+        Back
+      </button>
+      <button type="button" @click="next()"
+              aria-label="Next step"
+              class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent">
+        <span x-text="stepIndex === steps.length - 1 ? 'Done' : 'Next'"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function networkTour() {
+    return {
+      active: false,
+      stepIndex: 0,
+      anchorRect: null,
+      // 3 steps from the v16.0.0a3 brief.
+      steps: [
+        {
+          tourStep: 'network-graph',
+          title: 'Graph view',
+          body: 'Cytoscape renders every observed MCP call between operator → harbormaster → backends → projects. Hover edges to see counts; the layout re-fits whenever you flip back to graph view.',
+        },
+        {
+          tourStep: 'network-filter',
+          title: 'Filter dropdown',
+          body: 'Narrow the events table by tool, source, or time range. Filter state mirrors into the URL hash so you can share or bookmark a filtered view.',
+        },
+        {
+          tourStep: 'network-timeline',
+          title: 'Timeline toggle',
+          body: 'Switch between 1-hour (1-min buckets) and 24-hour (1-hour buckets) windows for the event-density chart. SSE pushes refresh the chart at most once per second.',
+        },
+      ],
+      currentStep() { return this.steps[this.stepIndex] || {}; },
+      maybeStart() {
+        try {
+          const params = new URLSearchParams(location.search);
+          const force = params.get('tour') === '1';
+          const done = localStorage.getItem('hm-network-tour-completed') === '1';
+          if (!force && done) return;
+          requestAnimationFrame(() => this.start());
+        } catch (_) { /* localStorage may be disabled */ }
+      },
+      start() {
+        this.active = true;
+        this.stepIndex = 0;
+        this._positionPopover();
+      },
+      next() {
+        if (this.stepIndex >= this.steps.length - 1) {
+          this.complete();
+          return;
+        }
+        this.stepIndex += 1;
+        this._positionPopover();
+      },
+      prev() {
+        if (this.stepIndex === 0) return;
+        this.stepIndex -= 1;
+        this._positionPopover();
+      },
+      dismiss() {
+        this.active = false;
+        // Don't mark "completed" on skip — operator may want to retry.
+      },
+      complete() {
+        this.active = false;
+        try { localStorage.setItem('hm-network-tour-completed', '1'); } catch (_) {}
+      },
+      _positionPopover() {
+        const step = this.currentStep();
+        if (!step.tourStep) { this.anchorRect = null; return; }
+        const el = document.querySelector(`[data-tour-step="${step.tourStep}"]`);
+        if (!el) { this.anchorRect = null; return; }
+        const r = el.getBoundingClientRect();
+        this.anchorRect = { top: r.top, left: r.left, width: r.width, height: r.height };
+      },
+      get popoverTop() {
+        if (!this.anchorRect) return 0;
+        const t = this.anchorRect.top + this.anchorRect.height + 12;
+        return Math.max(12, Math.min(t, window.innerHeight - 200));
+      },
+      get popoverLeft() {
+        if (!this.anchorRect) return 0;
+        const w = 360;
+        let l = this.anchorRect.left + (this.anchorRect.width / 2) - (w / 2);
+        l = Math.max(12, Math.min(l, window.innerWidth - w - 12));
+        return l;
+      },
+    };
+  }
+</script>
+
 {% endblock %}

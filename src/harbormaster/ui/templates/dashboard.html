@@ -62,7 +62,8 @@
          aria-label="Dashboard at-a-glance metrics"
          class="mb-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
   <div class="border border-border rounded-lg p-3 bg-gray-900/40"
-       data-kpi-cell="projects">
+       data-kpi-cell="projects"
+       data-tour-step="kpi-strip">
     <p class="text-[10px] uppercase tracking-wide text-foreground-muted">Projects</p>
     <p class="text-2xl font-bold text-foreground"
        x-text="kpi.projects ?? '—'"
@@ -654,8 +655,9 @@
             class="text-sm font-bold text-foreground-muted uppercase tracking-wide mb-2 mt-2 border-b border-border pb-1"
             x-text="g.label"></h3>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <template x-for="p in g.items" :key="p.path">
+          <template x-for="(p, idx) in g.items" :key="p.path">
       <article x-data="{ askExpanded: false }"
+               :data-tour-step="idx === 0 ? 'memories' : null"
                class="border border-border rounded-lg p-4 hover:border-accent-strong transition bg-gray-900/40">
         <header class="flex items-baseline justify-between mb-2 gap-2">
           <h3 class="font-bold text-accent truncate">
@@ -694,6 +696,7 @@
              is identical between the two surfaces (v3.0.0a7). -->
         <section x-show="askExpanded" x-cloak
                  x-data="askForm({ project: p.name, host: 'local' })"
+                 data-tour-step="ask-form"
                  class="mt-3 border-t border-border pt-3">
           <form @submit.prevent="ask()">
             <textarea x-model="question" rows="2" required minlength="3"
@@ -1890,30 +1893,40 @@
       active: false,
       stepIndex: 0,
       anchorRect: null,
-      // 5-step plan from the v15.0.0a6 brief.
+      // v16.0.0a3: tour anchors moved to explicit `data-tour-step`
+      // markup attrs (carry-over #6). Each step now lists the
+      // tour-step name first; the v15.a6 fallback selector stays as
+      // a `legacy` field so a template refactor that drops the
+      // attr falls through to the old selector instead of silently
+      // breaking the step. _findAnchor() picks the data-attr first.
       steps: [
         {
-          selector: '[data-kpi-cell="projects"]',
+          tourStep: 'kpi-strip',
+          legacy: '[data-kpi-cell="projects"]',
           title: 'KPI strip',
           body: 'The top strip surfaces the live operator KPIs — projects discovered, active embeds, recent queries, bridge state, and host budget usage.',
         },
         {
-          selector: '#hm-sidebar',
+          tourStep: 'sidebar',
+          legacy: '#hm-sidebar',
           title: 'Project sidebar',
           body: 'Every discovered project lives in the sidebar. Pin the ones you use most; collapsed state persists across reloads.',
         },
         {
-          selector: 'section[x-data^="askForm"]',
+          tourStep: 'ask-form',
+          legacy: 'section[x-data^="askForm"]',
           title: 'Ask form',
           body: 'Send a question to any project (or host) without leaving the dashboard. Streams the answer back via SSE.',
         },
         {
-          selector: '[x-data="commandPalette()"]',
+          tourStep: 'palette',
+          legacy: '[x-data="commandPalette()"]',
           title: 'Command palette',
           body: 'Press Cmd+K (Mac) or Ctrl+K (Linux/Win) to open the palette. Fuzzy-search every project, host, and dashboard view.',
         },
         {
-          selector: 'section[x-data^="memoriesPanel"], a[href*="/projects/"]',
+          tourStep: 'memories',
+          legacy: 'section[x-data^="memoriesPanel"], a[href*="/projects/"]',
           title: 'Memories',
           body: 'Each project carries its own CLAUDE.md + Serena memories. Click any project from the grid to open the per-project view, then edit memories inline.',
         },
@@ -1958,11 +1971,24 @@
         this.active = false;
         try { localStorage.setItem('hm-tour-completed', '1'); } catch (_) {}
       },
+      // v16.0.0a3: anchor lookup prefers `[data-tour-step="..."]`
+      // (resilient to template refactors), falling back to the
+      // pre-v16 querySelector when the step exposes a `legacy`
+      // selector. Returns the first matched element, or null.
+      _findAnchor(step) {
+        if (step.tourStep) {
+          const el = document.querySelector(`[data-tour-step="${step.tourStep}"]`);
+          if (el) return el;
+        }
+        if (step.legacy) {
+          const el = document.querySelector(step.legacy);
+          if (el) return el;
+        }
+        return null;
+      },
       _positionPopover() {
-        const sel = this.currentStep().selector;
-        if (!sel) { this.anchorRect = null; return; }
-        // querySelector handles comma-separated selectors — first match wins.
-        const el = document.querySelector(sel);
+        const step = this.currentStep();
+        const el = this._findAnchor(step);
         if (!el) { this.anchorRect = null; return; }
         const r = el.getBoundingClientRect();
         this.anchorRect = { top: r.top, left: r.left, width: r.width, height: r.height };
