@@ -1790,13 +1790,38 @@ def register_routes(
 
     class _RenderMarkdownBody(BaseModel):
         text: str = Field(default="")
+        # v15.0.0a6: optional project context — when set, the per-project
+        # `<project>/.harbormaster.toml` `[markdown] strict` value is
+        # honoured (falling through to the global `[markdown]` setting).
+        project: str | None = Field(default=None)
 
     @app.post("/api/render-markdown")
     async def render_markdown_endpoint(
         body: _RenderMarkdownBody,
     ) -> Response:
-        from harbormaster.ui.markdown import render_safe
-        html = render_safe(body.text)
+        from harbormaster.ui.markdown import render_safe, resolve_markdown_strict
+
+        # v15.0.0a6: per-project markdown strict resolution.
+        # No project context → use the global value. Unknown project
+        # name → silently fall through to the global value (operator-
+        # side feature, never block rendering).
+        project_path = None
+        if body.project:
+            from harbormaster.projects import find_project_path
+
+            try:
+                project_path = find_project_path(
+                    body.project,
+                    config.projects,
+                    ignore_patterns=list(config.ignore.patterns),
+                )
+            except Exception:
+                project_path = None
+        strict = resolve_markdown_strict(
+            project_path=project_path,
+            global_strict=config.markdown.strict,
+        )
+        html = render_safe(body.text, strict=strict)
         return Response(
             content=html,
             media_type="text/html; charset=utf-8",

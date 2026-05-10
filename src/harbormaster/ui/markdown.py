@@ -54,6 +54,16 @@ _ALLOWED_TAGS: frozenset[str] = frozenset({
     "section",  # v12.0.0a4: footnote container emitted by markdown-it
 })
 
+# v15.0.0a6: extra tags allowed when [markdown] strict = false.
+# Strict superset; protocols + attributes + script-injection rails
+# stay unchanged.
+_NON_STRICT_EXTRA_TAGS: frozenset[str] = frozenset({
+    "span",       # inline grouping
+    "kbd",        # keyboard input
+    "mark",       # highlighted text
+    "figure", "figcaption",  # figure semantics
+})
+
 _ALLOWED_ATTRIBUTES: dict[str, list[str]] = {
     "a": ["href", "title", "class", "id"],  # v12.0.0a4: footnote-ref / -backref classes + id targets
     "code": ["class"],
@@ -73,15 +83,29 @@ _ALLOWED_ATTRIBUTES: dict[str, list[str]] = {
 _ALLOWED_PROTOCOLS: list[str] = ["http", "https", "mailto"]
 
 
-# Module-scope MarkdownIt instance — cheap to reuse, the parser is
-# stateless across `render` calls.
+# Module-scope MarkdownIt instances — cheap to reuse, the parsers are
+# stateless across `render` calls. v15.0.0a6: a second instance with
+# `html=True` is used when [markdown] strict = false so operators can
+# embed `<span>`, `<kbd>`, `<mark>`, `<figure>`, `<figcaption>` inline.
+# Bleach still strips anything outside the allowlist on the way out;
+# the html flag only governs whether markdown-it preserves raw HTML.
 _md = MarkdownIt("commonmark", {"html": False, "linkify": True}).enable(
+    "table",
+)
+_md_html = MarkdownIt("commonmark", {"html": True, "linkify": True}).enable(
     "table",
 )
 
 
-def render_safe(md_text: str) -> str:
+def render_safe(md_text: str, *, strict: bool = True) -> str:
     """Render markdown to a sanitised HTML fragment.
+
+    ``strict`` (v15.0.0a6) toggles the tag allowlist. When True
+    (default), the v11.0.0a3 allowlist applies byte-for-byte. When
+    False, ``span``, ``kbd``, ``mark``, ``figure``, ``figcaption``
+    are also allowed. Protocols + attributes + script-injection
+    rails are unchanged either way — the strict flag only widens
+    the tag set.
 
     Returns an empty string for an empty / non-string input — a small
     contract the live-preview endpoint can rely on without an extra
@@ -89,10 +113,15 @@ def render_safe(md_text: str) -> str:
     """
     if not isinstance(md_text, str) or not md_text:
         return ""
-    html = _md.render(md_text)
+    # v15.0.0a6: non-strict uses an HTML-permissive markdown-it parser
+    # so raw inline HTML (`<span>`, `<kbd>`, etc.) survives to bleach
+    # for whitelist filtering. Strict still uses the html=False parser.
+    parser = _md if strict else _md_html
+    html = parser.render(md_text)
+    tags = _ALLOWED_TAGS if strict else (_ALLOWED_TAGS | _NON_STRICT_EXTRA_TAGS)
     cleaned = bleach.clean(
         html,
-        tags=_ALLOWED_TAGS,
+        tags=tags,
         attributes=_ALLOWED_ATTRIBUTES,
         protocols=_ALLOWED_PROTOCOLS,
         strip=True,
@@ -101,4 +130,43 @@ def render_safe(md_text: str) -> str:
     return str(cleaned)
 
 
-__all__ = ["render_safe"]
+def resolve_markdown_strict(
+    *,
+    project_path: object | None,
+    global_strict: bool,
+) -> bool:
+    """v15.0.0a6: per-project markdown.strict resolution.
+
+    Looks for ``<project_path>/.harbormaster.toml``; if present and
+    it has ``[markdown] strict = …``, that value wins. Otherwise the
+    ``global_strict`` value (from the top-level config) applies.
+
+    ``project_path`` may be ``None`` (no project context — use
+    global), a ``pathlib.Path``, or a string. Failures are silent
+    (return ``global_strict``); operator-side feature, never block
+    rendering.
+    """
+    import tomllib
+    from pathlib import Path
+
+    if project_path is None:
+        return global_strict
+    p = Path(str(project_path))
+    override = p / ".harbormaster.toml"
+    if not override.is_file():
+        return global_strict
+    try:
+        with override.open("rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return global_strict
+    md = data.get("markdown")
+    if not isinstance(md, dict):
+        return global_strict
+    val = md.get("strict")
+    if not isinstance(val, bool):
+        return global_strict
+    return val
+
+
+__all__ = ["render_safe", "resolve_markdown_strict"]

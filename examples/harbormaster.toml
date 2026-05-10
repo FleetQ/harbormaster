@@ -71,3 +71,9 @@ memory_revisions_per_file = 20
 [budget]
 # daily_call_budget_per_tool = { ask_project = 1000, fan_out_ask = 100 }
 daily_call_budget_per_tool = {}
+
+# v15.0.0a6: markdown render allowlist. strict = false widens to allow
+# <span>, <kbd>, <mark>, <figure>, <figcaption>. Per-project override:
+# drop `[markdown] strict = false` in <project_path>/.harbormaster.toml.
+[markdown]
+strict = true

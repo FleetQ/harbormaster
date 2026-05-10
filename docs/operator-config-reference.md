@@ -35,6 +35,7 @@ the offending key. There is no silent-drop path.
 - [`[plugins]`](#plugins)
 - [`[retention]`](#retention)
 - [`[budget]`](#budget)
+- [`[markdown]`](#markdown)
 - [Top-level keys](#top-level-keys)
 - [Worked example](#worked-example)
 
@@ -242,6 +243,16 @@ KPI cell (hover expands to show the per-tool breakdown).
 | Key                              | Type            | Default | Notes |
 |----------------------------------|-----------------|---------|-------|
 | `daily_call_budget_per_tool`     | `dict[str,int]` | `{}`    | Map of `tool_name → budget` (calls per 24h). All values must be > 0. Tools NOT listed have no budget tracked. Empty (default) means no per-tool budgets. Example: `daily_call_budget_per_tool = { ask_project = 1000, fan_out_ask = 100 }`. |
+
+## `[markdown]`
+
+v15.0.0a6. Markdown render allowlist tuning. Per-project overrides
+are picked up from `<project_path>/.harbormaster.toml` if present —
+the per-project value wins over the global one.
+
+| Key       | Type   | Default | Notes |
+|-----------|--------|---------|-------|
+| `strict`  | `bool` | `true`  | When `true`, the v11.0.0a3 bleach allowlist applies byte-for-byte. When `false`, also allow `<span>`, `<kbd>`, `<mark>`, `<figure>`, `<figcaption>`. Protocols, attributes, and script-injection rails are unchanged either way. |
 
 ## Top-level keys
 

@@ -1836,4 +1836,153 @@
   }
 </script>
 
+{# v15.0.0a6: dashboard tour wizard. 5-step interactive walkthrough on
+   first dashboard load, gated by localStorage `hm-tour-completed`.
+   Re-trigger via `?tour=1` query string. Steps anchor to existing
+   selectors via querySelector — no markup changes to anchors. #}
+<div x-data="dashboardTour()"
+     x-init="maybeStart()"
+     x-show="active"
+     x-cloak
+     class="fixed inset-0 z-50 pointer-events-none"
+     role="dialog"
+     :aria-label="`Tour step ${stepIndex + 1} of ${steps.length}`">
+  <!-- Backdrop. Pointer-events on so clicks dismiss the highlight
+       but not the underlying card (we keep operator interactivity). -->
+  <div class="absolute inset-0 bg-gray-950/40 pointer-events-auto"
+       @click="next()"></div>
+  <!-- Popover, positioned by computed anchorRect coords. -->
+  <div x-show="anchorRect"
+       :style="`top: ${popoverTop}px; left: ${popoverLeft}px;`"
+       class="absolute pointer-events-auto bg-surface-2 border border-accent-strong rounded-lg p-4 shadow-2xl max-w-sm">
+    <header class="flex items-center justify-between mb-2 gap-2">
+      <span class="text-[10px] uppercase tracking-wide text-accent"
+            x-text="`Step ${stepIndex + 1} of ${steps.length}`"></span>
+      <button type="button" @click="dismiss()"
+              aria-label="Skip tour"
+              class="text-xs text-foreground-muted hover:text-danger">
+        Skip
+      </button>
+    </header>
+    <h3 class="text-sm font-bold text-foreground mb-1"
+        x-text="currentStep().title"></h3>
+    <p class="text-xs text-foreground-muted mb-3"
+       x-text="currentStep().body"></p>
+    <div class="flex items-center justify-between gap-2">
+      <button type="button" @click="prev()"
+              :disabled="stepIndex === 0"
+              aria-label="Previous step"
+              class="text-xs px-2 py-1 rounded border border-border text-foreground-muted hover:text-accent disabled:opacity-30">
+        Back
+      </button>
+      <button type="button" @click="next()"
+              aria-label="Next step"
+              class="text-xs px-3 py-1 rounded border border-accent-strong bg-cyan-900/30 hover:bg-cyan-900/50 text-accent">
+        <span x-text="stepIndex === steps.length - 1 ? 'Done' : 'Next'"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function dashboardTour() {
+    return {
+      active: false,
+      stepIndex: 0,
+      anchorRect: null,
+      // 5-step plan from the v15.0.0a6 brief.
+      steps: [
+        {
+          selector: '[data-kpi-cell="projects"]',
+          title: 'KPI strip',
+          body: 'The top strip surfaces the live operator KPIs — projects discovered, active embeds, recent queries, bridge state, and host budget usage.',
+        },
+        {
+          selector: '#hm-sidebar',
+          title: 'Project sidebar',
+          body: 'Every discovered project lives in the sidebar. Pin the ones you use most; collapsed state persists across reloads.',
+        },
+        {
+          selector: 'section[x-data^="askForm"]',
+          title: 'Ask form',
+          body: 'Send a question to any project (or host) without leaving the dashboard. Streams the answer back via SSE.',
+        },
+        {
+          selector: '[x-data="commandPalette()"]',
+          title: 'Command palette',
+          body: 'Press Cmd+K (Mac) or Ctrl+K (Linux/Win) to open the palette. Fuzzy-search every project, host, and dashboard view.',
+        },
+        {
+          selector: 'section[x-data^="memoriesPanel"], a[href*="/projects/"]',
+          title: 'Memories',
+          body: 'Each project carries its own CLAUDE.md + Serena memories. Click any project from the grid to open the per-project view, then edit memories inline.',
+        },
+      ],
+      currentStep() { return this.steps[this.stepIndex] || {}; },
+      // v15.0.0a6: gating logic.
+      // - localStorage `hm-tour-completed` skips the tour.
+      // - URL `?tour=1` always starts the tour (re-trigger after dismiss).
+      maybeStart() {
+        try {
+          const params = new URLSearchParams(location.search);
+          const force = params.get('tour') === '1';
+          const done = localStorage.getItem('hm-tour-completed') === '1';
+          if (!force && done) return;
+          // Defer one paint so anchor elements have layout dimensions.
+          requestAnimationFrame(() => this.start());
+        } catch (_) { /* localStorage may be disabled */ }
+      },
+      start() {
+        this.active = true;
+        this.stepIndex = 0;
+        this._positionPopover();
+      },
+      next() {
+        if (this.stepIndex >= this.steps.length - 1) {
+          this.complete();
+          return;
+        }
+        this.stepIndex += 1;
+        this._positionPopover();
+      },
+      prev() {
+        if (this.stepIndex === 0) return;
+        this.stepIndex -= 1;
+        this._positionPopover();
+      },
+      dismiss() {
+        this.active = false;
+        // Don't mark "completed" on skip — operator may want to retry.
+      },
+      complete() {
+        this.active = false;
+        try { localStorage.setItem('hm-tour-completed', '1'); } catch (_) {}
+      },
+      _positionPopover() {
+        const sel = this.currentStep().selector;
+        if (!sel) { this.anchorRect = null; return; }
+        // querySelector handles comma-separated selectors — first match wins.
+        const el = document.querySelector(sel);
+        if (!el) { this.anchorRect = null; return; }
+        const r = el.getBoundingClientRect();
+        this.anchorRect = { top: r.top, left: r.left, width: r.width, height: r.height };
+      },
+      get popoverTop() {
+        if (!this.anchorRect) return 0;
+        // Place 12px below the anchor, clamped to viewport.
+        const t = this.anchorRect.top + this.anchorRect.height + 12;
+        return Math.max(12, Math.min(t, window.innerHeight - 200));
+      },
+      get popoverLeft() {
+        if (!this.anchorRect) return 0;
+        // Center on the anchor, clamped to viewport.
+        const w = 360; // matches max-w-sm-ish
+        let l = this.anchorRect.left + (this.anchorRect.width / 2) - (w / 2);
+        l = Math.max(12, Math.min(l, window.innerWidth - w - 12));
+        return l;
+      },
+    };
+  }
+</script>
+
 {% endblock %}
