@@ -95,10 +95,70 @@
     </ul>
     <article class="md:col-span-2 border border-gray-800 rounded p-3 bg-gray-950/60 min-h-[8rem]">
       <p x-show="!selected" class="text-xs text-gray-500">Select a file to view.</p>
-      <div x-show="selected" class="prose prose-invert prose-sm max-w-none"
+      <!-- v10.0.0a6: edit toolbar -->
+      <div x-show="selected" class="flex items-center justify-between gap-2 mb-2">
+        <span class="text-xs font-mono text-gray-500" x-text="selected ? selected.name : ''"></span>
+        <div class="flex gap-1">
+          <button type="button" x-show="!editing"
+                  @click="startEdit()"
+                  aria-label="Edit memory file"
+                  class="text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-cyan-700 text-gray-300 hover:text-cyan-300">
+            Edit
+          </button>
+          <button type="button" x-show="editing"
+                  @click="cancelEdit()"
+                  aria-label="Cancel edit"
+                  class="text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-rose-700 text-gray-300 hover:text-rose-300">
+            Cancel
+          </button>
+          <button type="button" x-show="editing"
+                  @click="save()"
+                  :disabled="saving"
+                  aria-label="Save memory file"
+                  class="text-xs px-2 py-0.5 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 disabled:opacity-50">
+            <span x-text="saving ? 'Saving…' : 'Save'"></span>
+          </button>
+        </div>
+      </div>
+      <p x-show="saveError" :aria-hidden="!saveError" role="alert"
+         class="text-xs text-red-400 mb-2" x-text="saveError"></p>
+      <div x-show="selected && !editing" class="prose prose-invert prose-sm max-w-none"
            x-html="rendered"></div>
+      <textarea x-show="editing" x-model="draft"
+                aria-label="Memory file source"
+                class="w-full min-h-[20rem] bg-gray-950 border border-gray-700 rounded p-2 text-xs font-mono text-gray-200"></textarea>
     </article>
   </div>
+
+  <!-- v10.0.0a6: new-memory creation form -->
+  <details class="mt-3 border border-gray-800 rounded p-2 bg-gray-950/40">
+    <summary class="text-xs text-gray-400 cursor-pointer">Create new memory…</summary>
+    <form @submit.prevent="createNew()" class="mt-2 space-y-2">
+      <label class="block text-xs text-gray-400">
+        Filename
+        <input type="text" x-model="newName"
+               aria-label="New memory filename"
+               placeholder="e.g. CLAUDE.md or .serena/memories/notes.md"
+               class="block w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs font-mono text-gray-200 mt-1">
+      </label>
+      <label class="block text-xs text-gray-400">
+        Content
+        <textarea x-model="newContent"
+                  aria-label="New memory content"
+                  class="block w-full min-h-[8rem] bg-gray-950 border border-gray-700 rounded p-2 text-xs font-mono text-gray-200 mt-1"></textarea>
+      </label>
+      <div class="flex items-center gap-2">
+        <button type="submit"
+                :disabled="creating || !newName"
+                aria-label="Create new memory file"
+                class="text-xs px-3 py-1 rounded border border-cyan-700 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-200 disabled:opacity-50">
+          <span x-text="creating ? 'Creating…' : 'Create'"></span>
+        </button>
+        <span x-show="createError" role="alert"
+              class="text-xs text-red-400" x-text="createError"></span>
+      </div>
+    </form>
+  </details>
 </section>
 
 <script src="/static/vendor/marked.min.js"></script>
@@ -110,6 +170,20 @@
       selected: null,
       rendered: '',
       error: '',
+      // v10.0.0a6: edit + create state
+      editing: false,
+      draft: '',          // textarea content while editing
+      saving: false,
+      saveError: '',
+      newName: '',
+      newContent: '',
+      creating: false,
+      createError: '',
+
+      _fileUrl(filename) {
+        return `/api/projects/${encodeURIComponent(this.project)}/memories/`
+               + filename.split('/').map(encodeURIComponent).join('/');
+      },
 
       async load() {
         try {
@@ -124,25 +198,101 @@
 
       async select(f) {
         this.selected = f;
+        this.editing = false;
+        this.saveError = '';
         this.rendered = '<p class="text-xs text-gray-500">loading…</p>';
         try {
-          const url = `/api/projects/${encodeURIComponent(this.project)}/memories/`
-                      + f.name.split('/').map(encodeURIComponent).join('/');
-          const r = await hmFetch(url);
+          const r = await hmFetch(this._fileUrl(f.name));
           if (!r.ok) throw new Error('HTTP ' + r.status);
           const text = await r.text();
-          // marked.parse — vendored marked exposes a default export under
-          // the global `marked` symbol when loaded as a script tag.
+          this.draft = text;
           if (window.marked && typeof window.marked.parse === 'function') {
             this.rendered = window.marked.parse(text);
           } else {
-            // Defensive fallback: render as preformatted text.
             const escaped = text
               .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             this.rendered = `<pre class="whitespace-pre-wrap text-xs">${escaped}</pre>`;
           }
         } catch (e) {
           this.rendered = `<p class="text-xs text-red-400">failed: ${e.message}</p>`;
+        }
+      },
+
+      startEdit() {
+        if (!this.selected) return;
+        this.editing = true;
+        this.saveError = '';
+      },
+
+      cancelEdit() {
+        this.editing = false;
+        this.saveError = '';
+        // Re-render with the saved content (restored from this.draft
+        // if changed locally; the next select() refreshes from disk).
+        if (this.selected && window.marked) {
+          this.rendered = window.marked.parse(this.draft || '');
+        }
+      },
+
+      async save() {
+        if (!this.selected) return;
+        this.saving = true;
+        this.saveError = '';
+        try {
+          const r = await hmFetch(this._fileUrl(this.selected.name), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: this.draft }),
+          });
+          if (!r.ok) {
+            let detail = 'HTTP ' + r.status;
+            try { const j = await r.json(); detail = j.detail || detail; } catch (_) {}
+            throw new Error(detail);
+          }
+          this.editing = false;
+          // Refresh the file list to pick up new size/mtime.
+          await this.load();
+          // Re-render the new content.
+          if (window.marked) this.rendered = window.marked.parse(this.draft);
+        } catch (e) {
+          this.saveError = 'save failed: ' + e.message;
+        } finally {
+          this.saving = false;
+        }
+      },
+
+      async createNew() {
+        if (!this.newName.trim()) return;
+        this.creating = true;
+        this.createError = '';
+        try {
+          const r = await hmFetch(
+            `/api/projects/${encodeURIComponent(this.project)}/memories`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                filename: this.newName.trim(),
+                content: this.newContent,
+              }),
+            },
+          );
+          if (!r.ok) {
+            let detail = 'HTTP ' + r.status;
+            try { const j = await r.json(); detail = j.detail || detail; } catch (_) {}
+            throw new Error(detail);
+          }
+          // Refresh + select the new file.
+          const created = this.newName.trim();
+          this.newName = '';
+          this.newContent = '';
+          await this.load();
+          const newFile = this.files.find(f => f.name === created);
+          if (newFile) await this.select(newFile);
+        } catch (e) {
+          this.createError = 'create failed: ' + e.message;
+        } finally {
+          this.creating = false;
         }
       },
     };

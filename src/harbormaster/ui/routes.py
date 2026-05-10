@@ -914,6 +914,132 @@ def register_routes(
             "files": _memories_list_for(project_path),
         }
 
+    class _MemoryPutBody(BaseModel):
+        """v10.0.0a6: body for PUT /api/projects/{name}/memories/{file}."""
+
+        content: str = Field(..., description="raw markdown body")
+
+    class _MemoryPostBody(BaseModel):
+        """v10.0.0a6: body for POST /api/projects/{name}/memories.
+
+        `filename` follows the same allowlist as the GET path:
+        either exactly `CLAUDE.md` or `.serena/memories/<basename>.md`.
+        """
+
+        filename: str = Field(...)
+        content: str = Field(...)
+
+    def _atomic_write(target: Path, content: str) -> None:
+        """v10.0.0a6: write `content` to `target` via temp file + rename
+        so a crash mid-write doesn't leave a partial memory file. Mode
+        0o644 — readable by group/other since memories aren't secrets,
+        but only the owner can edit them via the file system."""
+        import contextlib
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(target.suffix + ".hm-tmp")
+        try:
+            tmp.write_text(content, encoding="utf-8")
+            tmp.replace(target)
+            with contextlib.suppress(OSError):
+                target.chmod(0o644)
+        finally:
+            if tmp.exists():
+                with contextlib.suppress(OSError):
+                    tmp.unlink()
+
+    @app.put("/api/projects/{name}/memories/{file_token:path}")
+    async def put_project_memory(
+        name: str, file_token: str, body: _MemoryPutBody,
+    ) -> dict[str, object]:
+        from harbormaster.projects import resolve_project as _resolve_project
+        from harbormaster.projects import (
+            validate_project_name as _validate_project_name,
+        )
+
+        try:
+            _validate_project_name(name)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+        try:
+            project_path = _resolve_project(
+                name, config.projects, ignore_patterns=config.ignore.patterns,
+            )
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+        target = _memory_path_for(project_path, file_token)
+        # Containment check (target may not yet exist on PUT-create).
+        try:
+            project_resolved = project_path.resolve()
+            # If target doesn't exist, resolve its parent for containment.
+            anchor = (target if target.exists() else target.parent).resolve()
+            anchor.relative_to(project_resolved)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(400, "invalid memory filename") from exc
+
+        try:
+            _atomic_write(target, body.content)
+        except OSError as exc:
+            raise HTTPException(500, "write failed") from exc
+
+        st = target.stat()
+        return {
+            "project": name,
+            "file": file_token,
+            "size": st.st_size,
+            "mtime": int(st.st_mtime),
+            "created": False,
+        }
+
+    @app.post("/api/projects/{name}/memories")
+    async def create_project_memory(
+        name: str, body: _MemoryPostBody,
+    ) -> dict[str, object]:
+        from harbormaster.projects import resolve_project as _resolve_project
+        from harbormaster.projects import (
+            validate_project_name as _validate_project_name,
+        )
+
+        try:
+            _validate_project_name(name)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+        try:
+            project_path = _resolve_project(
+                name, config.projects, ignore_patterns=config.ignore.patterns,
+            )
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+        target = _memory_path_for(project_path, body.filename)
+
+        try:
+            project_resolved = project_path.resolve()
+            anchor = (target if target.exists() else target.parent).resolve()
+            anchor.relative_to(project_resolved)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(400, "invalid memory filename") from exc
+
+        if target.exists():
+            raise HTTPException(409, f"memory file already exists: {body.filename}")
+
+        try:
+            _atomic_write(target, body.content)
+        except OSError as exc:
+            raise HTTPException(500, "write failed") from exc
+
+        st = target.stat()
+        return {
+            "project": name,
+            "file": body.filename,
+            "size": st.st_size,
+            "mtime": int(st.st_mtime),
+            "created": True,
+        }
+
     @app.get("/api/projects/{name}/memories/{file_token:path}")
     async def get_project_memory(
         name: str, file_token: str,
