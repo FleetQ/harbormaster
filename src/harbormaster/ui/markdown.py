@@ -36,6 +36,9 @@ from markdown_it import MarkdownIt
 # Tag allowlist. Standard markdown set + tables. No raw HTML inside
 # the markdown source survives — markdown-it-py's `html=False`
 # default strips it before we even get to bleach.
+# v12.0.0a4: extended with `<details>` + `<summary>` (collapsible
+# blocks operators paste from issue templates / runbooks) and the
+# footnote-link classes emitted by markdown-it footnote plugins.
 _ALLOWED_TAGS: frozenset[str] = frozenset({
     "a", "p", "br", "hr",
     "strong", "em", "b", "i", "u", "s",
@@ -46,15 +49,23 @@ _ALLOWED_TAGS: frozenset[str] = frozenset({
     "table", "thead", "tbody", "tr", "th", "td",
     "img",  # markdown ![alt](src) — sanitised by allowed_protocols
     "del",  # GFM strikethrough
+    "details", "summary",  # v12.0.0a4: collapsible blocks
+    "sup", "sub",  # v12.0.0a4: footnote refs use <sup><a>...</a></sup>
+    "section",  # v12.0.0a4: footnote container emitted by markdown-it
 })
 
 _ALLOWED_ATTRIBUTES: dict[str, list[str]] = {
-    "a": ["href", "title"],
+    "a": ["href", "title", "class", "id"],  # v12.0.0a4: footnote-ref / -backref classes + id targets
     "code": ["class"],
     "pre": ["class"],
     "th": ["align"],
     "td": ["align"],
     "img": ["src", "alt", "title"],
+    # v12.0.0a4: footnote markup classes emitted by markdown-it.
+    "li": ["id", "class"],  # footnote items have id="fn-1" + class="footnote-item"
+    "section": ["class"],  # <section class="footnotes"> wrapper
+    "sup": ["class"],
+    "details": ["open"],
 }
 
 # Explicit allowlist — anything else (javascript:, data:, vbscript:)
