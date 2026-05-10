@@ -832,6 +832,129 @@ def register_routes(
             "names": ignored,
         }
 
+    # ----- v10.0.0a5: per-project memories viewer (read-only) ----------
+    # `GET /api/projects/{name}/memories` — list available memory files.
+    # `GET /api/projects/{name}/memories/{file}` — return raw markdown.
+    # Only `CLAUDE.md` and `.serena/memories/*.md` are served — anything
+    # else 400s. Path traversal is also blocked at the file token.
+
+    def _memories_list_for(project_path: Path) -> list[dict[str, object]]:
+        out: list[dict[str, object]] = []
+        claude = project_path / "CLAUDE.md"
+        if claude.is_file():
+            st = claude.stat()
+            out.append({
+                "name": "CLAUDE.md",
+                "size": st.st_size,
+                "mtime": int(st.st_mtime),
+            })
+        memdir = project_path / ".serena" / "memories"
+        if memdir.is_dir():
+            for f in sorted(memdir.glob("*.md")):
+                if not f.is_file():
+                    continue
+                st = f.stat()
+                out.append({
+                    "name": f".serena/memories/{f.name}",
+                    "size": st.st_size,
+                    "mtime": int(st.st_mtime),
+                })
+        return out
+
+    def _memory_path_for(project_path: Path, file_token: str) -> Path:
+        """Validate `file_token` and return the absolute path inside
+        `project_path`. Raises HTTPException(400) on any traversal or
+        unauthorised filename.
+        """
+        # Block absolute, parent-traversal, and backslashes.
+        if not file_token or file_token.startswith("/") or "\\" in file_token:
+            raise HTTPException(400, "invalid memory filename")
+        if ".." in file_token.split("/"):
+            raise HTTPException(400, "invalid memory filename")
+        # Allowlist: exact CLAUDE.md, OR `.serena/memories/<basename>.md`
+        # where basename matches a strict identifier.
+        if file_token == "CLAUDE.md":
+            return project_path / "CLAUDE.md"
+        if file_token.startswith(".serena/memories/") and file_token.endswith(".md"):
+            basename = file_token[len(".serena/memories/"):]
+            # Disallow nested slashes inside the basename.
+            if "/" in basename or not basename or basename in (".md",):
+                raise HTTPException(400, "invalid memory filename")
+            # Strict identifier-ish basename (alphanumerics, dot,
+            # underscore, hyphen). This is the same shape we accept in
+            # `validate_project_name`.
+            import re as _re
+            stem = basename[:-3]
+            if not _re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", stem):
+                raise HTTPException(400, "invalid memory filename")
+            return project_path / ".serena" / "memories" / basename
+        raise HTTPException(400, "invalid memory filename")
+
+    @app.get("/api/projects/{name}/memories")
+    async def list_project_memories(name: str) -> dict[str, object]:
+        from harbormaster.projects import resolve_project as _resolve_project
+        from harbormaster.projects import (
+            validate_project_name as _validate_project_name,
+        )
+
+        try:
+            _validate_project_name(name)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+        try:
+            project_path = _resolve_project(
+                name, config.projects, ignore_patterns=config.ignore.patterns,
+            )
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+        return {
+            "project": name,
+            "files": _memories_list_for(project_path),
+        }
+
+    @app.get("/api/projects/{name}/memories/{file_token:path}")
+    async def get_project_memory(
+        name: str, file_token: str,
+    ) -> Response:
+        from harbormaster.projects import resolve_project as _resolve_project
+        from harbormaster.projects import (
+            validate_project_name as _validate_project_name,
+        )
+
+        try:
+            _validate_project_name(name)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+        try:
+            project_path = _resolve_project(
+                name, config.projects, ignore_patterns=config.ignore.patterns,
+            )
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+        target = _memory_path_for(project_path, file_token)
+        if not target.is_file():
+            raise HTTPException(404, "memory file not found")
+
+        # Belt-and-braces containment check post-resolve to defeat
+        # symlinks pointing outside the project root.
+        try:
+            project_resolved = project_path.resolve()
+            target_resolved = target.resolve()
+            target_resolved.relative_to(project_resolved)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(400, "invalid memory filename") from exc
+
+        try:
+            text = target.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(500, "read failed") from exc
+
+        return Response(content=text, media_type="text/markdown; charset=utf-8")
+
     # One ManifestCache per UI process — first hit warm-loads, subsequent
     # /api/graph polls hit the cache and stat the manifest file only.
     graph_cache = ManifestCache()
