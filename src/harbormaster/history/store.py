@@ -391,6 +391,19 @@ class QAStore:
         row = self._conn.execute("SELECT COUNT(*) AS n FROM qa_log").fetchone()
         return int(row["n"])
 
+    def count_since(self, since_unix_seconds: int) -> int:
+        """Return the number of qa_log rows with `created_at >= since`.
+
+        Powers the v8.0.0a5 KPI strip's "recent queries" counter.
+        Cheap — uses a covering index on `created_at` (the same
+        column the chronological list is ordered by).
+        """
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM qa_log WHERE created_at >= ?",
+            (since_unix_seconds,),
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
     def list_recent(
         self,
         *,
