@@ -1983,21 +1983,37 @@ async def _emit_chunks_then_result(
             "data": json.dumps({"delta": chunk}),
         }
 
-    # v9.0.0a5: best-effort usage event. We don't have real
-    # token counting yet — the backends emit text deltas, not
-    # token boundaries. Approximate `output_tokens` as the chunk
-    # count so dashboards have a directional signal until backend
-    # instrumentation lands. Documented as approximate.
+    # v11.0.0a5: real backend-reported usage when available, with a
+    # graceful fall-back to the v9.0.0a5 chunk-count approximation
+    # for backends / claude versions that don't surface a usage block
+    # in their stream-json output.
+    real_usage = getattr(sync_iter, "usage", None)
+    if real_usage is not None and getattr(real_usage, "has_real_usage", False):
+        usage_payload: dict[str, object] = {
+            "input_tokens": int(getattr(real_usage, "input_tokens", 0)),
+            "output_tokens": int(getattr(real_usage, "output_tokens", 0)),
+            "cache_creation_input_tokens": int(
+                getattr(real_usage, "cache_creation_input_tokens", 0),
+            ),
+            "cache_read_input_tokens": int(
+                getattr(real_usage, "cache_read_input_tokens", 0),
+            ),
+            "model": getattr(real_usage, "model", None),
+            "output_chunks": len(chunks),
+            "output_chars": sum(len(c) for c in chunks),
+            # `approximate` flag DROPPED when the backend reports real
+            # counts (v11.0.0a5 deliverable).
+        }
+    else:
+        usage_payload = {
+            "output_chunks": len(chunks),
+            "output_chars": sum(len(c) for c in chunks),
+            "approximate": True,
+        }
     yield {
         "event": "usage",
         "id": next_id.next(),
-        "data": json.dumps(
-            {
-                "output_chunks": len(chunks),
-                "output_chars": sum(len(c) for c in chunks),
-                "approximate": True,
-            }
-        ),
+        "data": json.dumps(usage_payload),
     }
 
     assembled = "".join(chunks)
