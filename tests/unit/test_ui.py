@@ -1900,10 +1900,13 @@ def test_dashboard_renders_reembed_panel(populated_config):
 def test_reembed_panel_phase_badge_classes(populated_config):
     client = TestClient(create_app(populated_config))
     r = client.get("/")
-    # All four phase classes referenced.
-    assert "bg-cyan-900/50 text-cyan-300" in r.text  # running
-    assert "bg-emerald-900/50 text-emerald-300" in r.text  # done
-    assert "bg-rose-900/50 text-rose-300" in r.text  # failed
+    # All four phase classes referenced. v13.0.0a2 migrated the foreground
+    # halves from raw color utilities to semantic tokens; the bg halves
+    # keep their `/50` opacity variant which the migration intentionally
+    # skips (semantic tokens with opacity are a future v13 polish item).
+    assert "bg-cyan-900/50 text-accent" in r.text  # running
+    assert "bg-emerald-900/50 text-success" in r.text  # done
+    assert "bg-rose-900/50 text-danger" in r.text  # failed
     # phaseBadgeClass mapper is in scope.
     assert "phaseBadgeClass()" in r.text
 

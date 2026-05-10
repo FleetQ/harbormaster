@@ -21,6 +21,13 @@
  */
 @import "tailwindcss";
 
+/* v13.0.0a2: explicitly scan the templates directory so utility
+ * classes referenced from Jinja templates (which Tailwind v4's
+ * default heuristics don't always discover when the input CSS
+ * lives in a sibling `static/` folder) are emitted in the
+ * compiled stylesheet. */
+@source "../templates/**/*.html";
+
 @theme {
     /* Surfaces — graduated grays, darkest = canvas. */
     --color-surface-1: oklch(0.20 0 0);

@@ -2,33 +2,33 @@
 {% block title %}Network · Harbormaster{% endblock %}
 {% block content %}
 
-<nav class="mb-4 text-sm text-gray-400">
-  <a href="/" class="hover:text-cyan-400">← Dashboard</a>
-  <span class="mx-2 text-gray-700">/</span>
-  <span class="text-gray-300">Network</span>
+<nav class="mb-4 text-sm text-foreground-muted">
+  <a href="/" class="hover:text-accent">← Dashboard</a>
+  <span class="mx-2 text-foreground-subtle">/</span>
+  <span class="text-foreground-muted">Network</span>
 </nav>
 
 <header class="mb-4 flex items-center justify-between gap-3 flex-wrap">
   <div>
-    <h2 class="text-xl font-bold text-cyan-400">Inter-project network</h2>
-    <p class="text-xs text-gray-500 mt-1">
+    <h2 class="text-xl font-bold text-accent">Inter-project network</h2>
+    <p class="text-xs text-foreground-subtle mt-1">
       Live MCP-call events. Edges thicken with call frequency.
     </p>
   </div>
   <div class="flex items-center gap-2 text-xs">
-    <span class="text-gray-500">view:</span>
+    <span class="text-foreground-subtle">view:</span>
     <button type="button" id="hm-network-view-graph"
             x-data
             @click="$dispatch('hm:network:view', 'graph')"
             aria-label="Switch to graph view"
-            class="px-2 py-0.5 rounded border border-gray-700 hover:border-cyan-700 text-gray-300 hover:text-cyan-300">
+            class="px-2 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent">
       Graph
     </button>
     <button type="button" id="hm-network-view-chat"
             x-data
             @click="$dispatch('hm:network:view', 'chat')"
             aria-label="Switch to chat view"
-            class="px-2 py-0.5 rounded border border-gray-700 hover:border-cyan-700 text-gray-300 hover:text-cyan-300">
+            class="px-2 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent">
       Chat
     </button>
   </div>
@@ -37,36 +37,36 @@
 <!-- v11.0.0a6: aggregate metrics over the last 1h / 24h / 7d.
      Polls /api/network/stats; the window dropdown re-fetches. -->
 <section x-data="networkStats()" x-init="loadStats()"
-         class="mb-4 border border-gray-800 rounded-lg p-3 bg-gray-900/40">
+         class="mb-4 border border-border rounded-lg p-3 bg-gray-900/40">
   <header class="flex items-center justify-between gap-2 mb-2 flex-wrap">
-    <h3 class="text-sm font-bold text-gray-300">Network stats</h3>
+    <h3 class="text-sm font-bold text-foreground-muted">Network stats</h3>
     <select x-model="window" @change="loadStats()"
             aria-label="Stats window"
-            class="text-xs bg-gray-950 border border-gray-800 rounded px-2 py-0.5 text-gray-300">
+            class="text-xs bg-surface-1 border border-border rounded px-2 py-0.5 text-foreground-muted">
       <option value="1h">last 1h</option>
       <option value="24h">last 24h</option>
       <option value="7d">last 7d</option>
       <option value="all">all time</option>
     </select>
   </header>
-  <p x-show="error" role="alert" class="text-xs text-red-400" x-text="error"></p>
+  <p x-show="error" role="alert" class="text-xs text-danger" x-text="error"></p>
   <dl x-show="stats" class="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
-    <div class="border border-gray-800 rounded p-2 bg-gray-950/40">
-      <dt class="text-gray-500">total calls</dt>
-      <dd class="text-cyan-300 font-bold text-lg" x-text="stats?.total_calls ?? 0"></dd>
+    <div class="border border-border rounded p-2 bg-gray-950/40">
+      <dt class="text-foreground-subtle">total calls</dt>
+      <dd class="text-accent font-bold text-lg" x-text="stats?.total_calls ?? 0"></dd>
     </div>
-    <div class="border border-gray-800 rounded p-2 bg-gray-950/40">
-      <dt class="text-gray-500">error rate</dt>
-      <dd class="text-amber-300 font-bold text-lg"
+    <div class="border border-border rounded p-2 bg-gray-950/40">
+      <dt class="text-foreground-subtle">error rate</dt>
+      <dd class="text-warning font-bold text-lg"
           x-text="((stats?.error_rate ?? 0) * 100).toFixed(1) + '%'"></dd>
     </div>
-    <div class="border border-gray-800 rounded p-2 bg-gray-950/40">
-      <dt class="text-gray-500 mb-1">by tool</dt>
-      <dd class="text-gray-300 text-[11px]">
+    <div class="border border-border rounded p-2 bg-gray-950/40">
+      <dt class="text-foreground-subtle mb-1">by tool</dt>
+      <dd class="text-foreground-muted text-[11px]">
         <template x-for="(count, tool) in stats?.by_tool ?? {}" :key="'tool:' + tool">
           <span class="block">
-            <span class="text-cyan-400" x-text="tool"></span>
-            <span class="text-gray-600">×</span>
+            <span class="text-accent" x-text="tool"></span>
+            <span class="text-foreground-subtle">×</span>
             <span x-text="count"></span>
           </span>
         </template>
@@ -74,26 +74,26 @@
     </div>
     <!-- v12.0.0a5: per-source breakdown — call counts + per-source
          error rate. Operators can spot a misbehaving project quickly. -->
-    <div class="border border-gray-800 rounded p-2 bg-gray-950/40">
-      <dt class="text-gray-500 mb-1">by source</dt>
-      <dd class="text-gray-300 text-[11px]">
+    <div class="border border-border rounded p-2 bg-gray-950/40">
+      <dt class="text-foreground-subtle mb-1">by source</dt>
+      <dd class="text-foreground-muted text-[11px]">
         <template x-for="(row, source) in stats?.by_source ?? {}" :key="'src:' + source">
           <span class="block">
-            <span class="text-cyan-400 font-mono" x-text="source"></span>
-            <span class="text-gray-600 ml-1" x-text="'×' + row.calls"></span>
-            <span x-show="row.error_rate > 0" class="text-amber-400 ml-1"
+            <span class="text-accent font-mono" x-text="source"></span>
+            <span class="text-foreground-subtle ml-1" x-text="'×' + row.calls"></span>
+            <span x-show="row.error_rate > 0" class="text-warning ml-1"
                   x-text="'(' + (row.error_rate * 100).toFixed(0) + '% err)'"></span>
           </span>
         </template>
       </dd>
     </div>
-    <div class="border border-gray-800 rounded p-2 bg-gray-950/40">
-      <dt class="text-gray-500 mb-1">top projects</dt>
-      <dd class="text-gray-300 text-[11px]">
+    <div class="border border-border rounded p-2 bg-gray-950/40">
+      <dt class="text-foreground-subtle mb-1">top projects</dt>
+      <dd class="text-foreground-muted text-[11px]">
         <template x-for="row in stats?.top_projects_by_calls ?? []" :key="'p:' + row.project">
           <span class="block">
-            <span class="text-cyan-400 font-mono" x-text="row.project"></span>
-            <span class="text-gray-600 ml-1" x-text="'×' + row.count"></span>
+            <span class="text-accent font-mono" x-text="row.project"></span>
+            <span class="text-foreground-subtle ml-1" x-text="'×' + row.count"></span>
           </span>
         </template>
       </dd>
@@ -102,9 +102,9 @@
 </section>
 
 <section x-data="networkPanel()" x-init="init()"
-         class="border border-gray-800 rounded-lg p-3 bg-gray-900/40">
+         class="border border-border rounded-lg p-3 bg-gray-900/40">
   <div class="flex items-baseline justify-between gap-2 mb-2 text-xs">
-    <span class="text-gray-500" x-text="`${events.length} event${events.length === 1 ? '' : 's'} recorded`"></span>
+    <span class="text-foreground-subtle" x-text="`${events.length} event${events.length === 1 ? '' : 's'} recorded`"></span>
     {# v11.0.0a4: stateBadge unification — replaces two inline color-
        only spans with the shared icon+label badge component. #}
     <span x-show="connected"
@@ -117,17 +117,17 @@
           })"></span>
   </div>
   <p x-show="error" :aria-hidden="!error" role="alert"
-     class="text-xs text-red-400 mb-2" x-text="error"></p>
+     class="text-xs text-danger mb-2" x-text="error"></p>
   <p x-show="!error && events.length === 0" role="status"
      data-empty-state="network.no-events"
-     class="text-xs text-gray-400 px-4 py-6 text-center">
+     class="text-xs text-foreground-muted px-4 py-6 text-center">
     No MCP calls recorded yet — ask a project something and watch this fill in.
   </p>
 
   <!-- Graph view -->
   <div x-show="view === 'graph' && events.length > 0"
        id="hm-network-graph"
-       class="border border-gray-800 rounded bg-gray-950"
+       class="border border-border rounded bg-surface-1"
        style="width: 100%; height: 60vh;"></div>
 
   <!-- v10.0.0a8: chat view (chronological event log).
@@ -135,7 +135,7 @@
        Click a row to expand to the full preview text. -->
   <ul x-show="view === 'chat' && events.length > 0"
       id="hm-network-chat"
-      class="border border-gray-800 rounded bg-gray-950 divide-y divide-gray-900 overflow-y-auto"
+      class="border border-border rounded bg-surface-1 divide-y divide-gray-900 overflow-y-auto"
       style="max-height: 60vh;">
     <template x-for="(ev, i) in chatOrder()" :key="'ce:' + i + ':' + ev.timestamp_ms">
       <li x-data="{ open: false }"
@@ -145,28 +145,28 @@
                 :aria-expanded="open"
                 aria-label="Toggle event details"
                 class="w-full text-left flex items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
-          <span class="font-mono text-gray-500 shrink-0"
+          <span class="font-mono text-foreground-subtle shrink-0"
                 x-text="new Date(ev.timestamp_ms).toLocaleTimeString()"></span>
-          <span class="text-gray-400" x-text="ev.caller"></span>
-          <span class="text-gray-600" aria-hidden="true">→</span>
+          <span class="text-foreground-muted" x-text="ev.caller"></span>
+          <span class="text-foreground-subtle" aria-hidden="true">→</span>
           <span :class="{
-                  'text-cyan-300': ev.tool === 'ask_project',
-                  'text-purple-300': ev.tool === 'delegate_task',
-                  'text-cyan-200': ev.tool === 'fan_out_ask',
-                  'text-emerald-300': ev.tool === 'recall_qa',
+                  'text-accent': ev.tool === 'ask_project',
+                  'text-info': ev.tool === 'delegate_task',
+                  'text-accent': ev.tool === 'fan_out_ask',
+                  'text-success': ev.tool === 'recall_qa',
                 }"
-                class="text-gray-300 font-mono"
+                class="text-foreground-muted font-mono"
                 x-text="ev.tool"></span>
-          <span class="text-gray-600" aria-hidden="true">(</span>
-          <span class="text-cyan-400" x-text="ev.target"></span>
-          <span class="text-gray-600" aria-hidden="true">)</span>
-          <span class="truncate text-gray-400 italic"
+          <span class="text-foreground-subtle" aria-hidden="true">(</span>
+          <span class="text-accent" x-text="ev.target"></span>
+          <span class="text-foreground-subtle" aria-hidden="true">)</span>
+          <span class="truncate text-foreground-muted italic"
                 x-show="!open"
                 x-text="ev.question_preview ? `“${ev.question_preview.slice(0, 80)}${ev.question_preview.length > 80 ? '…' : ''}”` : ''"></span>
           <span x-show="ev.status === 'error'"
-                class="ml-auto text-rose-400 shrink-0">err</span>
+                class="ml-auto text-danger shrink-0">err</span>
         </button>
-        <div x-show="open" class="mt-1 ml-12 text-[11px] text-gray-300 whitespace-pre-wrap"
+        <div x-show="open" class="mt-1 ml-12 text-[11px] text-foreground-muted whitespace-pre-wrap"
              x-text="ev.question_preview || '(no preview)'"></div>
       </li>
     </template>

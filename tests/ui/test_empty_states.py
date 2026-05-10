@@ -13,8 +13,10 @@ Surfaces audited (each carries `data-empty-state="<surface>"`):
   - fanout.no-selection
 
 For each: the surface block must contain
-  * a `font-bold text-gray-200` headline (the 3-part top line)
-  * a `text-xs text-gray-400` body line (the secondary explanation)
+  * a `font-bold text-foreground` headline (the 3-part top line —
+    semantic-token form post-v13.0.0a2 utility migration)
+  * a `text-xs text-foreground-muted` body line (the secondary
+    explanation, semantic-token form)
   * a CTA — either an `<a href=` link or a `<button` with
     `aria-label`.
 """
@@ -60,7 +62,7 @@ def _surface_block(template_name: str, surface_id: str) -> str:
 @pytest.mark.parametrize("template,surface_id", SURFACES, ids=[s for _, s in SURFACES])
 def test_empty_state_has_headline(template: str, surface_id: str) -> None:
     block = _surface_block(template, surface_id)
-    assert "font-bold text-gray-200" in block, (
+    assert "font-bold text-foreground" in block, (
         f"{surface_id}: missing canonical headline class"
     )
 
@@ -69,7 +71,10 @@ def test_empty_state_has_headline(template: str, surface_id: str) -> None:
 def test_empty_state_has_body(template: str, surface_id: str) -> None:
     block = _surface_block(template, surface_id)
     # The body line uses one of two canonical sizes: text-xs or text-[11px].
-    assert ("text-xs text-gray-400" in block) or ("text-[11px] text-gray-400" in block), (
+    assert (
+        "text-xs text-foreground-muted" in block
+        or "text-[11px] text-foreground-muted" in block
+    ), (
         f"{surface_id}: missing canonical body class"
     )
 
