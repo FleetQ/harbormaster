@@ -66,6 +66,10 @@
     --color-foreground:        oklch(0.96 0.005 280);
     --color-foreground-muted:  oklch(0.75 0.005 280);
     --color-foreground-subtle: oklch(0.55 0.005 280);
+    /* v21.0.0a3: dimmest tier — used in empty-state body copy where
+     * the surface is also tinted (bg-surface-2/40) so we need a touch
+     * more lightness than subtle to keep WCAG AA contrast. */
+    --color-foreground-dim:    oklch(0.62 0.005 280);
 
     /* === Semantic state colors. === */
     --color-success: oklch(0.72 0.18 145);
@@ -119,6 +123,7 @@
         --color-foreground:        oklch(0.18 0.005 280);
         --color-foreground-muted:  oklch(0.40 0.005 280);
         --color-foreground-subtle: oklch(0.55 0.005 280);
+        --color-foreground-dim:    oklch(0.48 0.005 280);
         --color-accent:        oklch(0.55 0.18 290);
         --color-accent-strong: oklch(0.46 0.21 290);
         --color-border-subtle: oklch(0.90 0.005 280);
@@ -135,6 +140,7 @@ html.theme-light {
     --color-foreground:        oklch(0.18 0.005 280);
     --color-foreground-muted:  oklch(0.40 0.005 280);
     --color-foreground-subtle: oklch(0.55 0.005 280);
+    --color-foreground-dim:    oklch(0.48 0.005 280);
     --color-accent:        oklch(0.55 0.18 290);
     --color-accent-strong: oklch(0.46 0.21 290);
     --color-border-subtle: oklch(0.90 0.005 280);
@@ -151,6 +157,7 @@ html.theme-dark {
     --color-foreground:        oklch(0.96 0.005 280);
     --color-foreground-muted:  oklch(0.75 0.005 280);
     --color-foreground-subtle: oklch(0.55 0.005 280);
+    --color-foreground-dim:    oklch(0.62 0.005 280);
     --color-accent:        oklch(0.78 0.13 290);
     --color-accent-strong: oklch(0.62 0.22 290);
     --color-border-subtle: oklch(0.22 0.005 280);

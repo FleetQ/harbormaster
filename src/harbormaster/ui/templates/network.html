@@ -182,11 +182,15 @@
   </div>
   <p x-show="error" :aria-hidden="!error" role="alert"
      class="text-xs text-danger mb-2" x-text="error"></p>
-  <p x-show="!error && events.length === 0" role="status"
-     data-empty-state="network.no-events"
-     class="text-xs text-foreground-muted px-3 py-6 text-center">
-    No MCP calls recorded yet — ask a project something and watch this fill in.
-  </p>
+  <div x-show="!error && events.length === 0" role="status"
+       data-empty-state="network.no-events"
+       class="border border-border-subtle bg-surface-2/40 text-foreground-dim rounded px-3 py-6 text-center text-xs leading-snug">
+    <p class="text-foreground-muted font-semibold mb-1">No MCP traffic yet.</p>
+    <p class="text-foreground-dim">
+      Ask a project something via your MCP client and the call will appear here in real-time —
+      including caller, target, timing, and result.
+    </p>
+  </div>
 
   <!-- Graph view -->
   <div x-show="view === 'graph' && events.length > 0"

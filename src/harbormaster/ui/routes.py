@@ -112,6 +112,11 @@ def register_routes(
     # v5.0.0a4 is now operator-configurable.
     base_ctx: dict[str, object] = {
         "optimistic_stale_seconds": config.history.optimistic_stale_seconds,
+        # v21.0.0a3: surface the operator-configured accent into base.html
+        # so a per-page <style> override emits when non-default.
+        "ui_accent_hue": config.ui.accent_hue,
+        "ui_accent_chroma": config.ui.accent_chroma,
+        "ui_accent_chroma_soft": round(config.ui.accent_chroma * 0.6, 4),
     }
 
     def _render(
@@ -661,6 +666,112 @@ def register_routes(
             raise HTTPException(500, "write failed") from exc
 
         return _effective_budget_for_project(name)
+
+    def _user_config_toml_path() -> Path:
+        """v21.0.0a3: resolve the operator's user-level config.toml.
+
+        Uses the same XDG search as `_config_search_paths` but always
+        targets the user-scope file (never `.harbormaster.toml` in the
+        CWD) so the accent picker rewrites a single canonical file.
+        """
+        import os as _os
+
+        xdg = _os.environ.get("XDG_CONFIG_HOME") or "~/.config"
+        return Path(_os.path.expandvars(xdg)).expanduser() / "harbormaster" / "config.toml"
+
+    def _write_accent_toml(hue: float, chroma: float) -> None:
+        """v21.0.0a3: atomically write `[ui] accent_hue/accent_chroma`
+        into the user config.toml. Preserves existing top-level scalars
+        and tables; only the two `[ui]` keys are mutated.
+
+        Hand-written serializer — same pattern as `_write_project_budget_toml`.
+        """
+        toml_path = _user_config_toml_path()
+        toml_path.parent.mkdir(parents=True, exist_ok=True)
+
+        data: dict[str, Any] = {}
+        if toml_path.is_file():
+            try:
+                with toml_path.open("rb") as f:
+                    data = tomllib.load(f)
+            except (OSError, tomllib.TOMLDecodeError):
+                data = {}
+
+        ui_section = data.get("ui")
+        if not isinstance(ui_section, dict):
+            ui_section = {}
+        ui_section["accent_hue"] = float(hue)
+        ui_section["accent_chroma"] = float(chroma)
+        data["ui"] = ui_section
+
+        lines: list[str] = []
+        scalars = {k: v for k, v in data.items() if not isinstance(v, dict)}
+        tables = {k: v for k, v in data.items() if isinstance(v, dict)}
+        for k, v in scalars.items():
+            lines.append(f"{k} = {_toml_value(v)}")
+        for tname, tval in tables.items():
+            if lines:
+                lines.append("")
+            lines.append(f"[{tname}]")
+            for k, v in tval.items():
+                if isinstance(v, dict):
+                    continue
+                lines.append(f"{k} = {_toml_value(v)}")
+        content = "\n".join(lines) + "\n"
+
+        tmp = toml_path.with_suffix(toml_path.suffix + ".hm-tmp")
+        try:
+            tmp.write_text(content, encoding="utf-8")
+            tmp.replace(toml_path)
+            import contextlib
+            with contextlib.suppress(OSError):
+                toml_path.chmod(0o644)
+        finally:
+            if tmp.exists():
+                import contextlib
+                with contextlib.suppress(OSError):
+                    tmp.unlink()
+
+    @app.get("/api/settings/accent")
+    async def get_accent() -> dict[str, float]:
+        """v21.0.0a3: current operator-configured accent (OKLCH hue/chroma).
+
+        Returns the values from the loaded `[ui]` section — defaults
+        (290.0 / 0.22) when no operator override is present.
+        """
+        return {
+            "hue": float(config.ui.accent_hue),
+            "chroma": float(config.ui.accent_chroma),
+        }
+
+    @app.put("/api/settings/accent")
+    async def put_accent(body: dict[str, float]) -> JSONResponse:
+        """v21.0.0a3: persist accent to `~/.config/harbormaster/config.toml`.
+
+        Validates 0 <= hue <= 360 and 0 <= chroma <= 0.30. Atomic
+        tmpfile+rename. Mutates the in-process `config.ui` so SSR-side
+        emission of the override `<style>` reflects the new value on
+        the next page load without a restart.
+        """
+        try:
+            hue = float(body.get("hue", 290.0))
+            chroma = float(body.get("chroma", 0.22))
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "invalid payload"}, status_code=400)
+        if not (0.0 <= hue <= 360.0):
+            return JSONResponse({"error": "hue out of range"}, status_code=400)
+        if not (0.0 <= chroma <= 0.30):
+            return JSONResponse({"error": "chroma out of range"}, status_code=400)
+
+        try:
+            _write_accent_toml(hue, chroma)
+        except OSError as exc:
+            raise HTTPException(500, "write failed") from exc
+
+        # Live update — next render of base.html emits the new override.
+        config.ui.accent_hue = hue
+        config.ui.accent_chroma = chroma
+        return JSONResponse({"hue": hue, "chroma": chroma, "ok": True})
 
     @app.get("/api/network/sources")
     async def network_sources(

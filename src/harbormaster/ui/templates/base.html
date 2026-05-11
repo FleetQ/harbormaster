@@ -161,6 +161,20 @@
     }
   }
 </style>
+{# v21.0.0a3: operator-tunable accent override. Emits only when the
+   `[ui]` section diverges from the v19.0.0a4 violet defaults
+   (hue 290 / chroma 0.22). Keeps the base CSS tokens authoritative
+   for the common case (no override = zero extra bytes). #}
+{% if ui_accent_hue is defined and (ui_accent_hue != 290 or ui_accent_chroma != 0.22) %}
+<style id="hm-custom-accent">
+:root {
+  --color-accent-strong: oklch(62% {{ ui_accent_chroma }} {{ ui_accent_hue }});
+  --color-accent: oklch(78% {{ ui_accent_chroma_soft }} {{ ui_accent_hue }});
+  --hm-accent: oklch(78% {{ ui_accent_chroma_soft }} {{ ui_accent_hue }});
+  --hm-accent-strong: oklch(62% {{ ui_accent_chroma }} {{ ui_accent_hue }});
+}
+</style>
+{% endif %}
 {% include "_partials/_state_badge.html" %}
 </head>
 <body class="bg-surface-1 text-foreground min-h-screen">

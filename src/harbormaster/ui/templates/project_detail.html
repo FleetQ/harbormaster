@@ -138,8 +138,10 @@
           <li x-show="!files.length"
               role="status"
               data-empty-state="memories.no-files"
-              class="text-xs text-foreground-muted p-2">
-            no memory files
+              class="text-xs text-foreground-dim leading-snug border border-border-subtle bg-surface-2/40 rounded p-2 m-1">
+            <span class="block text-foreground-muted font-semibold mb-0.5">No memory files yet.</span>
+            Click <span class="font-mono text-accent">+ new</span> above to create one, or run
+            <span class="font-mono text-accent">serena init</span> in the project directory.
           </li>
         </ul>
         <p x-show="loadError" role="alert" aria-live="assertive"
@@ -1604,8 +1606,11 @@
           </details>
         </li>
       </template>
-      <li x-show="!results.length && loaded" class="text-foreground-muted text-xs">
-        No Q&amp;A history yet. Use the Ask form to query this project.
+      <li x-show="!results.length && loaded"
+          data-empty-state="qa-history.empty"
+          class="text-foreground-dim text-xs leading-snug border border-border-subtle bg-surface-2/40 rounded p-2">
+        <span class="block text-foreground-muted font-semibold mb-0.5">No Q&amp;A history yet.</span>
+        Use the <span class="font-mono text-accent">Ask</span> form above to query this project — saved questions appear here.
       </li>
     </ul>
   </section>

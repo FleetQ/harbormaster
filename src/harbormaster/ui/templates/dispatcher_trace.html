@@ -24,8 +24,14 @@
   <!-- Active (in-flight) spans -->
   <section class="mb-4" aria-label="Active spans">
     <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">In-flight</h3>
-    <div x-show="active.length === 0" role="status" class="text-xs text-foreground-subtle">
-      No spans currently in flight. Run a tool to see spans appear here.
+    <div x-show="active.length === 0" role="status"
+         data-empty-state="dispatcher.no-active"
+         class="border border-border-subtle bg-surface-2/40 text-foreground-dim rounded px-3 py-4 text-xs leading-snug">
+      <p class="text-foreground-muted font-semibold mb-0.5">No spans in flight.</p>
+      <p class="text-foreground-dim">
+        Live trace rows appear here as MCP tools start. Try
+        <span class="font-mono text-accent">ask_project</span> from any client.
+      </p>
     </div>
     <ul x-show="active.length > 0" class="space-y-1">
       <template x-for="span in active" :key="'active:' + span.span_id">
@@ -52,9 +58,14 @@
       Recent traces
       <span class="text-foreground-subtle" x-text="`(${traces.length})`"></span>
     </h3>
-    <div x-show="traces.length === 0" role="status" class="text-xs text-foreground-subtle">
-      No completed traces yet. The ring buffer holds the last 100 spans —
-      they'll appear here grouped by trace_id as tools finish.
+    <div x-show="traces.length === 0" role="status"
+         data-empty-state="dispatcher.no-traces"
+         class="border border-border-subtle bg-surface-2/40 text-foreground-dim rounded px-3 py-4 text-xs leading-snug">
+      <p class="text-foreground-muted font-semibold mb-0.5">No completed traces yet.</p>
+      <p class="text-foreground-dim">
+        Traces appear here grouped by <span class="font-mono">trace_id</span> as tools finish.
+        The ring buffer holds the last 100 spans.
+      </p>
     </div>
     <ul x-show="traces.length > 0" class="space-y-3"
         data-trace-waterfall-list>

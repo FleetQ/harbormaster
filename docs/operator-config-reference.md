@@ -36,6 +36,7 @@ the offending key. There is no silent-drop path.
 - [`[retention]`](#retention)
 - [`[budget]`](#budget)
 - [`[markdown]`](#markdown)
+- [`[ui]`](#ui)
 - [Top-level keys](#top-level-keys)
 - [Worked example](#worked-example)
 
@@ -270,6 +271,25 @@ the per-project value wins over the global one.
 |-----------|--------|---------|-------|
 | `strict`  | `bool` | `true`  | When `true`, the v11.0.0a3 bleach allowlist applies byte-for-byte. When `false`, also allow `<span>`, `<kbd>`, `<mark>`, `<figure>`, `<figcaption>`. Protocols, attributes, and script-injection rails are unchanged either way. |
 
+## `[ui]`
+
+v21.0.0a3. Operator-tunable accent color for the dashboard. The
+inspector accent picker on `/` writes these two keys back atomically
+via `PUT /api/settings/accent`. Defaults match the v19.0.0a4
+Linear-style violet baseline; the override `<style id="hm-custom-accent">`
+block is rendered only when the values diverge.
+
+| Key             | Type    | Default | Notes |
+|-----------------|---------|---------|-------|
+| `accent_hue`    | `float` | `290.0` | OKLCH hue in degrees (0-360). |
+| `accent_chroma` | `float` | `0.22`  | OKLCH chroma (0-0.30). Higher values are more saturated. |
+
+```toml
+[ui]
+accent_hue = 150
+accent_chroma = 0.18
+```
+
 ## Top-level keys
 
 These live at the root of the TOML file (no section header).
@@ -338,6 +358,10 @@ allow = ["harbormaster-plugin-jira"]
 [retention]
 network_log_max_rows = 25000
 memory_revisions_per_file = 50
+
+[ui]
+accent_hue = 150
+accent_chroma = 0.18
 ```
 
 This config registers two backends, two hosts, enables FleetQ
