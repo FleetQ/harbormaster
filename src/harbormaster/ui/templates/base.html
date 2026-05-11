@@ -191,6 +191,7 @@
   <button type="button"
           @click="$dispatch('hm-toggle-sidebar')"
           aria-label="Toggle sidebar"
+          title="Toggle sidebar"
           class="lg:hidden text-foreground-muted hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent px-1">
     <span aria-hidden="true">☰</span>
   </button>
@@ -204,6 +205,7 @@
     <button type="button"
             @click="$dispatch('hm-toggle-inspector')"
             aria-label="Toggle inspector"
+            title="Toggle inspector"
             class="lg:hidden text-foreground-muted hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent px-1">
       <span aria-hidden="true">ⓘ</span>
     </button>
@@ -280,8 +282,9 @@
     <div class="p-2 border-b border-border flex items-center justify-between">
       <span class="text-xs opacity-60">INSPECTOR</span>
       <button @click="toggleInspector()"
-              class="text-sm opacity-60 hover:opacity-100"
-              aria-label="Collapse inspector">«</button>
+              class="text-sm opacity-60 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-accent"
+              aria-label="Collapse inspector"
+              title="Collapse inspector">«</button>
     </div>
     {# v19.0.0a3: each page defines its own inspector content via this
        block. Default placeholder shows when a page declines to override. #}
@@ -295,8 +298,9 @@
   <!-- Floating expand button when inspector is collapsed. -->
   <button x-show="inspectorCollapsed"
           @click="toggleInspector()"
-          class="fixed right-2 top-14 bg-surface-2 border border-border rounded p-1 text-sm opacity-60 hover:opacity-100 z-40"
-          aria-label="Expand inspector">»</button>
+          class="fixed right-2 top-14 bg-surface-2 border border-border rounded p-1 text-sm opacity-60 hover:opacity-100 z-40 focus-visible:ring-2 focus-visible:ring-accent"
+          aria-label="Expand inspector"
+          title="Expand inspector">»</button>
 </div>
 
 <script>
@@ -610,7 +614,7 @@
        class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-surface-2 border border-border rounded-lg shadow-2xl p-4 pointer-events-auto max-w-2xl w-full max-h-[80vh] overflow-y-auto">
     <header class="flex items-center justify-between mb-4">
       <h2 class="text-lg font-semibold">Keyboard shortcuts</h2>
-      <button @click="open = false" aria-label="Close cheatsheet" class="text-foreground-muted hover:text-foreground text-xl leading-none">×</button>
+      <button @click="open = false" aria-label="Close cheatsheet" title="Close cheatsheet" class="text-foreground-muted hover:text-foreground text-xl leading-none focus-visible:ring-2 focus-visible:ring-accent">×</button>
     </header>
     <template x-for="group in groups" :key="group.name">
       <section class="mb-4">
