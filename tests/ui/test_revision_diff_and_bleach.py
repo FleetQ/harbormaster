@@ -269,11 +269,14 @@ def test_bleach_javascript_protocol_still_stripped() -> None:
 
 
 def test_diff_dropdown_present_in_memory_editor(tmp_path: Path) -> None:
+    """v19.0.0a6: the legacy memoriesPanel `diffFrom` state var was
+    renamed to `diffAgainst` on the new memoriesEditor, but the dropdown
+    contract (aria-label + loadDiff handler) is preserved."""
     p = _make_project_dir(tmp_path, "alpha")
     (p / "CLAUDE.md").write_text("hi\n", encoding="utf-8")
     client = TestClient(create_app(_config(tmp_path)))
     body = client.get("/projects/alpha").text
-    assert "diffFrom" in body
+    assert "diffAgainst" in body
     assert 'aria-label="Diff against revision"' in body
     assert "loadDiff()" in body
 
@@ -281,23 +284,27 @@ def test_diff_dropdown_present_in_memory_editor(tmp_path: Path) -> None:
 def test_loaddiff_calls_diff_endpoint_with_query_params(tmp_path: Path) -> None:
     """The Alpine factory's loadDiff() builds the right URL — guard
     against drift between the Python endpoint signature and the JS
-    caller."""
+    caller. v19.0.0a6: the new editor puts `?file=` first (then `&from=`
+    and `&format=html`) — the FastAPI route accepts query params in any
+    order so both shapes hit the same handler."""
     p = _make_project_dir(tmp_path, "alpha")
     (p / "CLAUDE.md").write_text("hi\n", encoding="utf-8")
     client = TestClient(create_app(_config(tmp_path)))
     body = client.get("/projects/alpha").text
-    assert "/memory-revisions/diff?from=" in body
-    assert "&file=" in body
+    assert "/memory-revisions/diff`" in body
+    assert "?file=" in body
+    assert "&from=" in body
 
 
-def test_toggle_history_clears_diff_state(tmp_path: Path) -> None:
-    """Closing the history panel must reset diff state so re-opening
-    is a clean slate."""
+def test_select_resets_diff_state(tmp_path: Path) -> None:
+    """v19.0.0a6: the legacy memoriesPanel toggleHistory() reset the
+    diff state when closing the history panel; the new memoriesEditor
+    has no separate history-panel toggle, so the equivalent guarantee
+    is provided by select(): switching files resets diffAgainst +
+    diffHtml so the new file starts with a clean diff slate."""
     p = _make_project_dir(tmp_path, "alpha")
     (p / "CLAUDE.md").write_text("hi\n", encoding="utf-8")
     client = TestClient(create_app(_config(tmp_path)))
     body = client.get("/projects/alpha").text
-    # All three diff state vars get reset in toggleHistory().
-    assert "this.diffFrom = ''" in body
-    assert "this.diffOutput = ''" in body
-    assert "this.diffError = ''" in body
+    assert "this.diffAgainst = ''" in body
+    assert "this.diffHtml = ''" in body

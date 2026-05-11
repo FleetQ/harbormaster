@@ -229,8 +229,13 @@ def test_template_includes_live_preview_pane(tmp_path: Path) -> None:
     r = client.get("/projects/alpha")
     assert r.status_code == 200
     body = r.text
-    assert "Live preview" in body
-    assert "updatePreview" in body
+    # v19.0.0a6: legacy memoriesPanel "Live preview" label is now
+    # "Live markdown preview" on the memoriesEditor split-pane layout;
+    # the equivalent debounced render handler is `renderPreview`
+    # (called from onContentChange). The endpoint contract
+    # (/api/render-markdown + 300ms debounce) is unchanged.
+    assert "Live markdown preview" in body
+    assert "renderPreview" in body
     assert "/api/render-markdown" in body
     # Debounce hint present.
     assert "debounce.300ms" in body
