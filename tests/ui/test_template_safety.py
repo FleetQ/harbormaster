@@ -56,6 +56,15 @@ ALLOWLIST: tuple[tuple[str, str], ...] = (
     # render assertion (test_dashboard_graph_renders_with_real_viewbox)
     # is the runtime backstop.
     ("dashboard.html", "!graphLoading"),
+    # dashboard.html v21.0.0a6 Overview-tab wrapper:
+    # The default tab is 'overview' (dashboardTabs() initializes
+    # `active: 'overview'`), so on a fresh page load with no
+    # `#tab=...` hash the wrapper is visible BEFORE Mermaid measures —
+    # matching the existing `!graphLoading` guard pattern. Deep-links
+    # to other tabs (#tab=activity / #tab=plugins) are operator-driven
+    # post-initial-render navigation; the Mermaid pre `<pre>` rerenders
+    # naturally when graphPanel's loadGraph() reruns.
+    ("dashboard.html", "active === 'overview'"),
 )
 
 

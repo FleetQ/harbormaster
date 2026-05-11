@@ -21,24 +21,12 @@
    in v19.0.0a6 / v19.0.0a5; Settings shows read-only metadata until
    v19.0.0a4 adds per-project budget edit. #}
 <div x-data="projectTabs()" x-init="restoreFromHash()">
-  <nav id="hm-project-tabs" class="border-b border-border mb-4 -mt-4 -mx-4 px-3">
-    <ul class="flex gap-0" role="tablist">
-      <template x-for="tab in tabs" :key="tab.id">
-        <li>
-          <button type="button"
-                  @click="setTab(tab.id)"
-                  :class="active === tab.id ? 'text-accent border-accent-strong' : 'text-foreground-muted border-transparent hover:text-foreground'"
-                  class="px-3 py-2 text-sm border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  :aria-selected="active === tab.id"
-                  :aria-label="tab.label + ' tab (shortcut ' + tab.shortcut + ')'"
-                  role="tab">
-            <span x-text="tab.label"></span>
-            <kbd class="ml-1 text-xs opacity-50" x-text="tab.shortcut"></kbd>
-          </button>
-        </li>
-      </template>
-    </ul>
-  </nav>
+  {# v21.0.0a6: tab strip extracted to shared partial. The
+     projectTabs() factory continues to own state (tabs/active/setTab);
+     the partial is presentation-only and reads from the parent scope. #}
+  {% with tabs_id="project" %}
+    {% include "_partials/_tabs.html" %}
+  {% endwith %}
 
   <!-- Overview tab: existing project header + status. -->
   <section x-show="active === 'overview'" x-transition role="tabpanel" aria-label="Overview">

@@ -147,10 +147,15 @@ def test_api_hosts_budget_excludes_unconfigured_targets() -> None:
 
 
 def test_network_html_has_timeline_view_button() -> None:
+    """v21.0.0a6: the inline Timeline button was replaced by a tab in
+    the shared `_partials/_tabs.html` strip. The tab id `timeline`
+    flows through networkTabs.setTab() → hm:network:view dispatch
+    so the timeline render path is untouched."""
     body = _read("network.html")
-    assert "hm-network-view-timeline" in body
-    assert "$dispatch('hm:network:view', 'timeline')" in body
-    assert ">\n      Timeline\n    <" in body
+    assert "id: 'timeline'" in body
+    assert "label: 'Timeline'" in body
+    # The dispatch still happens — only the surface changed.
+    assert "hm:network:view" in body
 
 
 def test_network_html_timeline_window_toggle_present() -> None:

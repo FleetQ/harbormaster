@@ -1,0 +1,33 @@
+{# v21.0.0a6: generic tab strip partial.
+   Presentation-only — the caller's enclosing Alpine scope MUST provide:
+     - `tabs`: array of {id, label, shortcut}
+     - `active`: id of the currently-active tab
+     - `setTab(id)`: switch handler
+   The caller also supplies a stable `tabs_id` (used for the wrapper id
+   so e2e tests + CSS can target it) and an optional `tabs_extra_class`
+   for caller-side style overrides.
+
+   This is intentionally a thin visual wrapper — keeping state on the
+   caller's factory means the existing tab panels (which already use
+   `x-show="active === 'foo'"`) work unmodified. #}
+<nav id="hm-{{ tabs_id | e }}-tabs"
+     class="border-b border-border mb-4 -mt-4 -mx-4 px-3 {{ tabs_extra_class | default('') }}"
+     role="tablist"
+     aria-label="{{ tabs_id | e }} tabs">
+  <ul class="flex gap-0">
+    <template x-for="tab in tabs" :key="tab.id">
+      <li>
+        <button type="button"
+                @click="setTab(tab.id)"
+                :class="active === tab.id ? 'text-accent border-accent-strong' : 'text-foreground-muted border-transparent hover:text-foreground'"
+                class="px-3 py-2 text-sm border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                :aria-selected="active === tab.id"
+                :aria-label="tab.label + ' tab (shortcut ' + tab.shortcut + ')'"
+                role="tab">
+          <span x-text="tab.label"></span>
+          <kbd class="ml-1 text-xs opacity-50" x-text="tab.shortcut"></kbd>
+        </button>
+      </li>
+    </template>
+  </ul>
+</nav>

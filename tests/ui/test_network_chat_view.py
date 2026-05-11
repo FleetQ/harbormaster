@@ -57,9 +57,17 @@ def test_view_toggle_persists_to_localstorage() -> None:
 
 
 def test_view_toggle_skeleton_dispatches_event() -> None:
+    """v21.0.0a6: the inline view-switch buttons were replaced by a
+    shared tab strip (`_partials/_tabs.html`). networkTabs.setTab()
+    now centralises the `hm:network:view` dispatch so the existing
+    networkPanel() listener keeps working unchanged."""
     src = _read_template()
-    assert "$dispatch('hm:network:view', 'graph')" in src
-    assert "$dispatch('hm:network:view', 'chat')" in src
+    assert "hm:network:view" in src
+    assert "new CustomEvent('hm:network:view'" in src
+    # Tabs include both graph and chat ids — these are the values
+    # that get passed through as `detail` on the dispatch.
+    assert "id: 'graph'" in src
+    assert "id: 'chat'" in src
 
 
 def test_chat_order_is_newest_first() -> None:

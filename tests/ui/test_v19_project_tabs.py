@@ -41,8 +41,11 @@ def test_tab_strip_renders_with_five_tabs() -> None:
         assert f"id: '{tab_id}'" in src, f"tab {tab_id!r} missing from factory"
         assert f"shortcut: '{i}'" in src, f"shortcut {i} missing"
     # Tab strip is wrapped in a nav with a stable id so e2e tests + CSS
-    # can target it without brittle class selectors.
-    assert 'id="hm-project-tabs"' in src
+    # can target it without brittle class selectors. v21.0.0a6 extracted
+    # the strip to `_partials/_tabs.html` — the id is now rendered by
+    # the partial using the tabs_id Jinja variable supplied here.
+    assert '{% include "_partials/_tabs.html" %}' in src
+    assert 'tabs_id="project"' in src
 
 
 def test_each_tab_has_a_panel_with_role_tabpanel() -> None:

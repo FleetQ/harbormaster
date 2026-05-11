@@ -128,9 +128,12 @@ def test_network_page_html_includes_cytoscape_vendor() -> None:
     body = r.text
     assert "/static/vendor/cytoscape.min.js" in body
     assert "networkPanel" in body
-    # Toggle infrastructure between graph and chat views.
-    assert "hm-network-view-graph" in body
-    assert "hm-network-view-chat" in body
+    # v21.0.0a6: the inline view-toggle buttons were replaced by a
+    # shared tab strip. The graph + chat ids still appear as tab ids
+    # and the legacy hm:network:view dispatch keeps wiring intact.
+    assert "id: 'graph'" in body
+    assert "id: 'chat'" in body
+    assert "hm:network:view" in body
 
 
 def test_cytoscape_vendor_file_present() -> None:

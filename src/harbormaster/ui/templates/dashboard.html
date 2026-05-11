@@ -54,6 +54,18 @@
   </div>
 </div>
 
+{# v21.0.0a6: dashboard tab system. The Overview pane carries the
+   existing dashboard (Quick Ask, KPI strip, card grid, project grid);
+   Activity adds a larger recent-events feed; Plugins lifts the bridge
+   + plugin status strip out for a dedicated surface. The dashboardTabs()
+   factory owns active/setTab/tabs; the _tabs.html partial renders the
+   strip. URL hash + 1-3 keyboard shortcuts wired in the factory. #}
+<div x-data="dashboardTabs()" x-init="restoreFromHash()">
+{% with tabs_id="dashboard" %}{% include "_partials/_tabs.html" %}{% endwith %}
+
+<!-- Overview tab: full existing dashboard content. -->
+<div x-show="active === 'overview'" x-transition role="tabpanel" aria-label="Overview">
+
 <!-- v19.0.0a5: Quick Ask card. Prominent at top of dashboard so
      operators can fire a question without scrolling to the project grid.
      Pragmatic implementation: navigates to /projects/{name}?q=... — the
@@ -946,11 +958,128 @@
   </div>
 </section>
 
+</div><!-- /Overview tab (v21.0.0a6) -->
+
+<!-- Activity tab: larger recent-events feed (last 100 MCP calls). -->
+<div x-show="active === 'activity'" x-transition role="tabpanel" aria-label="Recent activity">
+  <section x-data="dashboardActivityFeed()" x-init="load(); start()"
+           data-dashboard-activity-feed
+           class="bg-surface-2 border border-border rounded-md p-2.5">
+    <header class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-bold text-foreground-muted">Recent activity</h3>
+      <a href="/network" class="text-xs text-accent hover:underline">open network view →</a>
+    </header>
+    <p class="text-xs text-foreground-subtle mb-2"
+       x-text="`${events.length} event${events.length === 1 ? '' : 's'} (last 100)`"></p>
+    <ul class="text-xs space-y-1 max-h-[60vh] overflow-y-auto">
+      <template x-for="ev in events" :key="'dafeed:' + ev.timestamp_ms + ':' + ev.tool + ':' + ev.target">
+        <li class="font-mono text-foreground-muted truncate border-b border-border-subtle py-0.5">
+          <span class="text-foreground-subtle" x-text="ev.time"></span>
+          <span class="text-accent ml-1" x-text="ev.tool"></span>
+          <span class="text-foreground-muted ml-1" x-text="ev.target"></span>
+        </li>
+      </template>
+      <li x-show="!events.length"
+          data-empty-state="dashboard.no-activity"
+          class="text-foreground-dim text-[11px] leading-snug border border-border-subtle bg-surface-2/40 rounded p-2">
+        <span class="block text-foreground-muted font-semibold mb-0.5">No recent activity.</span>
+        Ask any project something via your MCP client and the call will appear here in real-time.
+      </li>
+    </ul>
+  </section>
+</div>
+
+<!-- Plugins tab: dedicated surface for the bridge + plugin status strip. -->
+<div x-show="active === 'plugins'" x-transition role="tabpanel" aria-label="Plugins">
+  <section x-data="statusStrip()" x-init="loadAll()"
+           data-dashboard-plugins-tab
+           class="grid grid-cols-1 md:grid-cols-2 gap-2">
+    <article class="border border-border rounded-md p-2.5 bg-surface-2/40">
+      <header class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-bold text-foreground-muted">FleetQ Bridge</h3>
+      </header>
+      <p class="text-xs text-foreground-muted">
+        <span x-text="bridge.host || '—'"></span>
+        <span class="ml-2 text-foreground-subtle" x-text="bridge.status || ''"></span>
+      </p>
+    </article>
+    <article class="border border-border rounded-md p-2.5 bg-surface-2/40">
+      <header class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-bold text-foreground-muted">Plugins</h3>
+      </header>
+      <p class="text-xs text-foreground-muted"
+         x-text="`${pluginCount || 0} plugin${pluginCount === 1 ? '' : 's'} discovered`"></p>
+    </article>
+  </section>
+</div>
+
+</div><!-- /dashboardTabs wrapper (v21.0.0a6) -->
+
 {# v3.0.0a7: per-card inline ask form needs the askForm() Alpine
    component. Dashboard owns its own card markup so the partial's
    form HTML isn't reused — only the script.
 #}
 {% include "_partials/_ask_form_script.html" %}
+
+<script>
+  // v21.0.0a6: dashboard tab controller. Mirrors projectTabs() shape
+  // (tabs/active/restoreFromHash/setTab) so the _tabs.html partial
+  // works without modification. Keys 1..3 cycle tabs (skipped when
+  // typing or when modifier keys are held).
+  function dashboardTabs() {
+    return {
+      tabs: [
+        { id: 'overview', label: 'Overview',        shortcut: '1' },
+        { id: 'activity', label: 'Recent activity', shortcut: '2' },
+        { id: 'plugins',  label: 'Plugins',         shortcut: '3' },
+      ],
+      active: 'overview',
+      restoreFromHash() {
+        const m = window.location.hash.match(/^#tab=([\w-]+)$/);
+        if (m && this.tabs.find(t => t.id === m[1])) this.active = m[1];
+        window.addEventListener('keydown', (e) => {
+          if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+          if (e.target.isContentEditable) return;
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
+          if (/^[1-3]$/.test(e.key)) {
+            const idx = parseInt(e.key, 10) - 1;
+            if (this.tabs[idx]) this.setTab(this.tabs[idx].id);
+          }
+        });
+      },
+      setTab(id) {
+        this.active = id;
+        window.history.replaceState(null, '', '#tab=' + id);
+      },
+    };
+  }
+
+  // v21.0.0a6: dashboardActivityFeed — larger sibling of the
+  // recentActivityCard. Hits /api/network/events?limit=100; mirrors
+  // the polling pattern so the implementation stays a single fetch
+  // every 5s without an SSE subscription.
+  function dashboardActivityFeed() {
+    return {
+      events: [],
+      timer: null,
+      async load() {
+        try {
+          const r = await hmFetch('/api/network/events?limit=100');
+          if (!r || !r.ok) return;
+          const data = await r.json();
+          const items = data.events || data.items || [];
+          this.events = items.map((ev) => ({
+            ...ev,
+            time: new Date(ev.timestamp_ms || Date.now()).toLocaleTimeString(),
+          }));
+        } catch (_) { /* swallow — empty list renders the empty state */ }
+      },
+      start() {
+        this.timer = setInterval(() => this.load(), 5000);
+      },
+    };
+  }
+</script>
 
 <script>
   // v8.0.0a5: KPI strip Alpine scope. Single /api/kpi fetch on
