@@ -121,19 +121,6 @@ dev = [
     # tests/ui/_screenshot_diff/ which run in the regular -m '' pass.
     "Pillow>=10.0",
 ]
-ui-test = [
-    # v3.0.0a10: headless browser tests for the dashboard / fan-out /
-    # project_detail flows. Browser tests opt-in via `-m browser`.
-    # Operators install the chromium binary separately:
-    #     uv run playwright install chromium
-    "playwright>=1.45",
-    "pytest-playwright>=0.5",
-    # v13.0.0a1: Pillow also needed for the screenshot-diff harness
-    # under -m browser (helper.py uses ImageChops). Keeps `uv sync
-    # --extra ui-test` self-sufficient.
-    "Pillow>=10.0",
-]
-
 [project.scripts]
 harbormaster-mcp = "harbormaster.__main__:main"
 harbormaster-ui = "harbormaster.ui.cli:main"
@@ -198,9 +185,3 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 python_files = "test_*.py"
 addopts = "-v"
-# v3.0.0a10: opt-in markers. Browser tests are skipped unless `-m browser`
-# is passed; CI's smoke-ui-browser job runs them after installing the
-# Playwright browser binaries.
-markers = [
-    "browser: requires Playwright + chromium (gate with -m browser)",
-]

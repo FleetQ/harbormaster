@@ -2547,28 +2547,31 @@ def register_routes(
     # /api/graph polls hit the cache and stat the manifest file only.
     graph_cache = ManifestCache()
 
-    @app.get("/api/graph")
-    async def api_graph(
-        include_dev_deps: bool = False,
-        transitive: bool = False,
-        format: str = "mermaid",
+    # v21.0.2 perf: /api/graph used to block the asyncio event loop for
+    # ~2s (lockfile walk across all projects), serialising every other
+    # /api/* request behind it on a single-worker uvicorn. Two fixes:
+    #
+    #   1. compute in a worker thread via asyncio.to_thread, so the
+    #      event loop stays responsive while filesystem work happens.
+    #   2. TTL cache the payload by (include_dev_deps, transitive,
+    #      format). Dependency graphs change on a project add/remove
+    #      or manifest edit — slow on the human timescale. 60s TTL
+    #      keeps repeated polls (sidebar refresh, autodetect, second
+    #      tab) free of any disk work.
+    _graph_ttl_s = 60.0
+    _graph_payload_cache: dict[
+        tuple[bool, bool, str],
+        tuple[float, dict[str, object]],
+    ] = {}
+
+    def _compute_graph_payload(
+        include_dev_deps: bool, transitive: bool, fmt: str,
     ) -> dict[str, object]:
-        """Cross-project graph + ready-to-render mermaid markup.
-
-        v2.1.0a1: surfaces the v2.0.0a1 `transitive` toggle so the
-        dashboard can let the user flip between manifest-only and
-        lockfile-resolved deps.
-
-        v21.0.0a9: optional `?format=cytoscape` adds a `cytoscape`
-        field carrying nodes/edges in Cytoscape elements shape, so the
-        dashboard can render with Cytoscape (force-directed) instead
-        of the static Mermaid block. The `mermaid` field is always
-        emitted for backwards compat.
-        """
-        from pathlib import Path
-
+        """Sync builder — called from asyncio.to_thread."""
         manifests = []
-        for p in discover_projects(config.projects, ignore_patterns=config.ignore.patterns):
+        for p in discover_projects(
+            config.projects, ignore_patterns=config.ignore.patterns,
+        ):
             m = graph_cache.get(Path(p.path))
             if m is not None:
                 manifests.append(m)
@@ -2586,11 +2589,39 @@ def register_routes(
             "graph": graph.as_dict(),
             "mermaid": graph_to_mermaid(graph),
         }
-        if format == "cytoscape":
-            # v21.0.0a9: also emit Cytoscape elements. We keep
-            # `mermaid` in the same response so the dashboard can
-            # let the operator toggle without a second round-trip.
+        if fmt == "cytoscape":
             payload["cytoscape"] = _graph_to_cytoscape(graph)
+        return payload
+
+    @app.get("/api/graph")
+    async def api_graph(
+        include_dev_deps: bool = False,
+        transitive: bool = False,
+        format: str = "mermaid",
+    ) -> dict[str, object]:
+        """Cross-project graph + ready-to-render mermaid markup.
+
+        v2.1.0a1: surfaces the v2.0.0a1 `transitive` toggle so the
+        dashboard can let the user flip between manifest-only and
+        lockfile-resolved deps.
+
+        v21.0.0a9: optional `?format=cytoscape` adds a `cytoscape`
+        field carrying nodes/edges in Cytoscape elements shape, so the
+        dashboard can render with Cytoscape (force-directed) instead
+        of the static Mermaid block. The `mermaid` field is always
+        emitted for backwards compat.
+
+        v21.0.2 perf: TTL cached (60s) + computed in a worker thread.
+        """
+        key = (include_dev_deps, transitive, format)
+        now = time.monotonic()
+        cached = _graph_payload_cache.get(key)
+        if cached is not None and (now - cached[0]) < _graph_ttl_s:
+            return cached[1]
+        payload = await asyncio.to_thread(
+            _compute_graph_payload, include_dev_deps, transitive, format,
+        )
+        _graph_payload_cache[key] = (now, payload)
         return payload
 
     @app.get("/api/kpi")
