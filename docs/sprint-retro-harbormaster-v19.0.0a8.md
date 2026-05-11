@@ -1,7 +1,14 @@
-# Sprint Retro — harbormaster v19.0.0a6
+# Sprint Retro — harbormaster v19.0.0a8
 
 **Phase 6 of v19.0** — full Memories tab implementation. Closes the
 operator's "v10 over-reported memories editor" gripe.
+
+> **Versioning note** — Phase 6 was originally specced to ship as
+> `v19.0.0a6`, parallel with Phase 5 (`v19.0.0a5`). During Phase 6
+> work, an unscheduled Phase 7 (SSE-driven inspector activity feed)
+> jumped onto main and claimed both `v19.0.0a6` and `v19.0.0a7`
+> consecutively. To preserve semver monotonicity we shipped this work
+> as `v19.0.0a8`. Lessons captured in §Friction.
 
 ## What shipped
 
@@ -94,7 +101,16 @@ state.
    `dashboard.html` modifications from Phase 7 leaked into our
    `git status`. **Fix**: always use `git worktree add` for parallel
    branch work — Phase 6 finished cleanly only after moving to a
-   `/tmp/hm-memories-editor` worktree.
+   `/tmp/hm-memories-editor` worktree. CLAUDE.md already mandates this
+   for any agent that does git mutations; the spec for parallel-phase
+   sprints needs to enforce `isolation: "worktree"` on every phase, not
+   just the ones flagged risky.
+3. **Semver collisions when phases race.** Spec said "ship a6", but
+   Phase 7 raced ahead and claimed both a6 and a7 sequentially. We
+   shipped as a8. **Fix**: the sprint orchestrator should hand each
+   phase a guaranteed-unique alpha number at dispatch time, not at
+   ship time, OR each phase should bump to "next-available" via a
+   `git ls-remote --tags` lookup right before tagging.
 3. **`/api/render-markdown` body shape mismatch.** The endpoint
    accepts `{text: …}` (with optional `project: …`), NOT `{content: …}`
    (which is the PUT memories body). Test
@@ -113,8 +129,10 @@ Settings) is now anchored:
 - a3 — context-aware inspector pane
 - a4 — Linear violet tokens + compact density
 - a5 — dashboard relayout
-- **a6 — Memories editor (this release)**
-- a7 — SSE-driven inspector activity feed (in flight)
-- TBD — Q&A History project-scoped recall (target: v19.0.0a8)
-- TBD — per-project budget editor (target: v19.0.0a9)
+- a6 — (claimed by Phase 7's first bump; effectively skipped for
+       Memories editor)
+- a7 — SSE-driven inspector activity feed (Phase 7)
+- **a8 — Memories editor (this release, Phase 6 deliverable)**
+- TBD — Q&A History project-scoped recall (target: next available alpha)
+- TBD — per-project budget editor (target: alpha after that)
 - v19.0.0 GA — polish + screenshot-diff baselines
