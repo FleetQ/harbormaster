@@ -128,12 +128,15 @@ def test_overview_tab_keeps_existing_header_status_and_forms() -> None:
 @pytest.mark.parametrize(
     "tab_id,marker",
     [
-        ("memories", "lands in v19.0.0a6"),
+        # v19.0.0a6: Memories tab dropped its placeholder banner — it now
+        # mounts the full memoriesEditor (covered by
+        # tests/ui/test_v19_memories_tab.py). Q&A History keeps its
+        # placeholder until v19.0.0a5 lands the project-scoped recall view.
         ("qa-history", "v19.0.0a5"),
     ],
 )
 def test_placeholder_tabs_signal_target_version(tab_id: str, marker: str) -> None:
-    """Memories and Q&A History tabs ship as placeholders in a2; the
+    """Q&A History tab still ships as a placeholder in a6; the
     operator needs to see the target alpha for the full impl so they
     don't file regressions when those tabs look bare."""
     src = _read()

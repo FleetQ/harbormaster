@@ -285,7 +285,11 @@ def test_history_panel_link_present_in_template(tmp_path: Path) -> None:
     r = client.get("/projects/alpha")
     assert r.status_code == 200
     body = r.text
-    # Toolbar history button + panel ids.
-    assert "Toggle revision history" in body
-    assert "loadHistory" in body
+    # v19.0.0a6: the legacy memoriesPanel "Toggle revision history" button
+    # was replaced by an inline "diff vs:" dropdown on the new
+    # memoriesEditor toolbar; the equivalent revision-loader is
+    # `loadRevisions` (not `loadHistory`). The /api/.../memory-history
+    # endpoint contract is unchanged — still queried via ?file=.
+    assert 'aria-label="Diff against revision"' in body
+    assert "loadRevisions" in body
     assert "memory-history" in body

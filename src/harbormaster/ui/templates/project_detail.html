@@ -84,21 +84,386 @@
 {% include "_partials/delegate_form.html" %}
   </section>
 
-  <!-- Memories tab: placeholder for v19.0.0a6 dedicated editor; the
-       existing memoriesPanel viewer/editor remains mounted below the
-       banner so current edit/diff/history flows keep working until
-       a6's redesign lands. -->
-  <section x-show="active === 'memories'" x-transition role="tabpanel" aria-label="Memories">
-    <div class="text-sm text-foreground-muted p-2.5 mb-4 text-center border border-border rounded bg-surface-2/40">
-      Memories editor — full implementation lands in v19.0.0a6.
-    </div>
+  <!-- v19.0.0a6: Memories tab — split-pane editor (file list | textarea +
+       live markdown preview), with revision dropdown for inline diff and
+       a local undo/redo history stack. Replaces the v19.a2 placeholder
+       banner and the legacy memoriesPanel viewer block (both removed). -->
+  <section x-show="active === 'memories'"
+           x-transition
+           role="tabpanel"
+           aria-label="Memories"
+           x-data="memoriesEditor({{ project_name | tojson }})"
+           x-init="loadFiles()">
+    <div class="grid gap-3" style="grid-template-columns: 220px 1fr; min-height: calc(100vh - 16rem);">
 
-{# v10.0.0a5: per-project memories viewer (read-only). Lists
-   CLAUDE.md + .serena/memories/*.md for the current project; click a
-   file to render its markdown in-place. Uses vendored marked.min.js. #}
-<section x-data="memoriesPanel({ project: {{ project_name | tojson }} })"
-         x-init="load()"
-         class="mb-4 border border-border rounded-md p-2.5 bg-surface-2/40">
+      <!-- LEFT: file list -->
+      <aside class="border border-border rounded-md bg-surface-2/40 p-2 overflow-y-auto">
+        <header class="flex items-center justify-between mb-2">
+          <h3 class="text-xs uppercase text-foreground-muted">Files</h3>
+          <button type="button"
+                  @click="newFile()"
+                  class="text-xs text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded px-1"
+                  aria-label="New memory file">+ new</button>
+        </header>
+        <ul class="space-y-0.5" role="listbox" aria-label="Memory files">
+          <template x-for="file in files" :key="'memfile:' + file.name">
+            <li>
+              <button type="button"
+                      @click="select(file)"
+                      :aria-current="active && active.name === file.name ? 'true' : 'false'"
+                      :aria-label="`Open memory file ${file.name}`"
+                      :class="active && active.name === file.name
+                              ? 'bg-accent-soft/40 text-accent'
+                              : 'text-foreground-muted hover:bg-surface-3/50 hover:text-accent'"
+                      class="w-full text-left px-2 py-1 text-xs rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                <span x-text="file.name" class="font-mono"></span>
+                <span class="text-[10px] text-foreground-subtle ml-1"
+                      x-text="formatSize(file.size)"></span>
+                <span class="block mt-0.5 flex flex-wrap gap-1"
+                      x-show="(file.tags || []).length > 0">
+                  <template x-for="t in (file.tags || [])"
+                            :key="'tag:' + file.name + ':' + t">
+                    <span class="text-[9px] px-1.5 py-0 rounded bg-accent-soft/40 text-accent border border-accent-soft/60"
+                          x-text="t"></span>
+                  </template>
+                </span>
+              </button>
+            </li>
+          </template>
+          <li x-show="!files.length"
+              role="status"
+              data-empty-state="memories.no-files"
+              class="text-xs text-foreground-muted p-2">
+            no memory files
+          </li>
+        </ul>
+        <p x-show="loadError" role="alert" aria-live="assertive"
+           class="mt-2 text-xs text-danger" x-text="loadError"></p>
+      </aside>
+
+      <!-- RIGHT: editor + preview, or empty state -->
+      <div x-show="!active" class="text-foreground-muted text-sm flex items-center justify-center border border-border rounded-md bg-surface-2/40">
+        <span>Select a memory file to edit, or click "+ new" to create one.</span>
+      </div>
+
+      <div x-show="active" class="grid gap-2 min-h-0" style="grid-template-rows: auto 1fr auto;">
+
+        <!-- Toolbar -->
+        <div class="flex items-center gap-2 text-xs flex-wrap">
+          <span x-text="active && active.name" class="font-mono font-semibold flex-1 truncate"></span>
+          <span x-show="dirty" class="text-warning text-[10px]" aria-live="polite">unsaved</span>
+          <button type="button"
+                  @click="save()"
+                  :disabled="!dirty || saving"
+                  class="bg-accent-soft/60 text-accent hover:bg-accent-soft px-2 py-1 rounded disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  aria-label="Save memory file">
+            <span x-text="saving ? 'Saving…' : 'Save'"></span>
+          </button>
+          <button type="button"
+                  @click="undo()"
+                  :disabled="!canUndo()"
+                  class="hover:bg-surface-3/50 px-2 py-1 rounded disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  aria-label="Undo">↶ Undo</button>
+          <button type="button"
+                  @click="redo()"
+                  :disabled="!canRedo()"
+                  class="hover:bg-surface-3/50 px-2 py-1 rounded disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  aria-label="Redo">↷ Redo</button>
+          <label class="text-foreground-subtle">diff vs:
+            <select x-model="diffAgainst"
+                    @change="loadDiff()"
+                    aria-label="Diff against revision"
+                    class="bg-surface-1 border border-border rounded px-1 py-0.5 text-foreground">
+              <option value="">none</option>
+              <template x-for="r in revisions" :key="'rev:' + r.id">
+                <option :value="r.id"
+                        x-text="r.saved_at + ' (' + (r.bytes_diff > 0 ? '+' : '') + r.bytes_diff + 'B)'"></option>
+              </template>
+            </select>
+          </label>
+        </div>
+
+        <!-- Split: textarea LEFT, preview RIGHT -->
+        <div class="grid grid-cols-2 gap-2 min-h-0">
+          <textarea x-model="content"
+                    @input.debounce.300ms="onContentChange()"
+                    @keydown.meta.z.prevent="undo()"
+                    @keydown.ctrl.z.prevent="undo()"
+                    @keydown.meta.shift.z.prevent="redo()"
+                    @keydown.ctrl.shift.z.prevent="redo()"
+                    aria-label="Memory file content"
+                    class="bg-surface-1 border border-border rounded p-2 text-xs font-mono resize-none overflow-y-auto text-foreground focus:border-accent-strong focus:outline-none"
+                    style="min-height: 24rem;"></textarea>
+          <div class="bg-surface-1 border border-border rounded p-2 text-xs prose prose-invert max-w-none overflow-y-auto"
+               style="min-height: 24rem;"
+               aria-label="Live markdown preview"
+               x-html="preview"></div>
+        </div>
+
+        <!-- Diff panel (only when a revision is selected) -->
+        <div x-show="diffAgainst"
+             aria-label="Diff against selected revision"
+             class="border border-border rounded p-2 text-xs font-mono whitespace-pre overflow-auto bg-surface-2/40 max-h-64"
+             x-html="diffHtml"></div>
+
+        <p x-show="saveError" role="alert" aria-live="assertive"
+           class="text-xs text-danger" x-text="saveError"></p>
+      </div>
+    </div>
+  </section>
+
+  <script src="/static/vendor/marked.min.js"></script>
+  <script>
+    // v19.0.0a6: split-pane Memories editor. Replaces the legacy
+    // memoriesPanel viewer. Backed by the existing API surface
+    // (/api/projects/{name}/memories, memory-history, memory-revisions/diff,
+    // /api/render-markdown).
+    function memoriesEditor(projectName) {
+      return {
+        project: projectName,
+        files: [],
+        active: null,
+        content: '',
+        preview: '',
+        dirty: false,
+        saving: false,
+        saveError: '',
+        loadError: '',
+        diffAgainst: '',
+        diffHtml: '',
+        revisions: [],
+        // Local undo/redo stack. Index 0 = newest. historyIndex points
+        // at the current "live" entry; undo moves towards older snapshots.
+        history: [],
+        historyIndex: 0,
+        // Snapshot of the on-disk content at the time of last load/save,
+        // so dirty-flag toggles compare against persisted state — not the
+        // first entry of the undo stack (which is the same value but
+        // shifts as the user edits).
+        savedContent: '',
+
+        async loadFiles() {
+          try {
+            const r = await hmFetch(`/api/projects/${encodeURIComponent(this.project)}/memories`);
+            if (!r.ok) {
+              this.loadError = `failed to list memories (${r.status})`;
+              return;
+            }
+            const d = await r.json();
+            this.files = d.files || [];
+            this.loadError = '';
+            // Auto-select first file if nothing chosen yet.
+            if (!this.active && this.files.length) {
+              await this.select(this.files[0]);
+            }
+          } catch (e) {
+            this.loadError = 'failed to list memories: ' + e.message;
+          }
+        },
+
+        async select(file) {
+          try {
+            const r = await hmFetch(
+              `/api/projects/${encodeURIComponent(this.project)}/memories/`
+              + encodeURIComponent(file.name).replace(/%2F/g, '/')
+            );
+            if (!r.ok) {
+              this.loadError = `failed to open ${file.name} (${r.status})`;
+              return;
+            }
+            const text = await r.text();
+            this.active = file;
+            this.content = text;
+            this.savedContent = text;
+            this.dirty = false;
+            this.history = [{ content: text, ts: Date.now() }];
+            this.historyIndex = 0;
+            this.diffAgainst = '';
+            this.diffHtml = '';
+            await this.loadRevisions();
+            await this.renderPreview();
+          } catch (e) {
+            this.loadError = 'failed to open file: ' + e.message;
+          }
+        },
+
+        async loadRevisions() {
+          try {
+            const r = await hmFetch(
+              `/api/projects/${encodeURIComponent(this.project)}/memory-history`
+              + `?file=${encodeURIComponent(this.active.name)}`
+            );
+            if (!r.ok) {
+              this.revisions = [];
+              return;
+            }
+            const d = await r.json();
+            this.revisions = d.revisions || [];
+          } catch (e) {
+            this.revisions = [];
+          }
+        },
+
+        onContentChange() {
+          this.dirty = (this.content !== this.savedContent);
+          // Push onto undo stack only when content differs from current
+          // history head, so 300ms debounced typing produces sensible
+          // checkpoints rather than per-keystroke spam.
+          if (this.history[this.historyIndex]
+              && this.history[this.historyIndex].content === this.content) {
+            // No change since last snapshot — just refresh preview.
+            this.renderPreview();
+            return;
+          }
+          // Truncate any redo entries (newer than historyIndex) since the
+          // user has diverged from that future timeline.
+          if (this.historyIndex > 0) {
+            this.history = this.history.slice(this.historyIndex);
+            this.historyIndex = 0;
+          }
+          this.history.unshift({ content: this.content, ts: Date.now() });
+          this.renderPreview();
+        },
+
+        async renderPreview() {
+          try {
+            const r = await hmFetch('/api/render-markdown', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: this.content, project: this.project }),
+            });
+            this.preview = r.ok ? await r.text() : '';
+          } catch (e) {
+            this.preview = '';
+          }
+        },
+
+        async save() {
+          if (!this.active || this.saving) return;
+          this.saving = true;
+          this.saveError = '';
+          try {
+            const r = await hmFetch(
+              `/api/projects/${encodeURIComponent(this.project)}/memories/`
+              + encodeURIComponent(this.active.name).replace(/%2F/g, '/'),
+              {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: this.content }),
+              }
+            );
+            if (!r.ok) {
+              this.saveError = `save failed (${r.status})`;
+              return;
+            }
+            this.savedContent = this.content;
+            this.dirty = false;
+            await this.loadRevisions();
+            await this.loadFiles();
+          } catch (e) {
+            this.saveError = 'save failed: ' + e.message;
+          } finally {
+            this.saving = false;
+          }
+        },
+
+        canUndo() { return this.historyIndex < this.history.length - 1; },
+        canRedo() { return this.historyIndex > 0; },
+
+        undo() {
+          if (!this.canUndo()) return;
+          this.historyIndex += 1;
+          this.content = this.history[this.historyIndex].content;
+          this.dirty = (this.content !== this.savedContent);
+          this.renderPreview();
+        },
+
+        redo() {
+          if (!this.canRedo()) return;
+          this.historyIndex -= 1;
+          this.content = this.history[this.historyIndex].content;
+          this.dirty = (this.content !== this.savedContent);
+          this.renderPreview();
+        },
+
+        async loadDiff() {
+          if (!this.diffAgainst || !this.active) {
+            this.diffHtml = '';
+            return;
+          }
+          try {
+            const r = await hmFetch(
+              `/api/projects/${encodeURIComponent(this.project)}/memory-revisions/diff`
+              + `?file=${encodeURIComponent(this.active.name)}`
+              + `&from=${encodeURIComponent(this.diffAgainst)}`
+              + `&format=html`
+            );
+            this.diffHtml = r.ok ? await r.text() : '';
+          } catch (e) {
+            this.diffHtml = '';
+          }
+        },
+
+        async newFile() {
+          const name = window.prompt(
+            'New memory file name (e.g. CLAUDE.md or .serena/memories/notes.md):'
+          );
+          if (!name) return;
+          try {
+            const r = await hmFetch(
+              `/api/projects/${encodeURIComponent(this.project)}/memories`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  filename: name,
+                  content: '# ' + name + '\n\n',
+                }),
+              }
+            );
+            if (!r.ok) {
+              this.saveError = `create failed (${r.status})`;
+              return;
+            }
+            await this.loadFiles();
+            // Auto-select the new file if it's now in the list.
+            const created = this.files.find((f) => f.name === name);
+            if (created) await this.select(created);
+          } catch (e) {
+            this.saveError = 'create failed: ' + e.message;
+          }
+        },
+
+        formatSize(b) {
+          if (typeof b !== 'number') return '';
+          if (b < 1024) return b + 'B';
+          return (b / 1024).toFixed(1) + 'KB';
+        },
+      };
+    }
+  </script>
+{# v19.0.0a6: legacy memoriesPanel REMOVED.
+
+   The v10.0.0a5 viewer + v11/v12/v13/v14/v15 editor stack (the entire
+   `memoriesPanel` Alpine component, its file list, edit toolbar, tag
+   chip editor, history aside, diff panel, new-file form, and the 535-
+   line `function memoriesPanel(initial) { ... }` script) used to
+   live below this comment. It has been replaced wholesale by the
+   split-pane `memoriesEditor` Alpine component at the top of the
+   Memories tab.
+
+   The new editor reuses the same backend API surface
+   (memory-history, memory-revisions/diff, render-markdown), so
+   server-side bleach-sanitised preview, undo/redo (via local stack),
+   and HTML diff still work — they're just driven by a simpler
+   component with a fixed split-pane layout instead of toggling
+   edit/preview modes inline.
+
+   Wrapped in {%- if false -%} so Jinja never emits the legacy markup
+   even if some downstream regex stumbles into a stray closing fence.
+#}
+{% if false %}
+<section style="display:none" data-legacy-removed="memoriesPanel-v15">
   <header class="mb-2 flex items-baseline justify-between gap-2 flex-wrap">
     <h3 class="text-base font-bold text-foreground-muted">Memories</h3>
     <span class="text-xs text-foreground-subtle"
@@ -945,6 +1310,7 @@
   }
 </script>
   </section>
+{% endif %}
 
   <!-- Trajectories tab: relocated trajectoryList component (v19.0.0a2;
        previously rendered standalone below the memories panel). -->
