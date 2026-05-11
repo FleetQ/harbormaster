@@ -9,43 +9,28 @@
   <span class="text-foreground-muted">Network</span>
 </nav>
 
-<header class="mb-4 flex items-center justify-between gap-2 flex-wrap">
+<header class="mb-4">
   <div>
     <h2 class="text-xl font-bold text-accent">Inter-project network</h2>
     <p class="text-xs text-foreground-subtle mt-1">
       Live MCP-call events. Edges thicken with call frequency.
     </p>
   </div>
-  <div class="flex items-center gap-2 text-xs">
-    <span class="text-foreground-subtle">view:</span>
-    <button type="button" id="hm-network-view-graph"
-            x-data
-            @click="$dispatch('hm:network:view', 'graph')"
-            aria-label="Switch to graph view"
-            class="px-2 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent">
-      Graph
-    </button>
-    <button type="button" id="hm-network-view-chat"
-            x-data
-            @click="$dispatch('hm:network:view', 'chat')"
-            aria-label="Switch to chat view"
-            class="px-2 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent">
-      Chat
-    </button>
-    <!-- v14.0.0a4: timeline view — horizontal-bar event density -->
-    <button type="button" id="hm-network-view-timeline"
-            x-data
-            @click="$dispatch('hm:network:view', 'timeline')"
-            aria-label="Switch to timeline view"
-            class="px-2 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent">
-      Timeline
-    </button>
-  </div>
 </header>
+
+{# v21.0.0a6: network tabs. The networkTabs() factory owns active/setTab
+   and (for graph/chat/timeline) re-dispatches the legacy hm:network:view
+   event consumed by networkPanel(); the stats tab toggles a sibling
+   `data-network-stats` block. #}
+<div x-data="networkTabs()" x-init="restoreFromHash()" class="mb-3">
+  {% with tabs_id="network" %}{% include "_partials/_tabs.html" %}{% endwith %}
+</div>
 
 <!-- v11.0.0a6: aggregate metrics over the last 1h / 24h / 7d.
      Polls /api/network/stats; the window dropdown re-fetches. -->
 <section x-data="networkStats()" x-init="loadStats()"
+         data-network-stats
+         x-show="$store.hmNetTab.active === 'stats'"
          class="mb-4 border border-border rounded-md p-2 bg-surface-2/40">
   <header class="flex items-center justify-between gap-2 mb-2 flex-wrap">
     <h3 class="text-sm font-bold text-foreground-muted">Network stats</h3>
@@ -117,6 +102,7 @@
 </section>
 
 <section x-data="networkPanel()" x-init="init()"
+         x-show="$store.hmNetTab.active !== 'stats'"
          class="border border-border rounded-md p-2 bg-surface-2/40">
   {# v13.0.0a4: server-side filter controls. Tool + source dropdowns
      are derived from the stats panel above (auto-refresh every 30s);
@@ -833,6 +819,54 @@
         let l = this.anchorRect.left + (this.anchorRect.width / 2) - (w / 2);
         l = Math.max(12, Math.min(l, window.innerWidth - w - 12));
         return l;
+      },
+    };
+  }
+
+  // v21.0.0a6: networkTabs() controller — bridges the unified tab
+  // strip (Graph/Chat/Timeline/Stats) to the existing networkPanel
+  // which already listens to `hm:network:view` events. The Stats
+  // branch toggles a sibling Alpine store consumed by both panels.
+  document.addEventListener('alpine:init', () => {
+    if (!window.Alpine.store('hmNetTab')) {
+      window.Alpine.store('hmNetTab', { active: 'graph' });
+    }
+  });
+  function networkTabs() {
+    return {
+      tabs: [
+        { id: 'graph',    label: 'Graph',    shortcut: '1' },
+        { id: 'chat',     label: 'Chat',     shortcut: '2' },
+        { id: 'timeline', label: 'Timeline', shortcut: '3' },
+        { id: 'stats',    label: 'Stats',    shortcut: '4' },
+      ],
+      active: 'graph',
+      restoreFromHash() {
+        const m = window.location.hash.match(/^#tab=([\w-]+)$/);
+        if (m && this.tabs.find(t => t.id === m[1])) this.active = m[1];
+        this._publish();
+        window.addEventListener('keydown', (e) => {
+          if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+          if (e.target.isContentEditable) return;
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
+          if (/^[1-4]$/.test(e.key)) {
+            const idx = parseInt(e.key, 10) - 1;
+            if (this.tabs[idx]) this.setTab(this.tabs[idx].id);
+          }
+        });
+      },
+      setTab(id) {
+        this.active = id;
+        window.history.replaceState(null, '', '#tab=' + id);
+        this._publish();
+      },
+      _publish() {
+        // Mirror to Alpine store so the stats panel toggle works.
+        try { window.Alpine.store('hmNetTab').active = this.active; } catch (_) {}
+        // Re-dispatch as the legacy view event for networkPanel.
+        if (this.active !== 'stats') {
+          window.dispatchEvent(new CustomEvent('hm:network:view', { detail: this.active }));
+        }
       },
     };
   }
