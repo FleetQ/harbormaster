@@ -7,9 +7,12 @@
 name: CI
 
 on:
+  # v21.0.3: removed `tags: ["v*"]` — tag pushes used to spawn a SECOND
+  # CI run alongside the main-push CI run with identical SHA + timestamp,
+  # which produced a non-deterministic ordering in publish.yml's verify-ci
+  # query and let one flaky shard block release of green commits.
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:

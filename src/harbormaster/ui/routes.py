@@ -1890,6 +1890,41 @@ def register_routes(
     # (so the first hit is always a miss → walk → cache).
     _last_dirs: list[Path] = []
 
+    # v21.0.3 perf: warm `projects_cache` on app startup in a background
+    # task so the first user request hits an already-built cache instead
+    # of paying ~1 s for `discover_projects()`. Runs in a worker thread
+    # so it doesn't delay uvicorn's bind-and-serve. Best-effort — failures
+    # log a warning and the first user request just pays the cold cost.
+    @app.on_event("startup")
+    async def _warm_caches_on_startup() -> None:
+        nonlocal _last_dirs
+        import asyncio as _asyncio
+        import logging as _logging
+
+        _logger = _logging.getLogger("harbormaster.ui.warmup")
+
+        def _prime() -> None:
+            nonlocal _last_dirs
+            try:
+                infos = discover_projects(
+                    config.projects, ignore_patterns=config.ignore.patterns,
+                )
+                _last_dirs = project_dirs_from_infos(infos)
+
+                def _builder() -> list[dict[str, object]]:
+                    return [p.as_dict() for p in infos]
+
+                projects_cache.get(_builder, _last_dirs)
+                _logger.info(
+                    "warmup: primed projects_cache with %d projects",
+                    len(infos),
+                )
+            except Exception as exc:  # noqa: BLE001 — best-effort
+                _logger.warning("warmup: prime failed (%s)", exc)
+
+        # Schedule without awaiting — uvicorn must finish startup fast.
+        _asyncio.create_task(_asyncio.to_thread(_prime))
+
     @app.get("/api/projects")
     async def list_projects() -> list[dict[str, object]]:
         nonlocal _last_dirs
@@ -1900,7 +1935,11 @@ def register_routes(
             _last_dirs = project_dirs_from_infos(infos)
             return [p.as_dict() for p in infos]
 
-        return projects_cache.get(_build, _last_dirs)
+        # v21.0.3 perf: the cache hit path is sub-ms, but a miss runs
+        # `discover_projects()` (~0.9 s for 62 projects post-T3). Offload
+        # to a thread so the miss doesn't stall every other /api/* request
+        # that wants the event loop.
+        return await asyncio.to_thread(projects_cache.get, _build, _last_dirs)
 
     # v11.0.0a6: 60s TTL memo for /api/ignored-projects. Two
     # discovery passes per call is non-trivial work and the sidebar
@@ -1938,22 +1977,41 @@ def register_routes(
         ):
             return cached_value
 
-        all_names = {
-            p.name for p in discover_projects(
-                config.projects, ignore_patterns=[],
-            )
-        }
-        visible_names = {
-            p.name for p in discover_projects(
-                config.projects, ignore_patterns=config.ignore.patterns,
-            )
-        }
-        ignored = sorted(all_names - visible_names)
-        payload: dict[str, object] = {
-            "patterns": list(config.ignore.patterns),
-            "count": len(ignored),
-            "names": ignored,
-        }
+        # v21.0.3 perf: short-circuit the "no ignore patterns configured"
+        # case — the diff between "all" and "visible" is always empty,
+        # so a single discovery is enough (and we don't need its result
+        # since we only return patterns/count/names).
+        if not config.ignore.patterns:
+            payload: dict[str, object] = {
+                "patterns": [],
+                "count": 0,
+                "names": [],
+            }
+            _ignored_cache["value"] = payload
+            _ignored_cache["cached_at"] = now_t
+            return payload
+
+        # v21.0.3 perf: run the two discovery passes on a worker thread
+        # so a cold cache miss (~3 s total) doesn't block the event loop.
+        def _compute_ignored() -> dict[str, object]:
+            all_names = {
+                p.name for p in discover_projects(
+                    config.projects, ignore_patterns=[],
+                )
+            }
+            visible_names = {
+                p.name for p in discover_projects(
+                    config.projects, ignore_patterns=config.ignore.patterns,
+                )
+            }
+            ignored = sorted(all_names - visible_names)
+            return {
+                "patterns": list(config.ignore.patterns),
+                "count": len(ignored),
+                "names": ignored,
+            }
+
+        payload = await asyncio.to_thread(_compute_ignored)
         _ignored_cache["value"] = payload
         _ignored_cache["cached_at"] = now_t
         return payload
@@ -2647,7 +2705,10 @@ def register_routes(
             _last_dirs = project_dirs_from_infos(infos)
             return [p.as_dict() for p in infos]
 
-        projects = projects_cache.get(_build_for_count, _last_dirs)
+        # v21.0.3 perf: same thread-offload as /api/projects above.
+        projects = await asyncio.to_thread(
+            projects_cache.get, _build_for_count, _last_dirs,
+        )
 
         # Reembed state — same source of truth as /api/history/state.
         reembed_phase: str | None = None
@@ -2773,7 +2834,12 @@ def register_routes(
             return [p.as_dict() for p in infos]
 
         try:
-            proj_count = len(projects_cache.get(_build_for_count, _last_dirs))
+            # v21.0.3 perf: thread-offload like /api/projects + /api/kpi.
+            proj_count = len(
+                await asyncio.to_thread(
+                    projects_cache.get, _build_for_count, _last_dirs,
+                )
+            )
         except Exception:  # noqa: BLE001 — soft-fail to zero
             proj_count = 0
         projects_hist = [proj_count] * 24

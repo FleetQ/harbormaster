@@ -45,9 +45,18 @@ jobs:
         run: |
           set -euo pipefail
           deadline=$(( $(date +%s) + 1800 ))
+          # v21.0.3: filter by event=push AND head_branch=main so we
+          # cannot accidentally match a workflow_dispatch / pull_request
+          # run on the same SHA. Defensive even though v21.0.3 ci.yml
+          # also dropped the tag trigger that caused the original
+          # ambiguity (two simultaneous CI runs on identical SHA).
           while true; do
             payload=$(gh api "repos/$OWNER/$REPO/actions/runs?head_sha=$SHA" \
-              --jq '[.workflow_runs[] | select(.name == "CI")] | sort_by(.created_at) | last // {}')
+              --jq '[.workflow_runs[]
+                     | select(.name == "CI")
+                     | select(.event == "push")
+                     | select(.head_branch == "main")]
+                    | sort_by(.created_at) | last // {}')
             status=$(printf '%s' "$payload" | jq -r '.status // ""')
             conclusion=$(printf '%s' "$payload" | jq -r '.conclusion // ""')
             id=$(printf '%s' "$payload" | jq -r '.id // ""')
