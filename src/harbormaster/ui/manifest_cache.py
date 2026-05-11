@@ -25,6 +25,7 @@ its own module per the v7 phase plan.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import threading
@@ -166,10 +167,8 @@ class ProjectsCache:
                 with tmp_path.open("w", encoding="utf-8") as fh:
                     fh.write(body)
                     fh.flush()
-                    try:
+                    with contextlib.suppress(OSError):
                         os.fsync(fh.fileno())
-                    except OSError:
-                        pass
                 os.replace(tmp_path, self._persist_path)
             finally:
                 if lock_fh is not None:
@@ -248,10 +247,8 @@ class ProjectsCache:
         # Also delete the cross-process file so peers don't serve
         # stale data on their next miss.
         if self._persist_path is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self._persist_path.unlink()
-            except OSError:
-                pass
 
 
 # v7.0.0a6: language → Tailwind color mapping for the dashboard badge.

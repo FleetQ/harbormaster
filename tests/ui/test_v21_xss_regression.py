@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from harbormaster.ui.markdown import render_safe
 
-
 # --- script + iframe -------------------------------------------------- #
 
 def test_script_tag_stripped() -> None:

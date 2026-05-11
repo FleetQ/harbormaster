@@ -18,6 +18,7 @@ multi-writer contention by retrying on busy.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 import time
@@ -52,16 +53,12 @@ class DispatcherMetricsStore:
         self.db_path = db_path or default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # Restrict directory perms — best-effort, no-op on non-POSIX.
-        try:
+        with contextlib.suppress(OSError):
             os.chmod(self.db_path.parent, 0o700)
-        except OSError:
-            pass
         self._init_schema()
         # File perms 0600 — best-effort.
-        try:
+        with contextlib.suppress(OSError):
             os.chmod(self.db_path, 0o600)
-        except OSError:
-            pass
 
     def _connect(self) -> sqlite3.Connection:
         # 5s busy timeout absorbs short contention windows during

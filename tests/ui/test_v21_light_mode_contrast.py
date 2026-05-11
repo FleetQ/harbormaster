@@ -53,7 +53,8 @@ def _oklch_to_linear_rgb(L: float, C: float, h_deg: float) -> tuple[float, float
 
 def _luminance(r: float, g: float, b: float) -> float:
     """WCAG relative luminance (already linear)."""
-    c = lambda x: max(0.0, min(1.0, x))
+    def c(x):
+        return max(0.0, min(1.0, x))
     return 0.2126 * c(r) + 0.7152 * c(g) + 0.0722 * c(b)
 
 
@@ -166,10 +167,10 @@ def test_media_query_block_matches_explicit_class() -> None:
         src, re.DOTALL,
     )
     assert media, "@media (prefers-color-scheme: light) :root block missing"
-    media_tokens = dict(
-        (name, (float(L), float(C), float(h)))
+    media_tokens = {
+        name: (float(L), float(C), float(h))
         for name, L, C, h in _TOKEN_RE.findall(media.group(1))
-    )
+    }
     explicit_tokens = _parse_light_tokens()
     # Only compare tokens defined in both blocks (they should be the same set).
     common = set(media_tokens) & set(explicit_tokens)

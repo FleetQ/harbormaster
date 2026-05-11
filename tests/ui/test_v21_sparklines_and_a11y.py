@@ -27,7 +27,6 @@ from fastapi.testclient import TestClient
 from harbormaster.config import HarbormasterConfig, ProjectsConfig
 from harbormaster.ui.app import create_app
 
-
 # ---------------------------------------------------------------------------
 # /api/kpi/history endpoint
 # ---------------------------------------------------------------------------

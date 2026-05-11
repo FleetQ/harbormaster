@@ -48,6 +48,7 @@ os.environ["HARBORMASTER_DISPATCHER_METRICS_DB"] = str(
 # in v15.0.0a4 N-way reembed call counters). Truncating at function
 # scope keeps per-test counts deterministic without forcing every test
 # file to wire up its own reset.
+import contextlib
 from collections.abc import Iterator  # noqa: E402
 
 import pytest  # noqa: E402
@@ -82,17 +83,13 @@ def _reset_v21_persistent_caches() -> Iterator[None]:
     """
     cache_file = Path(os.environ.get("HARBORMASTER_PROJECTS_CACHE", ""))
     if cache_file:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             cache_file.unlink()
-        except FileNotFoundError:
-            pass
         # Also drop the sidecar lock file so a stale flock doesn't
         # outlive its writer.
         lock = cache_file.with_suffix(cache_file.suffix + ".lock")
-        try:
+        with contextlib.suppress(FileNotFoundError):
             lock.unlink()
-        except FileNotFoundError:
-            pass
     # Force the metrics-store singleton to re-resolve on next access.
     try:
         from harbormaster.dispatcher_metrics_store import set_metrics_store
