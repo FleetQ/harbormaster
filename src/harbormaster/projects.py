@@ -81,6 +81,9 @@ def _detect_language(project_path: Path) -> str:
     Reuses the parser registry from harbormaster.graph.parser when
     available; falls back to file-existence checks. Returns "unknown"
     when no recognised manifest is present (e.g. docs-only repos).
+
+    v21.0.0a9: when manifest + file-existence both fail, sample
+    file extensions (linguist-style) before giving up.
     """
     try:
         from harbormaster.graph.parser import parse_project
@@ -103,7 +106,91 @@ def _detect_language(project_path: Path) -> str:
         return "rust"
     if (project_path / "go.mod").is_file():
         return "go"
+    # v21.0.0a9: linguist-style extension sampling as the last resort.
+    # Caps scan at 200 files so a huge monorepo without a manifest
+    # doesn't tank discovery.
+    ext_lang = _detect_language_from_extensions(project_path)
+    if ext_lang is not None:
+        return ext_lang
     return "unknown"
+
+
+# v21.0.0a9: ext → language map shared across the linguist fallback.
+# `None` means "doc/text — don't count toward majority".
+_EXT_TO_LANG: dict[str, str | None] = {
+    ".py": "python",
+    ".ts": "typescript", ".tsx": "typescript",
+    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript",
+    ".rs": "rust",
+    ".go": "go",
+    ".php": "php",
+    ".rb": "ruby",
+    ".java": "java",
+    ".kt": "kotlin", ".kts": "kotlin",
+    ".swift": "swift",
+    ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp",
+    ".c": "c", ".h": "c",
+    ".cs": "csharp",
+    ".lua": "lua",
+    ".sh": "shell", ".bash": "shell",
+    ".md": None,  # docs don't define language
+    ".txt": None,
+}
+
+_LINGUIST_SKIP_DIRS = {"node_modules", "vendor", "__pycache__", "dist", "build"}
+
+
+def _detect_language_from_extensions(
+    project_path: Path, max_files: int = 200,
+) -> str | None:
+    """v21.0.0a9: linguist-style fallback — count file extensions, majority wins.
+
+    Only used when manifest-based detection returns nothing. Caps the
+    scan at `max_files` files so a docs-only mega-repo without a
+    manifest doesn't pay a multi-second walk.
+
+    Skips hidden directories (`.git`, `.venv`, `.serena`, …) and a
+    small set of dependency / build dirs (`node_modules`, `vendor`,
+    `__pycache__`, `dist`, `build`).
+
+    Returns None when no recognised source files are present.
+    Ties are broken alphabetically so the result is deterministic.
+    """
+    counter: dict[str, int] = {}
+    count = 0
+    try:
+        iterator = project_path.rglob("*")
+    except OSError:
+        return None
+    for entry in iterator:
+        if count >= max_files:
+            break
+        # Skip hidden dirs (.git, .venv, .serena, .pytest_cache, etc.)
+        # plus dependency / build dirs. We test path *parts* relative
+        # to the project root so a project under e.g. /home/.config/foo
+        # still gets scanned.
+        try:
+            rel_parts = entry.relative_to(project_path).parts
+        except ValueError:
+            continue
+        if any(part.startswith(".") for part in rel_parts):
+            continue
+        if any(part in _LINGUIST_SKIP_DIRS for part in rel_parts):
+            continue
+        try:
+            if not entry.is_file():
+                continue
+        except OSError:
+            continue
+        lang = _EXT_TO_LANG.get(entry.suffix.lower())
+        if lang:
+            counter[lang] = counter.get(lang, 0) + 1
+            count += 1
+    if not counter:
+        return None
+    max_count = max(counter.values())
+    winners = sorted(lang for lang, c in counter.items() if c == max_count)
+    return winners[0]
 
 
 def _glob_base(pattern: str) -> Path | None:

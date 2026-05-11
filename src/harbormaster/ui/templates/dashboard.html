@@ -744,8 +744,12 @@
 <!-- v2.1.0a1: project graph render. Mermaid markup comes from
      /api/graph; we re-render with mermaid.run() after the DOM has the
      fresh markup so the layout adapts to includeDevDeps / transitive.
-     v19.0.0a5: spans both columns of the card grid. -->
-<section x-data="graphPanel()" x-init="loadGraph()"
+     v19.0.0a5: spans both columns of the card grid.
+     v21.0.0a9: Cytoscape default renderer (force-directed) with a
+     "use Mermaid" fallback toggle. Cytoscape was already vendored
+     in v10.0.0a7 for /network; reused here for the project-deps
+     graph card. -->
+<section x-data="graphPanel()" x-init="init(); loadGraph()"
          class="md:col-span-2 border border-border rounded-md p-2.5 bg-surface-2/40">
   <header class="flex items-center justify-between mb-2 gap-2 flex-wrap">
     <h2 class="text-lg font-bold">Project graph</h2>
@@ -758,6 +762,10 @@
         <input type="checkbox" x-model="transitive" @change="loadGraph()" class="accent-accent">
         transitive (lockfiles)
       </label>
+      <button type="button" @click="toggleRenderer()"
+              class="text-xs bg-surface-2/80 hover:bg-surface-3 border border-border px-2 py-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              x-text="renderer === 'cytoscape' ? 'use Mermaid' : 'use Cytoscape'"
+              :title="renderer === 'cytoscape' ? 'switch to static Mermaid layout' : 'switch to force-directed Cytoscape'"></button>
       <span x-show="graph.projects_discovered !== undefined"
             x-text="`${graph.projects_discovered} projects · ${(graph.graph?.edges?.length ?? 0)} edges${graph.projects_with_lockfile !== undefined ? ' · ' + graph.projects_with_lockfile + ' with lockfile' : ''}`"></span>
     </div>
@@ -770,13 +778,22 @@
     another project's manifest name. Try enabling <code class="text-accent">transitive</code>
     to also consider lockfile-resolved deps.
   </div>
-  <!-- v3.0.0a9: mobile-friendly graph viewport.
+
+  <!-- v21.0.0a9: Cytoscape renderer (default).
+       Fixed 280px height card — Cytoscape lays out internally via
+       cose (force-directed); no manual pan/zoom layer needed
+       (cytoscape ships its own). Click node → /projects/<name>. -->
+  <div x-show="renderer === 'cytoscape' && !graphLoading"
+       id="project-graph-cy"
+       x-ref="cyContainer"
+       class="border border-border-strong rounded bg-surface-1/40"
+       style="height: 280px; width: 100%;"></div>
+
+  <!-- v3.0.0a9: mobile-friendly graph viewport (Mermaid fallback).
        v4.0.0a3: pinch-zoom + drag-pan via graphZoom() Alpine scope.
-       The transform-target div carries the scale/translate; touch
-       events on the outer container drive zoom; mouse wheel zooms
-       on desktop; reset button returns to scale=1, translate=0,0. -->
+       v21.0.0a9: now hidden behind the "use Mermaid" toggle. -->
   <div x-data="graphZoom()"
-       x-show="!graphLoading"
+       x-show="renderer === 'mermaid' && !graphLoading"
        x-init="bindKeyboard()"
        @keydown.window="onKeyDown($event)"
        class="relative" tabindex="0">
@@ -803,6 +820,9 @@
     </div>
   </div>
 </section>
+
+<!-- v21.0.0a9: load cytoscape (already vendored in v10.0.0a7). -->
+<script src="/static/vendor/cytoscape.min.js"></script>
 
 </div><!-- /card-grid (v19.0.0a5) -->
 
@@ -2331,6 +2351,29 @@
     return {
       includeDevDeps: false, transitive: false,
       graph: {}, mermaidMarkup: '', graphLoading: true, graphError: null,
+      // v21.0.0a9: 'cytoscape' (default) or 'mermaid' fallback.
+      // Persisted via localStorage so a refresh keeps the operator's
+      // pick.
+      renderer: 'cytoscape',
+      cy: null,
+
+      init() {
+        try {
+          const saved = localStorage.getItem('hm:graph:renderer');
+          if (saved === 'cytoscape' || saved === 'mermaid') this.renderer = saved;
+        } catch (_) { /* default cytoscape */ }
+      },
+
+      toggleRenderer() {
+        this.renderer = (this.renderer === 'cytoscape') ? 'mermaid' : 'cytoscape';
+        try { localStorage.setItem('hm:graph:renderer', this.renderer); } catch (_) {}
+        // Re-render in the newly-selected mode using the cached data.
+        if (this.renderer === 'cytoscape') {
+          this._renderCytoscape();
+        } else {
+          this._renderMermaid();
+        }
+      },
 
       // v6.0.1: poll for window.__hmMermaid (loaded via async ESM in
       // base.html). Resolves true when ready, false on timeout.
@@ -2352,6 +2395,10 @@
           const params = new URLSearchParams();
           if (this.includeDevDeps) params.set('include_dev_deps', 'true');
           if (this.transitive) params.set('transitive', 'true');
+          // v21.0.0a9: always ask for Cytoscape format too — the
+          // server emits both shapes in one round-trip so toggling
+          // the renderer doesn't re-fetch.
+          params.set('format', 'cytoscape');
           const url = '/api/graph' + (params.toString() ? '?' + params : '');
           const r = await hmFetch(url);
           if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -2359,28 +2406,17 @@
           this.mermaidMarkup = this.graph.mermaid || 'graph LR\n  empty[No projects]';
           // v6.0.1 fixed two regressions (Alpine $refs scope leak +
           // async ESM race). v6.0.2 fixes a third: the section is
-          // hidden via x-show="!graphLoading" while loadGraph runs,
-          // so Mermaid measures the still-hidden <pre> at 0×0 and
-          // emits a placeholder viewBox="-8 -8 16 16". The graph
-          // content renders fine inside the SVG, but the SVG itself
-          // shrinks to 16×16 and stays invisible.
+          // hidden via x-show while loadGraph runs, so the renderer
+          // measures the still-hidden node at 0×0.
           //
-          // Fix: flip graphLoading=false BEFORE mermaid.run() so the
-          // viewport is laid out at its real dimensions. requestAnimationFrame
-          // gives Alpine + the browser one frame to apply the layout
-          // before mermaid measures.
+          // Fix: flip graphLoading=false BEFORE rendering so the
+          // viewport is laid out at its real dimensions.
           this.graphLoading = false;
-          await this._waitForMermaid(3000);
           await new Promise((r) => requestAnimationFrame(r));
-          const node = document.querySelector('pre.mermaid');
-          if (node && window.__hmMermaid) {
-            // Force re-process: clear `data-processed` if mermaid set it.
-            node.removeAttribute('data-processed');
-            try {
-              await window.__hmMermaid.run({ nodes: [node] });
-            } catch (e) { this.graphError = 'mermaid: ' + e.message; }
-          } else if (!window.__hmMermaid) {
-            this.graphError = 'mermaid bundle did not load within 3s';
+          if (this.renderer === 'cytoscape') {
+            this._renderCytoscape();
+          } else {
+            await this._renderMermaid();
           }
         } catch (e) {
           this.graphError = e.message;
@@ -2389,6 +2425,85 @@
           // succeeded; only flip here for the error path.
           this.graphLoading = false;
         }
+      },
+
+      async _renderMermaid() {
+        await this._waitForMermaid(3000);
+        await new Promise((r) => requestAnimationFrame(r));
+        const node = document.querySelector('pre.mermaid');
+        if (node && window.__hmMermaid) {
+          node.removeAttribute('data-processed');
+          try {
+            await window.__hmMermaid.run({ nodes: [node] });
+          } catch (e) { this.graphError = 'mermaid: ' + e.message; }
+        } else if (!window.__hmMermaid) {
+          this.graphError = 'mermaid bundle did not load within 3s';
+        }
+      },
+
+      // v21.0.0a9: render the Cytoscape view.
+      // Node colour by language: python=blue, javascript=yellow,
+      // typescript=blue-cyan, php=purple, rust=orange, go=teal,
+      // ruby=red, java=brown — matches the v6.0.0a3 sidebar palette.
+      // Click node → /projects/<name>. cose layout = force-directed.
+      _renderCytoscape() {
+        if (!window.cytoscape) {
+          this.graphError = 'cytoscape failed to load';
+          return;
+        }
+        const container = document.getElementById('project-graph-cy');
+        if (!container) {
+          this.graphError = 'project-graph-cy container missing';
+          return;
+        }
+        const cy_data = this.graph.cytoscape || { nodes: [], edges: [] };
+        const elements = [...cy_data.nodes, ...cy_data.edges];
+        if (this.cy) { this.cy.destroy(); this.cy = null; }
+        if (elements.length === 0) return;
+        const self = this;
+        this.cy = window.cytoscape({
+          container: container,
+          elements: elements,
+          style: [
+            { selector: 'node',
+              style: {
+                'background-color': '#475569',
+                'label': 'data(label)',
+                'color': '#e2e8f0',
+                'font-size': '10px',
+                'text-valign': 'center',
+                'text-halign': 'center',
+                'text-outline-color': '#0f172a',
+                'text-outline-width': 2,
+                'width': 28, 'height': 28,
+              } },
+            { selector: 'node[language = "python"]',     style: { 'background-color': '#3b82f6' } },
+            { selector: 'node[language = "javascript"]', style: { 'background-color': '#eab308' } },
+            { selector: 'node[language = "typescript"]', style: { 'background-color': '#0ea5e9' } },
+            { selector: 'node[language = "php"]',        style: { 'background-color': '#a855f7' } },
+            { selector: 'node[language = "rust"]',       style: { 'background-color': '#f97316' } },
+            { selector: 'node[language = "go"]',         style: { 'background-color': '#14b8a6' } },
+            { selector: 'node[language = "ruby"]',       style: { 'background-color': '#ef4444' } },
+            { selector: 'node[language = "java"]',       style: { 'background-color': '#b45309' } },
+            { selector: 'edge',
+              style: {
+                'curve-style': 'bezier',
+                'target-arrow-shape': 'triangle',
+                'width': 1.5,
+                'line-color': '#64748b',
+                'target-arrow-color': '#64748b',
+              } },
+            { selector: 'edge[kind = "dev_dep"]',
+              style: { 'line-style': 'dashed' } },
+            { selector: 'edge[kind = "transitive"]',
+              style: { 'line-color': '#0e7490', 'target-arrow-color': '#0e7490' } },
+          ],
+          layout: { name: 'cose', idealEdgeLength: 80, animate: false, fit: true, padding: 12 },
+        });
+        this.cy.on('tap', 'node', (evt) => {
+          const id = evt.target.id();
+          if (id) window.location.href = '/projects/' + encodeURIComponent(id);
+        });
       },
     };
   }
