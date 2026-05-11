@@ -236,6 +236,54 @@ def test_api_graph_accepts_transitive_query_param(populated_config):
     assert "mermaid" in body
 
 
+# ----- /api/graph cytoscape format (v21.0.0a9) -----------------------------
+
+
+def test_api_graph_default_format_is_mermaid_only(populated_config):
+    """No `format` query param → cytoscape field NOT present (backwards compat)."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/api/graph")
+    assert r.status_code == 200
+    body = r.json()
+    assert "mermaid" in body
+    assert "cytoscape" not in body
+
+
+def test_api_graph_cytoscape_format_adds_elements(populated_config):
+    """`?format=cytoscape` adds a `cytoscape` field shaped for the
+    Cytoscape elements API; `mermaid` remains present so toggling
+    the dashboard renderer doesn't re-fetch."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/api/graph?format=cytoscape")
+    assert r.status_code == 200
+    body = r.json()
+    assert "mermaid" in body  # legacy field kept
+    assert "cytoscape" in body
+    cy = body["cytoscape"]
+    assert "nodes" in cy and "edges" in cy
+    # Each node has data.id / data.label / data.language.
+    for n in cy["nodes"]:
+        assert "data" in n
+        for key in ("id", "label", "language"):
+            assert key in n["data"]
+    # Each edge has data.source / data.target / data.kind.
+    for e in cy["edges"]:
+        assert "data" in e
+        for key in ("id", "source", "target", "kind"):
+            assert key in e["data"]
+
+
+def test_api_graph_cytoscape_node_ids_match_project_names(populated_config):
+    """Node ids = canonical project names so the dashboard can click
+    through to /projects/<id>."""
+    client = TestClient(create_app(populated_config))
+    r = client.get("/api/graph?format=cytoscape")
+    body = r.json()
+    node_ids = {n["data"]["id"] for n in body["cytoscape"]["nodes"]}
+    graph_names = {n["name"] for n in body["graph"]["nodes"]}
+    assert node_ids == graph_names
+
+
 # ----- v2.1.0a2 — Project detail page --------------------------------------
 
 
@@ -2375,6 +2423,92 @@ def test_detect_language_fallback_when_parser_fails(tmp_path):
     (proj / "CLAUDE.md").write_text("# x")
     (proj / "pyproject.toml").write_text("not valid [toml")  # parser will fail
     assert _detect_language(proj) == "python"
+
+
+# --- v21.0.0a9: linguist-style extension fallback ----------------------
+
+
+def test_detect_language_extension_python_only(tmp_path):
+    """No manifest, but lots of .py files → python."""
+    from harbormaster.projects import _detect_language_from_extensions
+    proj = tmp_path / "py-only"
+    proj.mkdir()
+    for i in range(5):
+        (proj / f"mod{i}.py").write_text("pass\n")
+    (proj / "README.md").write_text("# x")  # md is ignored
+    assert _detect_language_from_extensions(proj) == "python"
+
+
+def test_detect_language_extension_majority_typescript(tmp_path):
+    """Mixed sources — majority TypeScript wins."""
+    from harbormaster.projects import _detect_language_from_extensions
+    proj = tmp_path / "ts-majority"
+    proj.mkdir()
+    for i in range(7):
+        (proj / f"a{i}.ts").write_text("export {}\n")
+    for i in range(2):
+        (proj / f"b{i}.py").write_text("pass\n")
+    assert _detect_language_from_extensions(proj) == "typescript"
+
+
+def test_detect_language_extension_only_docs_returns_none(tmp_path):
+    """Docs-only repo (md / txt) → None (caller falls back to 'unknown')."""
+    from harbormaster.projects import _detect_language_from_extensions
+    proj = tmp_path / "docs-only"
+    proj.mkdir()
+    (proj / "README.md").write_text("# x")
+    (proj / "NOTES.txt").write_text("notes\n")
+    assert _detect_language_from_extensions(proj) is None
+
+
+def test_detect_language_extension_ignores_hidden_dirs(tmp_path):
+    """Files inside .git / .venv / .serena must not count."""
+    from harbormaster.projects import _detect_language_from_extensions
+    proj = tmp_path / "hidden-dirs"
+    proj.mkdir()
+    (proj / ".git").mkdir()
+    (proj / ".git" / "junk.py").write_text("pass\n")
+    (proj / ".venv").mkdir()
+    (proj / ".venv" / "x.py").write_text("pass\n")
+    (proj / "README.md").write_text("# x")
+    # Only hidden .py files exist → nothing countable → None.
+    assert _detect_language_from_extensions(proj) is None
+
+
+def test_detect_language_extension_ignores_dependency_dirs(tmp_path):
+    """node_modules / vendor / dist / build / __pycache__ excluded."""
+    from harbormaster.projects import _detect_language_from_extensions
+    proj = tmp_path / "deps-excluded"
+    proj.mkdir()
+    (proj / "node_modules").mkdir()
+    for i in range(50):
+        (proj / "node_modules" / f"lib{i}.js").write_text("//x\n")
+    (proj / "src.py").write_text("pass\n")
+    # node_modules JS is excluded; the single .py wins.
+    assert _detect_language_from_extensions(proj) == "python"
+
+
+def test_detect_language_extension_respects_max_files_cap(tmp_path):
+    """The max_files cap actually short-circuits the walk."""
+    from harbormaster.projects import _detect_language_from_extensions
+    proj = tmp_path / "huge"
+    proj.mkdir()
+    # 50 .py files, but cap at 10.
+    for i in range(50):
+        (proj / f"m{i}.py").write_text("pass\n")
+    # With cap=10, we still get python (10 hits is enough for majority).
+    assert _detect_language_from_extensions(proj, max_files=10) == "python"
+
+
+def test_detect_language_uses_extension_fallback_when_no_manifest(tmp_path):
+    """End-to-end: _detect_language falls through to extension scan."""
+    from harbormaster.projects import _detect_language
+    proj = tmp_path / "ext-fallback"
+    proj.mkdir()
+    (proj / "CLAUDE.md").write_text("# x")  # makes it a project
+    (proj / "main.rs").write_text("fn main() {}\n")
+    (proj / "lib.rs").write_text("// x\n")
+    assert _detect_language(proj) == "rust"
 
 
 # --- v6.0.0a4: keyboard shortcut help popover ---------------------------

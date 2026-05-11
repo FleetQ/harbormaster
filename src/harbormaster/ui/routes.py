@@ -94,6 +94,39 @@ class McpProxyRequest(BaseModel):
     timeout: int | None = None
 
 
+def _graph_to_cytoscape(graph: Any) -> dict[str, list[dict[str, dict[str, Any]]]]:
+    """v21.0.0a9: shape ProjectGraph into Cytoscape elements JSON.
+
+    Each node carries `{id, label, language}` so the dashboard can
+    colour by language. Each edge carries `{id, source, target, kind}`
+    where `kind` matches GraphEdge.dep_kind ("dep" / "dev_dep" /
+    "transitive") so the dashboard can style edges identically to
+    the Mermaid arrow style.
+    """
+    nodes = [
+        {
+            "data": {
+                "id": n.name,
+                "label": n.name,
+                "language": n.language,
+            }
+        }
+        for n in graph.nodes
+    ]
+    edges = [
+        {
+            "data": {
+                "id": f"{e.src}->{e.dst}:{e.dep_kind}",
+                "source": e.src,
+                "target": e.dst,
+                "kind": e.dep_kind,
+            }
+        }
+        for e in graph.edges
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
 def register_routes(
     app: FastAPI,
     templates: Jinja2Templates,
@@ -2514,12 +2547,19 @@ def register_routes(
     async def api_graph(
         include_dev_deps: bool = False,
         transitive: bool = False,
+        format: str = "mermaid",
     ) -> dict[str, object]:
         """Cross-project graph + ready-to-render mermaid markup.
 
         v2.1.0a1: surfaces the v2.0.0a1 `transitive` toggle so the
         dashboard can let the user flip between manifest-only and
         lockfile-resolved deps.
+
+        v21.0.0a9: optional `?format=cytoscape` adds a `cytoscape`
+        field carrying nodes/edges in Cytoscape elements shape, so the
+        dashboard can render with Cytoscape (force-directed) instead
+        of the static Mermaid block. The `mermaid` field is always
+        emitted for backwards compat.
         """
         from pathlib import Path
 
@@ -2533,7 +2573,7 @@ def register_routes(
             include_dev_deps=include_dev_deps,
             transitive=transitive,
         )
-        return {
+        payload: dict[str, object] = {
             "projects_discovered": len(manifests),
             "projects_with_lockfile": sum(
                 1 for m in manifests if m.lockfile is not None
@@ -2542,6 +2582,12 @@ def register_routes(
             "graph": graph.as_dict(),
             "mermaid": graph_to_mermaid(graph),
         }
+        if format == "cytoscape":
+            # v21.0.0a9: also emit Cytoscape elements. We keep
+            # `mermaid` in the same response so the dashboard can
+            # let the operator toggle without a second round-trip.
+            payload["cytoscape"] = _graph_to_cytoscape(graph)
+        return payload
 
     @app.get("/api/kpi")
     async def api_kpi(since_seconds: int = 3600) -> dict[str, object]:

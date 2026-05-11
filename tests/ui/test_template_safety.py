@@ -49,13 +49,6 @@ MEASURE_DEPENDENT_CLASSES = frozenset(
 # the JS guarantees the wrapper is unhidden BEFORE the library
 # measures.
 ALLOWLIST: tuple[tuple[str, str], ...] = (
-    # dashboard.html ProjectGraph wrapper:
-    # The Alpine scope flips this.graphLoading = false BEFORE calling
-    # mermaid.run(). See dashboard.html ~line 1014 comment block, plus
-    # sprint retros v6.0.1 + v6.0.2 + v7.0.0a1. The Playwright SVG-
-    # render assertion (test_dashboard_graph_renders_with_real_viewbox)
-    # is the runtime backstop.
-    ("dashboard.html", "!graphLoading"),
     # dashboard.html v21.0.0a6 Overview-tab wrapper:
     # The default tab is 'overview' (dashboardTabs() initializes
     # `active: 'overview'`), so on a fresh page load with no
@@ -65,6 +58,15 @@ ALLOWLIST: tuple[tuple[str, str], ...] = (
     # post-initial-render navigation; the Mermaid pre `<pre>` rerenders
     # naturally when graphPanel's loadGraph() reruns.
     ("dashboard.html", "active === 'overview'"),
+    # dashboard.html v21.0.0a9 Cytoscape↔Mermaid renderer toggle.
+    # The default renderer is 'cytoscape' (set in graphPanel().init()
+    # before x-init fires loadGraph). The Mermaid <pre> only enters
+    # the visible subtree when the operator clicks "use Mermaid", at
+    # which point toggleRenderer() flips `renderer = 'mermaid'` and
+    # synchronously calls _renderMermaid() — i.e. the flag is flipped
+    # BEFORE mermaid.run() measures. Same v6.0.1 / v6.0.2 guarantee
+    # as the `!graphLoading` entry above.
+    ("dashboard.html", "renderer === 'mermaid' && !graphLoading"),
 )
 
 
@@ -195,13 +197,18 @@ def test_allowlist_entries_are_actually_present() -> None:
 
 
 def test_scanner_finds_a_real_pattern_in_dashboard() -> None:
-    """Sanity: the scanner must detect the known safe pattern in
+    """Sanity: the scanner must detect a known safe pattern in
     dashboard.html. If it doesn't, the scanner is broken (false
-    negatives are silent — defenders need to know the test runs)."""
+    negatives are silent — defenders need to know the test runs).
+
+    v21.0.0a9: the original `!graphLoading` wrapper was widened to
+    `renderer === 'mermaid' && !graphLoading` when the Cytoscape
+    renderer was added. We assert on the new substring instead.
+    """
     findings = _scan_template(TEMPLATE_DIR / "dashboard.html")
     exprs = {f[0] for f in findings}
-    assert "!graphLoading" in exprs, (
-        "scanner failed to find the !graphLoading wrapper in "
+    assert any("!graphLoading" in e for e in exprs), (
+        "scanner failed to find any !graphLoading wrapper in "
         "dashboard.html — the html.parser walk is broken or the "
         "template was restructured (in which case remove the "
         "ALLOWLIST entry too)."
