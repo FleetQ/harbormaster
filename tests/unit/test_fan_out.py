@@ -32,6 +32,8 @@ def test_fan_out_ask_signature():
         "question", "project_filter", "host_filter",
         "max_concurrency", "max_turns",
         "synthesize", "synthesis_max_turns",
+        # v21.0.0a10: operator-selectable model per tool call.
+        "model",
     }
     assert expected == set(sig.parameters.keys())
     assert sig.parameters["max_concurrency"].default == 5

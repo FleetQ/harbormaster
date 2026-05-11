@@ -69,7 +69,10 @@ fleetq = [
     # Pusher / Reverb client for the Bridge reverse-channel subscription
     # (private-daemon.<team_id> on FleetQ's Reverb server). Used by
     # harbormaster.fleetq.relay.BridgeRelay.
-    "pysher>=1.0",
+    # v21.0.1: upper-bound pin — pysher 1.0.9+ has a Thread.__init__
+    # regression ('host' kwarg) that crashes the Reverb subscriber on
+    # startup. Stay on 1.0.8 until upstream ships a fix.
+    "pysher==1.0.8",
 ]
 history = [
     # sqlite-vec ships a SQLite extension and Python loader. Used by the
@@ -108,7 +111,8 @@ dev = [
     "bleach>=6.1",
     "markdown-it-py>=3.0",
     "httpx>=0.27",
-    "pysher>=1.0",
+    # v21.0.1: see comment on [fleetq] extra above — pin 1.0.8.
+    "pysher==1.0.8",
     "sqlite-vec>=0.1.6",
     "fastembed>=0.3",
     "onnxruntime<1.26",

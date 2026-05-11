@@ -88,12 +88,22 @@ Add `[backends.codex]` (or any name) to register additional backends.
 | `timeout_local`  | `int` (s)   | `60`                 | Local invocation budget. |
 | `timeout_remote` | `int` (s)   | `120`                | SSH invocation budget — needs to cover SSH handshake + remote start. |
 | `output_word_cap`| `int`       | `800`                | Hard cap on response length post-truncation; protects context-window budgets in calling agents. |
+| `default_model`  | `str \| None` | `None`             | Backend-level fallback model id when a tool call does not specify one. `None` means "let the backend binary decide". (v21.0.0a10) |
+| `allowed_models` | `list[str]` | `[]`                 | Allowlist of model ids the backend may resolve to. Empty list = no restriction. Operator-level guard against runaway costs. (v21.0.0a10) |
+| `model_aliases`  | `dict[str, str]` | `{"haiku": "claude-haiku-4-5-20251001", "sonnet": "claude-sonnet-4-6", "opus": "claude-opus-4-7"}` | Friendly alias → model-id map. Lets UI dropdowns and tool calls use `"sonnet"` instead of the exact model identifier. (v21.0.0a10) |
 
 ```toml
 [backends.claude]
 binary = "claude"
 extra_args = ["-p", "--model", "claude-opus-4-5"]
 output_word_cap = 1200
+default_model = "sonnet"
+allowed_models = ["haiku", "sonnet", "opus"]
+
+[backends.claude.model_aliases]
+fast = "claude-haiku-4-5-20251001"
+balanced = "claude-sonnet-4-6"
+deep = "claude-opus-4-7"
 
 [backends.codex]
 binary = "codex"

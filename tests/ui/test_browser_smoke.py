@@ -30,7 +30,7 @@ from playwright.sync_api import Page, expect  # noqa: E402
 
 def test_dashboard_renders_header(page: Page, ui_url: str) -> None:
     page.goto(f"{ui_url}/")
-    expect(page.locator("h1")).to_contain_text("Harbormaster")
+    expect(page.locator("h1").first).to_contain_text("Harbormaster")
 
 
 def test_dashboard_renders_bridge_status_panel(page: Page, ui_url: str) -> None:
@@ -38,8 +38,9 @@ def test_dashboard_renders_bridge_status_panel(page: Page, ui_url: str) -> None:
     # The bridge status panel is rendered by JS — wait for the badge.
     page.wait_for_selector("text=FleetQ Bridge", timeout=5000)
     # No FleetQ token present → either "disabled" or "configured" is fine,
-    # but the badge must be in the DOM.
-    expect(page.locator("text=FleetQ Bridge")).to_be_visible()
+    # but the badge must be in the DOM. v19+ layout duplicates the
+    # heading in the sidebar + inspector, so .first to avoid strict-mode.
+    expect(page.locator("text=FleetQ Bridge").first).to_be_visible()
 
 
 def test_dashboard_lists_seeded_project(page: Page, ui_url: str) -> None:

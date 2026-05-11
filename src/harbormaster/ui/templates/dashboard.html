@@ -777,6 +777,7 @@
       <button type="button" @click="toggleRenderer()"
               class="text-xs bg-surface-2/80 hover:bg-surface-3 border border-border px-2 py-0.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               x-text="renderer === 'cytoscape' ? 'use Mermaid' : 'use Cytoscape'"
+              :aria-label="renderer === 'cytoscape' ? 'Switch to Mermaid renderer' : 'Switch to Cytoscape renderer'"
               :title="renderer === 'cytoscape' ? 'switch to static Mermaid layout' : 'switch to force-directed Cytoscape'"></button>
       <span x-show="graph.projects_discovered !== undefined"
             x-text="`${graph.projects_discovered} projects · ${(graph.graph?.edges?.length ?? 0)} edges${graph.projects_with_lockfile !== undefined ? ' · ' + graph.projects_with_lockfile + ' with lockfile' : ''}`"></span>
@@ -1048,7 +1049,7 @@
         <h3 class="text-sm font-bold text-foreground-muted">Plugins</h3>
       </header>
       <p class="text-xs text-foreground-muted"
-         x-text="`${pluginCount || 0} plugin${pluginCount === 1 ? '' : 's'} discovered`"></p>
+         x-text="`${(plugins.plugins || []).length} plugin${(plugins.plugins || []).length === 1 ? '' : 's'} discovered`"></p>
     </article>
   </section>
 </div>

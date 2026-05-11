@@ -25,14 +25,17 @@ from harbormaster.fleetq.bridge import (  # noqa: E402
 
 
 @pytest.fixture
-def base_url(httpserver: HTTPServer) -> str:
+def httpserver_url(httpserver: HTTPServer) -> str:
+    # v21.0.1: renamed from `base_url` to avoid clashing with the
+    # session-scoped `base_url` fixture that pytest-base-url's
+    # autouse `_verify_url` plugin requests (ScopeMismatch on collect).
     return httpserver.url_for("").rstrip("/")
 
 
 @pytest.fixture
-def client(base_url: str) -> BridgeClient:
+def client(httpserver_url: str) -> BridgeClient:
     c = BridgeClient(
-        base_url=base_url,
+        base_url=httpserver_url,
         api_token="test-token",
         label="harbormaster on test",
         bridge_version="1.0.0a6",

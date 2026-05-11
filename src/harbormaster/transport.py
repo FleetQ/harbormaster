@@ -15,6 +15,7 @@ it instead of binding an unauthenticated port.
 """
 from __future__ import annotations
 
+import hmac
 import os
 import sys
 from typing import Any
@@ -78,7 +79,9 @@ def build_bearer_middleware(expected_token: str) -> Any:
         async def dispatch(self, request, call_next):  # type: ignore[no-untyped-def]
             authz = request.headers.get("Authorization", "")
             if authz:
-                if authz != expected_header:
+                # hmac.compare_digest = constant-time comparison; defeats
+                # the timing-side-channel attack on byte-by-byte `!=`.
+                if not hmac.compare_digest(authz, expected_header):
                     return Response(
                         "invalid bearer token", status_code=401,
                     )
@@ -88,7 +91,7 @@ def build_bearer_middleware(expected_token: str) -> Any:
             # raw token (no "Bearer " prefix).
             cookie_token = request.cookies.get(HM_AUTH_COOKIE_NAME, "")
             if cookie_token:
-                if cookie_token != expected_token:
+                if not hmac.compare_digest(cookie_token, expected_token):
                     return Response(
                         "invalid bearer cookie", status_code=401,
                     )

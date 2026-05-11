@@ -20,6 +20,53 @@ permissions:
   contents: read
 
 jobs:
+  verify-ci:
+    # v21.0.1: gate PyPI publish on the CI workflow having gone green
+    # on this same commit. Prevents red-CI GAs from reaching PyPI like
+    # every v9-v21 tag did during the autonomous chain.
+    # Only enforced on tag-push; manual workflow_dispatch retains
+    # operator discretion. All ${{ github.* }} expressions used here
+    # come from trusted GitHub-controlled context (sha, repo metadata),
+    # not user-supplied content, but they are still bound via env: per
+    # GitHub Actions safe-pattern guidance.
+    name: Verify CI succeeded on this commit
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Wait for CI to finish + assert green
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          deadline=$(( $(date +%s) + 1800 ))
+          while true; do
+            payload=$(gh api "repos/$OWNER/$REPO/actions/runs?head_sha=$SHA" \
+              --jq '[.workflow_runs[] | select(.name == "CI")] | sort_by(.created_at) | last // {}')
+            status=$(printf '%s' "$payload" | jq -r '.status // ""')
+            conclusion=$(printf '%s' "$payload" | jq -r '.conclusion // ""')
+            id=$(printf '%s' "$payload" | jq -r '.id // ""')
+            printf 'CI on %s: status=%s conclusion=%s id=%s\n' "$SHA" "$status" "$conclusion" "$id"
+            if [ "$status" = "completed" ]; then
+              if [ "$conclusion" = "success" ]; then
+                echo "CI green — proceeding."
+                exit 0
+              fi
+              echo "::error::CI did not succeed on $SHA (conclusion=$conclusion). Refusing to publish."
+              exit 1
+            fi
+            if [ "$(date +%s)" -gt "$deadline" ]; then
+              echo "::error::Timed out waiting for CI on $SHA."
+              exit 1
+            fi
+            sleep 20
+          done
+
   build:
     name: Build sdist + wheel
     runs-on: ubuntu-24.04
@@ -64,7 +111,8 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
-    needs: build
+    # v21.0.1: gate on verify-ci (tag-push only); build is always required.
+    needs: [build, verify-ci]
     runs-on: ubuntu-24.04
     environment:
       name: pypi

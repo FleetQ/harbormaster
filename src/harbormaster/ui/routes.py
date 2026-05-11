@@ -2134,9 +2134,13 @@ def register_routes(
 
     def _atomic_write(target: Path, content: str) -> None:
         """v10.0.0a6: write `content` to `target` via temp file + rename
-        so a crash mid-write doesn't leave a partial memory file. Mode
-        0o644 — readable by group/other since memories aren't secrets,
-        but only the owner can edit them via the file system."""
+        so a crash mid-write doesn't leave a partial memory file.
+
+        v21.0.1 (security M2): mode 0o600 — memory files may contain
+        Q&A traces / prompts that echo tokens, paths, or otherwise
+        sensitive operator context; restrict to owner-only on
+        multi-user hosts.
+        """
         import contextlib
 
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -2145,7 +2149,7 @@ def register_routes(
             tmp.write_text(content, encoding="utf-8")
             tmp.replace(target)
             with contextlib.suppress(OSError):
-                target.chmod(0o644)
+                target.chmod(0o600)
         finally:
             if tmp.exists():
                 with contextlib.suppress(OSError):

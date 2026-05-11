@@ -82,8 +82,12 @@ def test_surface_matches_baseline(
     page.set_viewport_size({"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT})
     page.goto(f"{ui_url}{route}")
     _set_theme(page, theme)
-    # Allow a beat for any post-paint reflow (Alpine init, htmx swaps).
-    page.wait_for_load_state("networkidle", timeout=5000)
+    # v21.0.1: was `networkidle` — but the dashboard keeps an SSE
+    # activity stream + plugin/bridge poll loop open, so networkidle
+    # never fires and we hit the 5s timeout. `domcontentloaded` plus
+    # a short fixed beat for Alpine init is what we actually want.
+    page.wait_for_load_state("domcontentloaded", timeout=5000)
+    page.wait_for_timeout(300)
 
     baseline = baseline_path(surface, theme)
     if is_autobootstrap_mode() and not baseline.exists():

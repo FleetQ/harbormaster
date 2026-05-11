@@ -1147,7 +1147,7 @@ async def test_stream_ask_project_local_yields_chunk_events_and_final_result(
     from harbormaster.backends.claude import ClaudeBackend
     from harbormaster.ui.routes import _ask_project_prompt, _stream_local_tool
 
-    def fake_stream(self, *, cwd, prompt, max_turns):  # noqa: ARG001
+    def fake_stream(self, *, cwd, prompt, max_turns, model=None):  # noqa: ARG001
         yield "Hello, "
         yield "world."
 
@@ -1226,7 +1226,7 @@ async def test_stream_ask_project_local_502_on_backend_error_mid_stream(
     from harbormaster.backends.claude import ClaudeBackend
     from harbormaster.ui.routes import _ask_project_prompt, _stream_local_tool
 
-    def fake_stream(self, *, cwd, prompt, max_turns):  # noqa: ARG001
+    def fake_stream(self, *, cwd, prompt, max_turns, model=None):  # noqa: ARG001
         yield "partial output"
         raise BackendError("subprocess died", code="exit_nonzero")
 
@@ -1374,7 +1374,7 @@ async def test_stream_local_tool_delegate_task_yields_chunks(
 
     captured: dict[str, object] = {}
 
-    def fake_stream(self, *, cwd, prompt, max_turns):  # noqa: ARG001
+    def fake_stream(self, *, cwd, prompt, max_turns, model=None):  # noqa: ARG001
         captured["prompt"] = prompt
         yield "Plan: "
         yield "1) read files"
