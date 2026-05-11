@@ -2461,12 +2461,21 @@
       <dd class="text-foreground font-mono truncate" x-text="kpi.bridge ?? '—'"></dd>
     </dl>
   </section>
-  <section x-data="activityFeed()" x-init="load(); start()"
+  <section x-data="activityFeed()" x-init="load(); start(); subscribe()"
+           x-on:beforeunload.window="destroy()"
            class="border-t border-border pt-3">
-    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Recent activity</h3>
+    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2 flex items-center gap-1">
+      <span>Recent activity</span>
+      {# v19.0.0a7: live indicator — green dot when SSE stream is open. #}
+      <span x-show="connected"
+            data-inspector-activity-live
+            class="text-[10px] text-success leading-none"
+            title="live stream connected">●</span>
+    </h3>
     <ul class="text-xs space-y-1" data-inspector-activity>
       <template x-for="ev in events" :key="'ev:' + ev.timestamp_ms + ':' + ev.tool + ':' + ev.target">
-        <li class="font-mono text-foreground-muted truncate">
+        <li class="font-mono truncate"
+            :class="ev._new ? 'animate-pulse text-accent' : 'text-foreground-muted'">
           <span class="text-foreground-subtle" x-text="ev.time"></span>
           <span class="text-accent" x-text="ev.tool"></span>
           <span class="text-foreground-muted" x-text="ev.target"></span>
@@ -2474,6 +2483,7 @@
       </template>
       <li x-show="!events.length" class="text-foreground-subtle">no recent calls</li>
     </ul>
+    <a href="/network" class="text-xs text-accent block mt-2">view all →</a>
   </section>
 </div>
 <script>
@@ -2504,29 +2514,92 @@
     };
   }
   // v19.0.0a3: activityFeed — last 10 MCP-call events from /api/network/events.
+  // v19.0.0a7: extended with /api/network/stream SSE subscription. Initial
+  // load + 10s poll remain as a fallback for environments where SSE is
+  // proxy-blocked. Live updates from the stream are batched in 1s buckets
+  // before flushing to the DOM (avoids reflow thrash during call bursts).
+  // Newly-prepended rows wear `_new=true` for ~1.5s so the template can
+  // pulse them via Tailwind's `animate-pulse` utility.
   function activityFeed() {
     return {
       events: [],
       _interval: null,
+      _eventSource: null,
+      _flushInterval: null,
+      _clearFlashTimer: null,
+      _buffered: [],
+      _flushIntervalMs: 1000,
+      _flashHoldMs: 1500,
+      _maxEvents: 10,
+      connected: false,
+      _normalize(e) {
+        return {
+          timestamp_ms: e.timestamp_ms,
+          tool: e.tool,
+          target: e.target,
+          time: new Date(e.timestamp_ms).toLocaleTimeString([], {
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+          }),
+        };
+      },
       async load() {
         try {
           const r = await hmFetch('/api/network/events?limit=10');
           if (!r.ok) return;
           const body = await r.json();
           const list = Array.isArray(body.events) ? body.events : [];
-          this.events = list.map(e => ({
-            timestamp_ms: e.timestamp_ms,
-            tool: e.tool,
-            target: e.target,
-            time: new Date(e.timestamp_ms).toLocaleTimeString([], {
-              hour: '2-digit', minute: '2-digit', second: '2-digit'
-            }),
-          }));
+          this.events = list.map(e => this._normalize(e));
         } catch (_) { /* soft-fail */ }
       },
       start() {
         if (this._interval) return;
         this._interval = setInterval(() => this.load(), 10000);
+      },
+      subscribe() {
+        // EventSource doesn't support custom headers — SSE is bearer-protected
+        // via cookies/IP scope (same pattern as network.html).
+        if (this._eventSource) return;
+        try {
+          this._eventSource = new EventSource('/api/network/stream');
+          this._eventSource.addEventListener('open', () => {
+            this.connected = true;
+          });
+          this._eventSource.addEventListener('error', () => {
+            this.connected = false;
+          });
+          this._eventSource.addEventListener('event', (msg) => {
+            try {
+              const ev = JSON.parse(msg.data);
+              this._buffered.push(ev);
+            } catch (_) { /* drop malformed */ }
+          });
+        } catch (_) { /* soft-fail — poll fallback still active */ }
+        if (this._flushInterval) return;
+        this._flushInterval = setInterval(() => this._flush(), this._flushIntervalMs);
+      },
+      _flush() {
+        if (this._buffered.length === 0) return;
+        const drained = this._buffered.splice(0).map(e => {
+          const n = this._normalize(e);
+          n._new = true;
+          return n;
+        });
+        // Prepend newest, dedupe against existing (timestamp_ms+tool+target),
+        // cap at _maxEvents.
+        const seen = new Set(drained.map(e => e.timestamp_ms + ':' + e.tool + ':' + e.target));
+        const kept = this.events.filter(e => !seen.has(e.timestamp_ms + ':' + e.tool + ':' + e.target));
+        this.events = [...drained, ...kept].slice(0, this._maxEvents);
+        if (this._clearFlashTimer) clearTimeout(this._clearFlashTimer);
+        this._clearFlashTimer = setTimeout(() => {
+          this.events = this.events.map(e => ({ ...e, _new: false }));
+        }, this._flashHoldMs);
+      },
+      destroy() {
+        if (this._eventSource) { this._eventSource.close(); this._eventSource = null; }
+        if (this._flushInterval) { clearInterval(this._flushInterval); this._flushInterval = null; }
+        if (this._interval) { clearInterval(this._interval); this._interval = null; }
+        if (this._clearFlashTimer) { clearTimeout(this._clearFlashTimer); this._clearFlashTimer = null; }
+        this.connected = false;
       },
     };
   }
