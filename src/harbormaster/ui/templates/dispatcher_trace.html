@@ -83,7 +83,7 @@
             :data-trace-id="trace.trace_id">
           <!-- Trace header: clickable to collapse/expand -->
           <button type="button"
-                  class="w-full flex items-center gap-2 text-xs text-left"
+                  class="w-full flex items-center gap-2 text-xs text-left focus-visible:ring-2 focus-visible:ring-accent"
                   :aria-expanded="!trace.collapsed"
                   data-trace-toggle
                   @click="trace.collapsed = !trace.collapsed">
@@ -115,7 +115,7 @@
                       aria-hidden="true"></span>
                 <!-- Expand/collapse for span attributes -->
                 <button type="button"
-                        class="w-3 text-foreground-subtle flex-shrink-0"
+                        class="w-3 text-foreground-subtle flex-shrink-0 focus-visible:ring-2 focus-visible:ring-accent"
                         :aria-expanded="!!span.expanded"
                         :aria-label="span.expanded ? `Hide ${span.tool} attributes` : `Show ${span.tool} attributes`"
                         data-span-toggle

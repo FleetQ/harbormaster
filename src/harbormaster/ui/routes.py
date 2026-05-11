@@ -2658,6 +2658,73 @@ def register_routes(
             "dispatcher": dispatcher_state,
         }
 
+    @app.get("/api/kpi/history")
+    async def api_kpi_history() -> dict[str, list[int]]:
+        """v21.0.0a7: 24-hour sparkline history for each numeric KPI cell.
+
+        Returns 24 hourly buckets (oldest → newest) for the four
+        sparkline-enabled cells on the dashboard KPI strip. Cheap —
+        the only non-trivial query is one COUNT-per-hour scan against
+        the network_log mcp_calls table (covering index on `timestamp`).
+
+        Soft-fails per series — a missing [history] extra or empty
+        network log just returns zero-arrays so the SVG still renders
+        a flat line rather than a broken cell.
+        """
+        nonlocal _last_dirs
+
+        now_s = int(time.time())
+        # 24 buckets, oldest first. Each bucket is `[start_ms, end_ms)`.
+        hour_starts = [now_s - (i * 3600) for i in range(23, -1, -1)]
+
+        # Projects — stable count from the same cache /api/projects uses.
+        def _build_for_count() -> list[dict[str, object]]:
+            nonlocal _last_dirs
+            infos = discover_projects(
+                config.projects,
+                ignore_patterns=config.ignore.patterns,
+            )
+            _last_dirs = project_dirs_from_infos(infos)
+            return [p.as_dict() for p in infos]
+
+        try:
+            proj_count = len(projects_cache.get(_build_for_count, _last_dirs))
+        except Exception:  # noqa: BLE001 — soft-fail to zero
+            proj_count = 0
+        projects_hist = [proj_count] * 24
+
+        # Recent queries — bucketed COUNT against network_log (mcp_calls).
+        # network_log timestamps are epoch-MS; convert hour boundaries.
+        recent_queries_hist: list[int] = [0] * 24
+        try:
+            from harbormaster.ui.network_log import network_log
+
+            for i, start_s in enumerate(hour_starts):
+                end_s = start_s + 3600
+                # Inclusive-start, exclusive-end. network_log.stats() takes
+                # `since_ms` but not an upper bound; do a direct SQL count.
+                row = network_log._conn.execute(  # noqa: SLF001 — internal API
+                    "SELECT COUNT(*) FROM mcp_calls "
+                    "WHERE timestamp >= ? AND timestamp < ?",
+                    (start_s * 1000, end_s * 1000),
+                ).fetchone()
+                recent_queries_hist[i] = int(row[0]) if row else 0
+        except Exception:  # noqa: BLE001 — soft-fail
+            recent_queries_hist = [0] * 24
+
+        # Active embeds + host budget — no historical persistence layer
+        # exists for these yet; return zero arrays so the sparkline cell
+        # renders a flat line (acceptable per spec).
+        active_embeds_hist = [0] * 24
+        host_budget_hist = [0] * 24
+
+        return {
+            "projects": projects_hist,
+            "active_embeds": active_embeds_hist,
+            "recent_queries": recent_queries_hist,
+            "host_budget": host_budget_hist,
+        }
+
     @app.get("/health")
     async def fleetq_health() -> dict[str, str]:
         """Alias of /api/health using the path FleetQ Bridge expects when

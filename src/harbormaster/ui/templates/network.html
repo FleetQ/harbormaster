@@ -30,6 +30,8 @@
      Polls /api/network/stats; the window dropdown re-fetches. -->
 <section x-data="networkStats()" x-init="loadStats()"
          data-network-stats
+         role="tabpanel"
+         aria-label="Network stats"
          x-show="$store.hmNetTab.active === 'stats'"
          class="mb-4 border border-border rounded-md p-2 bg-surface-2/40">
   <header class="flex items-center justify-between gap-2 mb-2 flex-wrap">
@@ -103,6 +105,8 @@
 
 <section x-data="networkPanel()" x-init="init()"
          x-show="$store.hmNetTab.active !== 'stats'"
+         role="tabpanel"
+         aria-label="Network events"
          class="border border-border rounded-md p-2 bg-surface-2/40">
   {# v13.0.0a4: server-side filter controls. Tool + source dropdowns
      are derived from the stats panel above (auto-refresh every 30s);
@@ -716,7 +720,7 @@
             x-text="`Step ${stepIndex + 1} of ${steps.length}`"></span>
       <button type="button" @click="dismiss()"
               aria-label="Skip network tour"
-              class="text-xs text-foreground-muted hover:text-danger">
+              class="text-xs text-foreground-muted hover:text-danger focus-visible:ring-2 focus-visible:ring-accent">
         Skip
       </button>
     </header>
@@ -728,12 +732,12 @@
       <button type="button" @click="prev()"
               :disabled="stepIndex === 0"
               aria-label="Previous step"
-              class="text-xs px-2 py-1 rounded border border-border text-foreground-muted hover:text-accent disabled:opacity-30">
+              class="text-xs px-2 py-1 rounded border border-border text-foreground-muted hover:text-accent disabled:opacity-30 focus-visible:ring-2 focus-visible:ring-accent">
         Back
       </button>
       <button type="button" @click="next()"
               aria-label="Next step"
-              class="text-xs px-3 py-1 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent">
+              class="text-xs px-3 py-1 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent focus-visible:ring-2 focus-visible:ring-accent">
         <span x-text="stepIndex === steps.length - 1 ? 'Done' : 'Next'"></span>
       </button>
     </div>

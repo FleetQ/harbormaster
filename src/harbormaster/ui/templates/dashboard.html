@@ -111,7 +111,7 @@
      missing.
      v19.0.0a5: kept atop card grid so the at-a-glance row stays
      above the fold. -->
-<section x-data="kpiStrip()" x-init="loadKpi(); loadBudget(); startPolling()"
+<section x-data="kpiStrip()" x-init="loadKpi(); loadBudget(); loadHistory(); startPolling()"
          aria-label="Dashboard at-a-glance metrics"
          data-tour-step="kpi-strip"
          class="mb-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
@@ -122,6 +122,8 @@
     <p class="text-2xl font-bold text-foreground"
        x-text="kpi.projects ?? '—'"
        :aria-label="`${kpi.projects ?? 0} projects discovered`"></p>
+    <div class="mt-1 text-accent" data-kpi-sparkline="projects"
+         x-html="historySparkline('projects')"></div>
   </div>
   <div class="border border-border rounded-md p-2 bg-surface-2/40"
        data-kpi-cell="active-embeds">
@@ -130,6 +132,8 @@
        :class="activeEmbedsClass()"
        x-text="activeEmbedsLabel()"
        :aria-label="`Reembed phase ${kpi.active_embeds?.phase || 'unknown'}`"></p>
+    <div class="mt-1 text-accent" data-kpi-sparkline="active-embeds"
+         x-html="historySparkline('active_embeds')"></div>
   </div>
   <div class="border border-border rounded-md p-2 bg-surface-2/40"
        data-kpi-cell="recent-queries">
@@ -137,6 +141,8 @@
     <p class="text-2xl font-bold text-foreground"
        x-text="kpi.recent_queries ?? '—'"
        :aria-label="`${kpi.recent_queries ?? 0} queries in the last hour`"></p>
+    <div class="mt-1 text-accent" data-kpi-sparkline="recent-queries"
+         x-html="historySparkline('recent_queries')"></div>
   </div>
   <div class="border border-border rounded-md p-2 bg-surface-2/40"
        data-kpi-cell="bridge">
@@ -168,6 +174,8 @@
        :class="hostBudgetClass()"
        x-text="hostBudgetLabel()"
        :aria-label="hostBudgetAriaLabel()"></p>
+    <div class="mt-1 text-accent" data-kpi-sparkline="host-budget"
+         x-html="historySparkline('host_budget')"></div>
     <!-- v15.0.0a4: per-tool breakdown on hover.
          v17.0.0a4: also surface tightest-cap axis breakdown
          (per-host / per-tool / per-project) so operators see
@@ -308,7 +316,7 @@
                 x-show="pluginHost && pluginHost !== 'local' && pluginHost !== 'all'"
                 @click="loadConfigDiff()"
                 aria-label="Compare config with remote host"
-                class="text-[10px] px-1.5 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent">
+                class="text-[10px] px-1.5 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent focus-visible:ring-2 focus-visible:ring-accent">
           Compare config
         </button>
         <!-- v12.0.0a2: migrated to shared stateBadgeHtml helper. -->
@@ -364,7 +372,7 @@
         <span class="text-xs text-accent">Config diff: local → <span x-text="pluginHost"></span></span>
         <button type="button" @click="configDiffOpen = false"
                 aria-label="Close config diff"
-                class="text-xs px-1.5 py-0 rounded border border-border hover:border-rose-700 text-foreground-muted hover:text-danger">
+                class="text-xs px-1.5 py-0 rounded border border-border hover:border-rose-700 text-foreground-muted hover:text-danger focus-visible:ring-2 focus-visible:ring-accent">
           ×
         </button>
       </div>
@@ -498,7 +506,7 @@
           </button>
           <button type="button"
                   @click="clearCompareSelection()"
-                  class="px-1.5 py-0.5 rounded border border-border text-foreground-muted hover:text-accent">
+                  class="px-1.5 py-0.5 rounded border border-border text-foreground-muted hover:text-accent focus-visible:ring-2 focus-visible:ring-accent">
             Clear
           </button>
         </span>
@@ -557,7 +565,7 @@
                    this run vs the immediately-preceding chronological
                    run via the v13.a3 reembed parity endpoint. -->
               <td class="py-0.5 text-right">
-                <button type="button"
+                <button class="focus-visible:ring-2 focus-visible:ring-accent" type="button"
                         x-show="runs.indexOf(r) > 0"
                         @click="loadRunDiff(r)"
                         :aria-label="`Diff this run against the previous run`"
@@ -579,7 +587,7 @@
           </span>
           <button type="button" @click="runDiffOpen = false"
                   aria-label="Close run diff panel"
-                  class="text-foreground-muted hover:text-accent text-[11px] px-1.5 py-0 rounded border border-border">
+                  class="text-foreground-muted hover:text-accent text-[11px] px-1.5 py-0 rounded border border-border focus-visible:ring-2 focus-visible:ring-accent">
             close
           </button>
         </div>
@@ -618,7 +626,7 @@
           </span>
           <button type="button" @click="compareOpen = false"
                   aria-label="Close run compare panel"
-                  class="text-foreground-muted hover:text-accent text-[11px] px-1.5 py-0 rounded border border-border">
+                  class="text-foreground-muted hover:text-accent text-[11px] px-1.5 py-0 rounded border border-border focus-visible:ring-2 focus-visible:ring-accent">
             close
           </button>
         </div>
@@ -1227,10 +1235,50 @@
         } catch (_) { /* soft-fail */ }
       },
 
+      // v21.0.0a7: 24-hour history for each numeric KPI cell. Wires
+      // the v16.0.0a4 _tiny_sparkline.html helper onto the KPI strip
+      // (and the host-budget cell). Soft-fails per series — a missing
+      // /api/kpi/history endpoint just leaves `history.<key>` empty
+      // and the sparkline renders as an empty string.
+      history: { projects: [], active_embeds: [], recent_queries: [], host_budget: [] },
+      // v21.0.0a7: explicit version counter. Alpine 3's x-html binding
+      // reads scalar properties reliably; bumping `historyVersion`
+      // after each successful fetch guarantees the per-cell sparkline
+      // re-evaluates even if the proxy on `history` misses an in-place
+      // mutation.
+      historyVersion: 0,
+      async loadHistory() {
+        try {
+          const r = await hmFetch('/api/kpi/history');
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const body = await r.json();
+          // Replace the whole `history` object — Alpine 3's reactive
+          // proxy picks up the assignment. The `historyVersion` bump
+          // below additionally forces any x-html binding that reads
+          // it to re-evaluate (sibling-scope safety net).
+          this.history = body;
+          this.historyVersion += 1;
+        } catch (e) {
+          console.warn('loadHistory failed:', e);
+        }
+      },
+      // Returns the SVG snippet for a given KPI key. Delegates to the
+      // global `sparklineHtml` helper (defined in _tiny_sparkline.html,
+      // loaded by base.html). Empty arrays render as ''.
+      historySparkline(key) {
+        const _v = this.historyVersion; // reactive dep — forces re-eval
+        void _v;
+        const values = (this.history && this.history[key]) || [];
+        if (!Array.isArray(values) || values.length === 0) return '';
+        if (typeof window.sparklineHtml !== 'function') return '';
+        return window.sparklineHtml(values, { width: 80, height: 16, strokeW: 1.5 });
+      },
+
       startPolling() {
         this._interval = setInterval(() => {
           this.loadKpi();
           this.loadBudget();
+          this.loadHistory();
           // v15.0.0a4: keep the tool-breakdown current too — but only
           // after it's been loaded once (don't fetch on a never-hovered
           // dashboard).
@@ -2432,7 +2480,7 @@
             x-text="`Step ${stepIndex + 1} of ${steps.length}`"></span>
       <button type="button" @click="dismiss()"
               aria-label="Skip tour"
-              class="text-xs text-foreground-muted hover:text-danger">
+              class="text-xs text-foreground-muted hover:text-danger focus-visible:ring-2 focus-visible:ring-accent">
         Skip
       </button>
     </header>
@@ -2444,12 +2492,12 @@
       <button type="button" @click="prev()"
               :disabled="stepIndex === 0"
               aria-label="Previous step"
-              class="text-xs px-2 py-1 rounded border border-border text-foreground-muted hover:text-accent disabled:opacity-30">
+              class="text-xs px-2 py-1 rounded border border-border text-foreground-muted hover:text-accent disabled:opacity-30 focus-visible:ring-2 focus-visible:ring-accent">
         Back
       </button>
       <button type="button" @click="next()"
               aria-label="Next step"
-              class="text-xs px-3 py-1 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent">
+              class="text-xs px-3 py-1 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent focus-visible:ring-2 focus-visible:ring-accent">
         <span x-text="stepIndex === steps.length - 1 ? 'Done' : 'Next'"></span>
       </button>
     </div>
@@ -2674,13 +2722,13 @@
                 :disabled="saving"
                 aria-label="Save accent color"
                 data-accent-save
-                class="px-2 py-1 rounded border border-accent-strong bg-accent-soft/30 text-accent hover:bg-accent-soft/50 disabled:opacity-50">
+                class="px-2 py-1 rounded border border-accent-strong bg-accent-soft/30 text-accent hover:bg-accent-soft/50 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent">
           <span x-text="saving ? 'Saving...' : 'Save'"></span>
         </button>
         <button type="button" @click="reset()"
                 aria-label="Reset accent to violet default"
                 data-accent-reset
-                class="px-2 py-1 rounded border border-border text-foreground-muted hover:bg-surface-2 hover:text-foreground">
+                class="px-2 py-1 rounded border border-border text-foreground-muted hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent">
           Reset
         </button>
       </div>

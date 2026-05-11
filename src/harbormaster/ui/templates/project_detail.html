@@ -547,27 +547,27 @@
           <button type="button" x-show="!editing"
                   @click="startEdit()"
                   aria-label="Edit memory file"
-                  class="text-xs px-2 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent">
+                  class="text-xs px-2 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent focus-visible:ring-2 focus-visible:ring-accent">
             Edit
           </button>
           <button type="button" x-show="editing"
                   @click="cancelEdit()"
                   aria-label="Cancel edit"
-                  class="text-xs px-2 py-0.5 rounded border border-border hover:border-rose-700 text-foreground-muted hover:text-danger">
+                  class="text-xs px-2 py-0.5 rounded border border-border hover:border-rose-700 text-foreground-muted hover:text-danger focus-visible:ring-2 focus-visible:ring-accent">
             Cancel
           </button>
           <button type="button" x-show="editing"
                   @click="save()"
                   :disabled="saving"
                   aria-label="Save memory file"
-                  class="text-xs px-2 py-0.5 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent disabled:opacity-50">
+                  class="text-xs px-2 py-0.5 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent">
             <span x-text="saving ? 'Saving…' : 'Save'"></span>
           </button>
           <!-- v11.0.0a2: revision history toggle -->
           <button type="button" x-show="selected"
                   @click="toggleHistory()"
                   aria-label="Toggle revision history"
-                  class="text-xs px-2 py-0.5 rounded border border-border hover:border-warning text-foreground-muted hover:text-warning">
+                  class="text-xs px-2 py-0.5 rounded border border-border hover:border-warning text-foreground-muted hover:text-warning focus-visible:ring-2 focus-visible:ring-accent">
             <span x-text="showHistory ? 'Hide history' : 'History'"></span>
           </button>
           <!-- v12.0.0a4: diff against revision. Visible when the
@@ -626,7 +626,7 @@
                   @click="addTagChip()"
                   :disabled="!newTagChip.trim()"
                   aria-label="Add tag"
-                  class="text-[10px] px-1.5 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent disabled:opacity-50">
+                  class="text-[10px] px-1.5 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent">
             +
           </button>
         </div>
@@ -667,7 +667,7 @@
             <li class="flex items-center gap-2 text-xs">
               <button type="button" @click="loadRevision(r.id)"
                       :aria-label="`Preview revision ${r.id}`"
-                      class="text-accent hover:text-accent underline-offset-2 hover:underline font-mono">
+                      class="text-accent hover:text-accent underline-offset-2 hover:underline font-mono focus-visible:ring-2 focus-visible:ring-accent">
                 #<span x-text="r.id"></span>
               </button>
               <span class="text-foreground-subtle"
@@ -684,7 +684,7 @@
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs text-warning">Revision <span x-text="revisionPreviewId"></span> (read-only)</span>
             <button type="button" @click="copyRevisionToClipboard()"
-                    class="text-xs px-2 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent">
+                    class="text-xs px-2 py-0.5 rounded border border-border hover:border-accent-strong text-foreground-muted hover:text-accent focus-visible:ring-2 focus-visible:ring-accent">
               Copy
             </button>
           </div>
@@ -756,7 +756,7 @@
         <button type="submit"
                 :disabled="creating || !newName"
                 aria-label="Create new memory file"
-                class="text-xs px-3 py-1 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent disabled:opacity-50">
+                class="text-xs px-3 py-1 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent">
           <span x-text="creating ? 'Creating…' : 'Create'"></span>
         </button>
         <span x-show="createError" role="alert"
@@ -1581,7 +1581,7 @@
     <form @submit.prevent="search()" class="flex gap-2 mb-3">
       <input x-model="query" type="text" placeholder="semantic search…"
              class="bg-surface-1 border border-border rounded px-2 py-1 text-sm flex-1">
-      <button type="submit" class="bg-accent text-foreground px-3 py-1 text-sm rounded">Search</button>
+      <button type="submit" class="bg-accent text-foreground px-3 py-1 text-sm rounded focus-visible:ring-2 focus-visible:ring-accent">Search</button>
     </form>
     <ul class="space-y-2 text-sm" id="hm-qa-history-results">
       <template x-for="entry in results" :key="entry.id">
@@ -1634,7 +1634,7 @@
         </label>
         <div class="flex gap-2 items-center">
           <button type="submit" :disabled="saving"
-                  class="bg-accent text-foreground px-3 py-1 rounded">Save</button>
+                  class="bg-accent text-foreground px-3 py-1 rounded focus-visible:ring-2 focus-visible:ring-accent">Save</button>
           <span x-show="message" x-text="message" :class="messageClass" class="text-xs"></span>
         </div>
       </form>
@@ -1808,7 +1808,7 @@
        project: {{ project | tojson if project else "null" }},
        host: {{ host | tojson }},
      })'
-     x-init="loadBudget()"
+     x-init="loadBudget(); loadHistory()"
      data-tour-step="inspector-content">
   <section class="mb-4">
     <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Metadata</h3>
@@ -1861,6 +1861,13 @@
     </p>
     <p x-show="budgetError" class="text-[10px] text-foreground-subtle mt-1"
        x-text="budgetError"></p>
+    <!-- v21.0.0a7: 24-hour usage sparkline. Pulled from /api/kpi/history's
+         `recent_queries` series (24 hourly buckets, oldest→newest). Renders
+         only when at least one bucket is non-zero so a fresh install
+         doesn't show a noisy flat line. -->
+    <div x-show="usageHistory.length > 0"
+         class="mt-2 text-accent" data-budget-sparkline
+         x-html="budgetSparkline()"></div>
   </section>
 </div>
 <script>
@@ -1868,6 +1875,8 @@
   // /api/projects/budget call. `meta` is hydrated from the page's
   // own template context so first paint shows real data without a
   // round-trip; budget arrives shortly after.
+  // v21.0.0a7: also pulls /api/kpi/history for a 24-hour usage line
+  // beneath the budget block.
   function projectInspector(opts) {
     const project = opts.project || {};
     return {
@@ -1885,6 +1894,9 @@
       //   { calls_24h, budget, usage_pct, tightest_cap, tightest_cap_axis }
       budget: null,
       budgetError: '',
+      // v21.0.0a7: 24h usage history (recent_queries series from
+      // /api/kpi/history). Empty array = no sparkline shown.
+      usageHistory: [],
       lastCommitShort() {
         const c = this.meta.last_commit;
         if (!c) return '—';
@@ -1922,6 +1934,29 @@
         } catch (_) {
           this.budgetError = 'budget unavailable';
         }
+      },
+      // v21.0.0a7: 24h hourly recent-queries history. Soft-fails to
+      // empty array so the sparkline stays hidden if /api/kpi/history
+      // isn't available (e.g. older operator build).
+      async loadHistory() {
+        try {
+          const r = await hmFetch('/api/kpi/history');
+          if (!r.ok) return;
+          const body = await r.json();
+          const series = body.recent_queries || [];
+          // Only show the sparkline when at least one bucket has data.
+          if (Array.isArray(series) && series.some(v => +v > 0)) {
+            this.usageHistory = series;
+          }
+        } catch (_) { /* soft-fail */ }
+      },
+      budgetSparkline() {
+        if (typeof window.sparklineHtml !== 'function') return '';
+        if (!this.usageHistory.length) return '';
+        return window.sparklineHtml(
+          this.usageHistory,
+          { width: 160, height: 22, strokeW: 1.5, fillBelow: true }
+        );
       },
     };
   }
