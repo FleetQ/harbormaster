@@ -110,33 +110,66 @@ operator console. All surfaces speak the same SSE event stream that powers
 the MCP transport, so what you see in the UI matches what your MCP clients
 see.
 
-- **Dashboard (`/`)** — KPI strip across the top (in-flight calls,
-  completed, failed, today's budget headroom, tightest cap), project grid
-  with framework / git / Serena / `CLAUDE.md` badges, Plugins / Auto-reembed
-  / Recent Q&A panels, sidebar with grouped projects + pinned + ignored.
-- **Project page (`/projects/<name>`)** — per-project status, Recent Q&A
-  history (live-updates as streamed answers complete), inline ask /
-  delegate / fan-out forms, memories list. Tab system splits the surface
-  into Status / Memory / Activity for fast switching.
+### Workspace shell (v19+)
+
+Every page renders inside a fixed three-column workspace borrowed in spirit
+from VSCode / Postman / Linear:
+
+```
+┌─ topbar (h-12, fixed) ────────────────────────────────┐
+├──────────┬──────────────────────────┬─────────────────┤
+│ sidebar  │ main                      │ inspector      │
+│ (240px)  │ (1fr, scroll-y)           │ (320px,        │
+│ projects │ page-specific content     │  collapsible)  │
+└──────────┴──────────────────────────┴─────────────────┘
+```
+
+* **Topbar** — brand-mark + page title + Cmd-K hint + theme toggle +
+  auth indicator.
+* **Sidebar** — `all hosts ▾` filter + `Filter projects…` search +
+  `RECENTLY ASKED` + language groups (`GO`, `JAVASCRIPT`, `PHP`, …)
+  with `★`-pinned project markers.
+* **Main** — page content; layout choice (single column / card grid /
+  split pane / tabs) belongs to the page.
+* **Inspector** — context-aware widgets per page (KPI summary + live
+  activity feed on the dashboard, project metadata + budget gauges on
+  the project page, etc.). Collapse via `«` button (state persisted in
+  `localStorage`); auto-collapses below 1280 px.
+
+Linear-violet OKLCH palette, compact density, light/dark theme toggle.
+
+### Per-page surfaces
+
+- **Dashboard (`/`)** — **Quick Ask** card at the top (project picker +
+  question → navigates to project page with pre-filled query), KPI strip
+  (projects, active embeds, recent queries, bridge state, dispatcher
+  health, host budget headroom), 2-column card grid (recent activity,
+  Auto-reembed, FleetQ Bridge, Plugins, Recall Q&A history full-width,
+  Project graph full-width). Inspector shows a KPI mini-strip plus a
+  live SSE-driven activity feed with pulse-on-new.
+- **Project page (`/projects/<name>`)** — five-tab system:
+  **Overview** / **Memories** / **Trajectories** / **Q&A History** /
+  **Settings**. Number keys `1`–`5` jump tabs; `#tab=<id>` URL hash
+  makes shareable deep links. Inspector shows project metadata +
+  24h budget consumption.
+- **Memories tab** — split-pane editor: file list (left) + raw markdown
+  textarea (centre) + bleach-sanitised live HTML preview (right).
+  Toolbar: Save / Undo (`Cmd-Z`) / Redo (`Cmd-Shift-Z`) / `diff vs:`
+  revision selector. Last-20 per-file history, side-by-side HTML diff,
+  optional tag chip editor.
 - **Network (`/network`)** — inter-project call graph rendered with a
-  vendored Cytoscape build. Edge weights track real Harbormaster MCP calls
-  (caller → target). Filters by host / project / tool / window; switchable
-  graph / chat list view; SSE-driven live append. Aggregate stats at
-  `/api/network/stats?window=…`.
-- **Dispatcher trace (`/dispatcher`)** — live in-flight spans + last-100
-  completed spans rendered as a waterfall with parent / child nesting.
-  Each span exposes tool, project, host, duration, and (where the backend
-  emits it) tool-call sub-spans for the model's own tool use. Real backend
-  token usage in the SSE `usage` event.
-- **Memories editor** — read / edit allowlisted files (per-project
-  `CLAUDE.md` + `.serena/memories/*.md`) with bleach-sanitised live
-  markdown preview, last-20-revisions history, side-by-side HTML diff,
-  Cmd+Z undo / redo, and an optional tag chip editor.
+  vendored Cytoscape build. Edge weights track real Harbormaster MCP
+  calls (caller → target). Filters by host / project / tool / window;
+  switchable graph / chat list view; SSE-driven live append. Aggregate
+  stats at `/api/network/stats?window=…`.
+- **Dispatcher trace (`/dispatcher`)** — live in-flight spans +
+  last-100 completed spans rendered as a waterfall with parent / child
+  nesting. Each span exposes tool, project, host, duration, and (where
+  the backend emits it) tool-call sub-spans for the model's own tool
+  use. Real backend token usage in the SSE `usage` event.
 - **Cmd-K command palette** — bigram fuzzy-matched action launcher;
   shareable URLs via `?q=` pre-fill; pulls actions from a single catalog
   so every page surface adds itself for free.
-- **Light / dark theme toggle** — auto / light / dark, OKLCH semantic
-  colour tokens, no flash on reload.
 
 Operator-facing reference: [`docs/operator-guide.md`](docs/operator-guide.md).
 

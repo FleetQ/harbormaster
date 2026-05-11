@@ -1057,3 +1057,227 @@ scripts/post_sync_install_hooks.sh` wires the hook into
   streaming / 30 s network / 10 s trace. Configurable via
   `heartbeat_interval_streaming_s`, `heartbeat_interval_network_s`,
   `heartbeat_interval_trace_s` top-level keys.
+
+---
+
+# Part C — v19.0 Workspace Revamp
+
+Sections 30–34 cover the v19.0 sprint, which retired the v8-era
+single-column-with-sidebar layout in favour of a multi-pane workspace
+borrowed in spirit from VSCode / Postman / Linear.
+
+## 30. Three-column workspace shell (v19.0.0a1)
+
+`src/harbormaster/ui/templates/base.html` was rewritten around a
+four-landmark CSS grid:
+
+```
+┌─ topbar (h-12, fixed, full-width) ────────────────────┐
+├──────────┬──────────────────────────┬─────────────────┤
+│ sidebar  │ main                      │ inspector      │
+│ (240px)  │ (1fr, scroll-y)           │ (320px,        │
+│ fixed    │                           │  collapsible)  │
+└──────────┴──────────────────────────┴─────────────────┘
+```
+
+* **Topbar** (`#hm-topbar`) — `⚓ Harbormaster v<version>` brand-mark on
+  the left, `{% block page_title %}` centred, Cmd-K hint + theme
+  toggle + auth-state lock icon on the right. `position: fixed; top: 0`.
+* **Sidebar** (`#hm-sidebar`, `aside`) — extracted to
+  `_partials/_sidebar.html` so every page picks it up via
+  `{% block sidebar %}{% include "_partials/_sidebar.html" %}{% endblock %}`.
+  Contents: `all hosts ▾` filter, `Filter projects…` text input,
+  `RECENTLY ASKED`, language groups (`GO`, `JAVASCRIPT`, `PHP`, …)
+  with `★`-pinned indicators per project. Independent
+  `overflow-y-auto`.
+* **Main** (`#hm-main`, `main`) — `{% block content %}` lives here.
+  Independent `overflow-y-auto`. The page-specific layout (single column
+  vs card grid vs split pane) is the page template's choice; the shell
+  is unopinionated.
+* **Inspector** (`#inspector`, `aside`) — `{% block inspector %}` lives
+  here. Independent `overflow-y-auto`. Collapse via in-pane `«` button
+  flips the grid columns to `240px 1fr 0` and persists to
+  `localStorage.hm-inspector-collapsed`. Below 1280 px the inspector
+  auto-collapses (v20 a6 will replace this with a proper drawer
+  pattern below 1024 px).
+
+The four landmarks each carry a stable HTML `id` so e2e tests + future
+CSS hooks can reference them without scraping deep selectors.
+
+The Alpine factory `appShell()` owns inspector collapse state +
+listeners; it lives inline in `base.html` to keep the shell self-
+contained.
+
+## 31. Tab system on `/projects/<name>` (v19.0.0a2 + v19.0.0a8)
+
+The project page got five tabs in the main pane:
+
+| # | Tab            | Source                                  |
+|---|----------------|-----------------------------------------|
+| 1 | Overview       | Existing project header + status block  |
+| 2 | Memories       | New split-pane editor (v19.0.0a8/a9)    |
+| 3 | Trajectories   | Relocated `trajectoryList` component    |
+| 4 | Q&A History    | Project-scoped recall (v19.0.0a5 stub)  |
+| 5 | Settings       | Read-only metadata grid (v20.0.0a3 will edit) |
+
+Mechanics:
+
+* Tab strip uses the v8.0.0a2 `_state_badge`-adjacent visual language
+  (active tab gets `border-accent` underline, inactive tabs get
+  `border-transparent`). Stable container `id="hm-project-tabs"`.
+* **URL-hash persistence**: `#tab=memories` survives reload via
+  `restoreFromHash` (init) + `replaceState` (on click — keeps the
+  back button bound to navigation, not tab toggling).
+* **Keyboard shortcuts `1`..`5`** map to tab indices. The handler
+  bails when the focused element is `INPUT`/`TEXTAREA`/`contentEditable`,
+  or any modifier key is held.
+* **A11y**: every tab button carries
+  `aria-label="<label> tab (shortcut <N>)"` so the audit picks up an
+  accessible name even though the visible label is `x-text`-injected.
+
+The Alpine factory `projectTabs()` is mounted on the parent `<section>`
+of the tab strip — **not** on the same element that owns
+`x-show`/`x-transition`, because Alpine has known interaction issues
+with multi-directive mounts on the same element (cf. memoriesEditor a8
+bug below).
+
+## 32. Memories editor (v19.0.0a8 + v19.0.0a9 hotfix)
+
+The Memories tab on `/projects/<name>#tab=memories` ships a working
+edit surface that closes the v10.0.0a5/a6 over-report.
+
+### Layout
+
+```
+┌─ FILES (200px) ─┬─ source / preview (split) ─────────┐
+│ ★ CLAUDE.md     │ Toolbar: Save · Undo · Redo · diff │
+│ + new           ├─────────────────┬──────────────────┤
+│ <serena memos>  │ raw markdown    │ rendered preview │
+│   …             │ textarea        │ (bleach-clean)   │
+└─────────────────┴─────────────────┴──────────────────┘
+```
+
+### Wiring
+
+* **File list** populates from `GET /api/projects/{name}/memories`
+  (v10.0.0a5).
+* **Selecting a file** loads `GET /api/projects/{name}/memories/{file}`
+  and `GET /api/projects/{name}/memories/{file}/history`.
+* **Live preview** re-renders on textarea input, debounced 300 ms,
+  via `POST /api/render-markdown` which goes through
+  `harbormaster.ui.markdown.render_safe` (bleach allowlist —
+  v11.0.0a3, extended in v12.0.0a4 for `<details>`/`<summary>` and
+  footnotes).
+* **Save** issues `PUT /api/projects/{name}/memories/{file}`; new
+  files via `POST` with `{filename, content}`.
+* **Diff** dropdown loads
+  `GET /api/projects/{name}/memories/{file}/diff?from=<rev>&to=current&format=html`
+  — server-side `difflib.HtmlDiff` (v13.0.0a3).
+* **Undo / Redo** are local stack semantics over the `select →
+  load → edit` cycle. Cmd-Z / Cmd-Shift-Z are wired via
+  `@keydown.cmd.z.prevent="undo()"` on the textarea.
+
+### a8 → a9 hotfix lesson
+
+`v19.0.0a8` mounted the editor with
+`x-data="memoriesEditor({{ project_name | tojson }})"`. The `tojson`
+filter emits a JSON-quoted string (`"harbormaster"`), and inside a
+double-quoted attribute value, the inner `"` collided with the
+attribute's outer `"` — the HTML parser truncated the value at the
+first inner `"`, Alpine mounted with an empty data stack, and the
+editor stayed blank. **Verified visually** by the v19 anti-slop
+protocol — without the screenshot step this would have shipped as
+"working" per the agent's self-report and re-played the v10
+over-report.
+
+`v19.0.0a9` switched to `x-data="memoriesEditor('{{ project_name | e }}')"`
+(single quotes outside, Jinja `e`-escaped value inside) and moved
+`x-data` off the same element as `x-show`/`x-transition` — Alpine has
+documented quirks when those directives co-mount.
+
+The same `tojson` anti-pattern was discovered in `trajectoryList` and
+queued for `v20.0.0a1`. **The general rule is now codified**: never
+use `{{ … | tojson }}` inside a double-quoted HTML attribute. Use
+`'{{ … | e }}'` single-quoted instead, or move the value to a
+`data-*` attribute that Alpine reads via `$el.dataset`.
+
+## 33. Inspector pane widgets (v19.0.0a3 + v19.0.0a7)
+
+Each page template defines `{% block inspector %}` to populate the
+right-hand pane with context-aware widgets:
+
+| Page                          | Inspector widgets                                   |
+|-------------------------------|-----------------------------------------------------|
+| `/` Dashboard                 | `SUMMARY` (KPI mini-strip) + `RECENT ACTIVITY` (live SSE feed) |
+| `/projects/<name>` Overview   | `METADATA` (last commit, language, host, path, serena/CLAUDE.md presence) + `BUDGET (24H)` |
+| `/projects/<name>` Trajectories | Filter controls (date range, tool, host)         |
+| `/network`                    | `STATS SUMMARY` (1h calls, error rate, by-tool, top-projects) |
+| `/dispatcher`                 | `IN-FLIGHT` count + `RECENT TRACES` summary         |
+| `/tools/fan-out`              | Minimal context help                                |
+
+The dashboard inspector's `RECENT ACTIVITY` widget (v19.0.0a7) connects
+to the existing `GET /api/network/stream` SSE feed (v10.0.0a7):
+
+* **Initial load** via `GET /api/network/events?limit=10` for the
+  last 10 entries.
+* **Subscribe** via browser-native `EventSource` (cookie-auth,
+  v12.0.0a6).
+* **Buffer** incoming events; **flush every 1000 ms** to the DOM —
+  the throttle prevents jank on bursty MCP traffic.
+* **Pulse** `animate-pulse text-accent` on each new event row for
+  1500 ms; class clears via `setTimeout`.
+* **Cap** at 10 events; the widget also shows a `view all →` link to
+  `/network` for the full feed.
+
+The widget cleans up its `EventSource` on `destroy()` (Alpine's
+component-removal hook).
+
+## 34. Linear violet OKLCH palette + compact density (v19.0.0a4)
+
+The v8-era cyan accent was replaced with a Linear-styled violet at hue
+290. **OKLCH was chosen** because:
+
+* `oklch()` is the only CSS colour space where lightness perception is
+  perceptually uniform — lightness `60%` looks equally "medium" across
+  hues.
+* Tailwind v4's `@theme` block emits OKLCH natively; no PostCSS
+  workaround needed.
+* Operator-tunable accents in v20+ become a one-line CSS variable
+  swap rather than a regenerate-and-rebuild step.
+
+### Token surface
+
+```
+Accent:       --color-accent              oklch(78% .13 290)
+              --color-accent-strong       oklch(62% .22 290)
+Surface:      --color-surface-0..3        oklch(12-22% .005-.010 280)
+Border:       --color-border-subtle/-default/-strong
+Foreground:   --color-foreground          oklch(96% .005 280)
+              --color-foreground-muted    oklch(75% .005 280)
+              --color-foreground-dim      oklch(55% .005 280)
+Semantic:     --color-success/warning/danger/info  (hue per status)
+```
+
+`--color-accent-strong` was bumped from the spec value
+`oklch(54% .21 290)` (3.4:1 contrast against `surface-1`) to
+`oklch(62% .22 290)` (≥ 4.5:1) when the
+`test_dark_mode_pairs_meet_wcag_aa` regression flagged the spec
+value. v20.0.0a5 will repeat the audit in **light mode**.
+
+### Compact density pass
+
+359 token + density substitutions across templates (one migration
+script committed for traceability:
+`scripts/migrate_v19a4_violet_compact.py`):
+
+* `gap-4 → gap-2`, `gap-3 → gap-2`, `gap-2 → gap-1.5`
+* `p-4 → p-2.5`, `px-4 → px-3`, `py-4 → py-2.5`, `p-3 → p-2`
+* `text-base → text-sm`, secondary text dropped to `text-xs`
+* `mb-6 → mb-4`, `mb-3 → mb-2`, `mt-3 → mt-2`
+* `rounded-lg → rounded-md`
+* Sidebar rows tightened to `h-7` (down from `~h-9` implied by `py-2`)
+* Tabs (from v19.0.0a2): `px-3 py-2 → px-2.5 py-1.5`
+
+Compiled `tailwind.css` grew from ~37 KB (v18) to ~42 KB (v19) — the
+violet shade scale is defined for future use even though Tailwind v4's
+tree-shaker only emits utilities actually referenced by templates.

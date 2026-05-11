@@ -17,8 +17,116 @@ entry lists the alpha tags that built up to GA.
 
 ## [Unreleased]
 
+_v20 sprint in flight: trajectoryList tojson hotfix, bleach pipeline audit,
+editable budget settings, inspector drag-resize, light-mode contrast fixes,
+mobile responsive drawer, tabs extension to dashboard/network/dispatcher._
+
+---
+
+## [19.0.0] - 2026-05-11
+
+**Theme:** **Dramatic UI revamp.** Operator's "I see no difference from v8"
+critique answered with a multi-pane workspace, Linear-violet visual identity,
+compact density, and a real (rather than over-reported) memories editor.
+Anti-slop protocol: every alpha required a Playwright screenshot to disk
+before commit — caught the v19.0.0a8 → a9 hotfix in the act.
+
+Nine PyPI versions across the sprint (a1, a2, a3, a4, a5, a7, a8, a9, GA).
+The a6 number was skipped because Phase 7 (a7 SSE feed) and Phase 6 (memories
+editor) raced; semver monotonicity required the memories editor to land as a8
+once a7 was already published. v20 forwards retain the a6-skip lesson.
+
+### Added
+- **Three-column workspace shell** (`v19.0.0a1`) — fixed topbar / 240px
+  sidebar / fluid main / 320px collapsible inspector. CSS Grid + landmark
+  IDs (`hm-topbar`, `hm-sidebar`, `hm-main`, `inspector`). Inspector
+  collapse persists in `localStorage`.
+- **Tab system on `/projects/<name>`** (`v19.0.0a2`) — Overview / Memories
+  / Trajectories / Q&A History / Settings. URL-hash persistence (`#tab=…`),
+  keyboard shortcuts `1`..`5`, ARIA-labelled tab buttons.
+- **Context-aware inspector widgets** (`v19.0.0a3`) — per-page widgets:
+  KPI summary + activity feed (dashboard), metadata + budget gauges
+  (project), stats summary (network), in-flight + recent traces
+  (dispatcher).
+- **Quick Ask card on dashboard** (`v19.0.0a5`) — project picker +
+  question input at the very top of the main column. Navigates to
+  `/projects/<name>?q=<question>` (uses the existing `?q=` pre-fill from
+  `v11.0.0a4`) instead of duplicating SSE plumbing.
+- **2-column card grid** dashboard layout (`v19.0.0a5`) — Recent Activity,
+  FleetQ Bridge, Plugins, Auto-reembed, Recall Q&A History, Project Graph
+  arranged as cards (full-width for wide widgets via `md:col-span-2`).
+- **SSE-driven activity feed in inspector** (`v19.0.0a7`) — live indicator
+  pulse on new events, 1-second DOM-update throttle, last 10 events shown,
+  `view all →` deep-link to `/network`.
+- **Full memories editor on the Memories tab** (`v19.0.0a8`/`a9`) —
+  split-pane layout (file list + textarea + live preview), toolbar with
+  Save / Undo / Redo / `diff vs:` revision selector. Renders correctly
+  after the `a9` hotfix.
+- **Migration script** `scripts/migrate_v19a4_violet_compact.py` —
+  committed for traceability of the 359 token+density substitutions.
+
 ### Changed
-- v19 docs sweep: README rewritten to reflect the v9–v19 reality (dashboard, network graph, dispatcher trace, memories editor, budget triad, light/dark theme). CHANGELOG created from scratch by mining the 18 GA retros. Obsolete v2.x roadmap docs moved to `docs/legacy/`.
+- **Linear-violet OKLCH palette** (`v19.0.0a4`) — accent hue 290 (violet)
+  replaces the v8-era cyan. Fresh semantic tokens: `accent` /
+  `accent-strong`, `surface-0/1/2/3`, `border-subtle/default/strong`,
+  `foreground` / `foreground-muted` / `foreground-dim`. Compiled
+  `tailwind.css` grew from ~37 KB to ~42 KB.
+- **Compact density pass** (`v19.0.0a4`) — global sweep:
+  `gap-4 → gap-2`, `p-4 → p-2.5`, `text-base → text-sm`, `mb-6 → mb-4`,
+  `rounded-lg → rounded-md`, sidebar rows tightened to `h-7`.
+- **`accent-strong` bumped** from spec `oklch(54% 0.21 290)` to
+  `oklch(62% 0.22 290)` to clear `test_dark_mode_pairs_meet_wcag_aa`
+  (3.4:1 → ≥ 4.5:1 on `surface-1`/`surface-2`).
+- **`x-data` mounting pattern** (`v19.0.0a9` hotfix) — switched from
+  `x-data="factory({{ var | tojson }})"` (which collided with
+  attribute double-quotes and broke Alpine mounting) to
+  `x-data="factory('{{ var | e }}')"`. Same anti-pattern flagged in
+  `trajectoryList` for v20.0.0a1 follow-up.
+- **Tab buttons** carry `aria-label="<label> tab (shortcut <N>)"` so the
+  a11y auditor sees an accessible name even though `x-text` is opaque.
+- **`trajectoryList`** relocated under the Trajectories tab (`v19.0.0a2`);
+  pre-v19 standalone render is gone.
+- **Memories tab** on project page is now the canonical edit surface;
+  the legacy `memoriesPanel` block is wrapped in `{% if false %}` and
+  no longer emitted (kept inert as artefact for one release).
+- **Docs sweep**: README rewritten to reflect v9–v19 reality (dashboard,
+  network graph, dispatcher trace, memories editor, budget triad,
+  light/dark theme). CHANGELOG created from scratch by mining the
+  GA retros. Obsolete v2.x roadmap docs moved to `docs/legacy/`.
+
+### Fixed
+- **Memories editor failed to render in `v19.0.0a8`** — the `tojson`-
+  inside-attribute pattern collided with HTML attribute parsing,
+  Alpine mounted with empty data, and the editor stayed blank. Hotfixed
+  in `v19.0.0a9` by switching to single-quoted `'{{ … | e }}'`. The
+  same bug was discovered in `trajectoryList` and queued for
+  `v20.0.0a1`.
+
+### Removed
+- **v10 fixed-footer + v9 mobile hamburger / rail-collapse** patterns
+  (superseded by the inspector-collapse model).
+- **Topbar nav links** (intentionally retired — Cmd-K palette is the
+  single navigation surface).
+- **v19.0.0a2 placeholder banner** ("Memories editor — full
+  implementation lands in v19.0.0a6") — replaced by the working
+  editor in `a8`/`a9`.
+
+### Notes
+- **Anti-slop protocol** worked: every alpha required a Playwright
+  screenshot to disk before commit. The screenshot for `v19.0.0a8`
+  showed an empty Memories tab → the `a9` hotfix shipped within the
+  same day. Without the protocol, this would have been a
+  "shipped but invisible" repeat of the `v10.a5/a6` over-report.
+- **Parallel agent coordination** — three agents (`a5` dashboard, `a6`
+  memories, `a7` SSE feed) shipped concurrently. Disjoint scope by
+  file (`dashboard.html` vs `project_detail.html` vs inspector block)
+  + version-bump coordination via `git pull origin main` before each
+  bump worked cleanly. Documented in
+  [`docs/sprint-retro-harbormaster-v19.0.0.md`](docs/sprint-retro-harbormaster-v19.0.0.md).
+- **Git hygiene pass** (concurrent with v19) — pre-cleanup branch state
+  (~110 stale `feat/v(3-18).0-*` branches + 4 `ship/v(N).0.0-ga` +
+  2 `fix/v6.0.x-*` + 13 stale worktrees + phantom `parent/`+`worktree/`
+  remote refs) reduced to 3 local + 2 remote branches. Tags untouched.
 
 ---
 
