@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "harbormaster-mcp"
 dynamic = ["version"]
-description = "MCP server that routes Q&A across all your projects — locally or over SSH. Part of the FleetQ ecosystem."
+description = "Multi-project MCP router + operator dashboard for Claude Code, Codex, Cursor. Ask any local or SSH-reachable project a question without `cd` — the project's subagent loads its own CLAUDE.md and Serena memories and answers. Ships with a live web console: KPI strip, inter-project network graph, trace waterfall, memory editor, multi-axis budgets. Part of the FleetQ ecosystem."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -13,16 +13,40 @@ requires-python = ">=3.11"
 authors = [
     { name = "FleetQ", email = "harbormaster@fleetq.net" },
 ]
-keywords = ["mcp", "claude", "claude-code", "fleetq", "agent", "router", "ai", "subagent"]
+keywords = [
+    "mcp", "mcp-server", "model-context-protocol",
+    "claude", "claude-code", "claude-desktop", "anthropic",
+    "codex", "cursor", "aider",
+    "ai-agents", "agent-orchestration", "subagent", "subagent-orchestration",
+    "multi-project", "developer-tools", "operator-console",
+    "fleetq", "fleetq-bridge",
+    "ssh-fan-out", "remote-execution",
+    "observability", "dashboard", "trace-waterfall",
+    "claude-md", "serena", "memory-editor",
+    "router", "agent-router", "ai", "python",
+]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Framework :: FastAPI",
     "Topic :: Software Development",
+    "Topic :: Software Development :: Build Tools",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Distributed Computing",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+    "Environment :: Web Environment",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Typing :: Typed",
 ]
 dependencies = [
     "mcp>=1.2.0",

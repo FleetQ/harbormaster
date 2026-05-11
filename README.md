@@ -1,24 +1,66 @@
 # Harbormaster
 
-> One MCP server, many projects, one operator console. Local + SSH + observability + budgets — without changing directory.
+> **Stop `cd`-ing between projects.** One MCP server routes any question to any project's subagent — locally or over SSH — with a live operator dashboard for the whole fleet.
 
 [![PyPI](https://img.shields.io/pypi/v/harbormaster-mcp.svg?label=harbormaster-mcp)](https://pypi.org/project/harbormaster-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/harbormaster-mcp.svg)](https://pypi.org/project/harbormaster-mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Status](https://img.shields.io/badge/status-stable-green.svg)](#versioning)
+[![MCP](https://img.shields.io/badge/MCP-compatible-7c3aed.svg)](https://modelcontextprotocol.io/)
 
-Harbormaster is an MCP server that routes Q&A and delegations across every
-project on your machine — and across SSH-reachable hosts — without making you
-`cd` between them. Each target project's subagent loads its own `CLAUDE.md` /
-Serena memories, answers, and returns a summary back to the calling
-session.
+**Harbormaster** is a Model Context Protocol (MCP) server + operator console
+for developers who work across **many projects at once**. Point your
+[Claude Code](https://claude.com/product/claude-code),
+[Claude Desktop](https://claude.ai/desktop), [Codex](https://github.com/openai/codex),
+[Cursor](https://cursor.sh/), or any MCP client at it, and you can ask
+any project a question — *without `cd`* — and the target project's subagent
+loads its own `CLAUDE.md` and [Serena](https://github.com/oraios/serena)
+memories, answers, and returns a summary.
 
-It also ships a local web dashboard for the operator: a project grid with
-KPIs, an inter-project network graph, a live dispatcher trace waterfall,
-a memory editor for `CLAUDE.md` and `.serena/memories/*.md`, multi-axis
-budgets (per-host, per-tool, per-project), and a light/dark theme.
+The bundled web dashboard turns the same server into a glanceable mission
+control: a project grid with KPIs, an inter-project network graph, a live
+dispatcher trace waterfall, a markdown memory editor, multi-axis budgets
+(per-host / per-tool / per-project), and a light/dark theme.
 
 > Part of the [FleetQ](https://fleetq.net) ecosystem. Standalone OSS works
 > fully without FleetQ; FleetQ Bridge integration is purely additive.
+
+---
+
+## Why Harbormaster?
+
+You probably already have:
+
+- 5–80 projects in `~/htdocs/` (or `~/work/`, or `~/code/`)
+- Each with its own `CLAUDE.md`, Serena memories, framework, Git state
+- Possibly 1–5 SSH-reachable VPS hosts running production copies
+- One LLM-coding session per project (Claude Code, Codex, Cursor) — which
+  means **context-switching costs every time you `cd` somewhere new**
+
+**Without Harbormaster:**
+You change directory, wait for the agent to re-bootstrap context, ask the
+question, copy the answer back. Repeat 12 times a day.
+
+**With Harbormaster:**
+```
+> ask_project "accounting-fleetq" "did the cron job run today?"
+> fan_out_ask "any flaky tests since last release?" --hosts=local,prod-1
+> delegate_task "hr-fleetq" "summarize last 10 commits" --deliverable=changelog
+```
+
+The calling session never leaves its own cwd. The target project's
+subagent loads its own memory, answers, returns a summary, and your
+question + answer go into a recall-able Q&A history.
+
+## Who is this for?
+
+| You are… | And Harbormaster gives you… |
+|---|---|
+| **A solo developer with 10+ side projects** | One console for all of them, with cross-project search and a graph of who calls whom |
+| **A small-team CTO** | One MCP endpoint your agents talk to across local + production hosts, with budget caps per host/tool/project |
+| **A platform engineer** | A drop-in Bridge daemon for [FleetQ](https://fleetq.net) — Platform Tool, A2A Agent Cards, federated KnowledgeGraph |
+| **An AI agent researcher** | A real-world multi-agent orchestration target with a working web UI for observability |
+| **A vibe coder with too many tabs** | A keyboard-first dashboard (Cmd-K palette, 1–5 tab nav) and a calmer life |
 
 ---
 
@@ -299,6 +341,56 @@ Discovered contract reference: [`docs/fleetq-bridge-contract.md`](docs/fleetq-br
 
 ---
 
+## How it compares
+
+|  | **Harbormaster** | A single MCP per project | `cd` between projects | Bash aliases |
+|---|---|---|---|---|
+| Number of MCP server processes | **1** | N (one per project) | 0 | 0 |
+| Q&A history searchable across projects | ✅ | ❌ | ❌ | ❌ |
+| Inter-project call graph | ✅ Cytoscape network view | ❌ | ❌ | ❌ |
+| Live trace waterfall | ✅ `/dispatcher` | ❌ | ❌ | ❌ |
+| Multi-axis budgets | ✅ per-host + per-tool + per-project | ❌ | ❌ | ❌ |
+| Remote SSH project routing | ✅ same tools target `host=...` | requires N SSH MCPs | manual ssh + cd | manual ssh + cd |
+| Memory editor (CLAUDE.md, `.serena/memories/*.md`) | ✅ split-pane + bleach preview + revision history | edit on disk | edit on disk | edit on disk |
+| Web operator console | ✅ | ❌ | ❌ | ❌ |
+| Setup per new project | 0 (auto-discovered) | new MCP entry | n/a | n/a |
+
+## FAQ
+
+**Does Harbormaster work without Claude Code?**
+Yes. Any MCP-compatible client works — Claude Code, Claude Desktop, Codex,
+Cursor, Aider, or your own integration via the [MCP spec](https://modelcontextprotocol.io/).
+
+**Do I need FleetQ?**
+No. Harbormaster is fully functional standalone. The `[fleetq]` extra is
+purely additive — register as a Bridge, publish A2A Agent Cards, mirror
+trajectories into FleetQ Memory. All opt-in.
+
+**Where is my data stored?**
+Locally. SQLite at `~/.harbormaster/qa_local.db` (Q&A history) +
+`~/.harbormaster/network_log.db` (inter-project calls) +
+`~/.harbormaster/memory_revisions.db` (last-20 memory revisions per file).
+No telemetry, no phone-home. The optional `[telemetry]` config block is
+opt-in only and routes to your own endpoint.
+
+**What about security?**
+Bearer-token authentication on every UI endpoint + cookie-backed SSE
+(v12+). Memory editor goes through `bleach.clean()` on render
+(allowlisted tags, blocks `javascript:`/`data:` schemes). Path-traversal
+protected per project (only `CLAUDE.md` + `.serena/memories/*.md`).
+
+**Can I run it as a long-lived daemon?**
+Yes. `harbormaster-ui --port 7531 &` then bookmark `http://127.0.0.1:7531/`.
+Or wrap in launchd / systemd. Or use a Tauri shell (planned, separate
+project: `harbormaster-desktop`).
+
+**How is this different from the [MCP Inspector](https://github.com/modelcontextprotocol/inspector)?**
+MCP Inspector is a debugging UI for a single MCP server. Harbormaster is
+a multi-project router *plus* operator console — it exposes MCP tools
+that target many projects, and visualizes their interactions.
+
+---
+
 ## Versioning
 
 Harbormaster ships on a proven alpha-cadence: each major (`vN.0.0`) is
@@ -307,7 +399,7 @@ PyPI-published release, and the GA tag `vN.0.0` is a no-code promotion
 plus a cumulative retro doc.
 
 The cadence has shipped GA 18 times (v1 through v18) without a single
-forced rollback. Current head: **v19.0.0a1**.
+forced rollback. Current head: **v21.0.0a3**.
 
 Every behaviour change lands in one alpha and shows up in
 [`CHANGELOG.md`](CHANGELOG.md) under the corresponding major release.
