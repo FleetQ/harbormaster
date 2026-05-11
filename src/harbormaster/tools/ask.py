@@ -15,6 +15,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         question: str,
         max_turns: int = 5,
         host: str | None = None,
+        model: str | None = None,
     ) -> str:
         """Ask a question of a project's Claude Code subagent.
 
@@ -27,6 +28,10 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         When `[history] auto_ground = true`, the prompt is prepended with
         a "Prior context" section listing the top-K past Q&A matches for
         this project from the per-host sqlite store (v1.2 phase 4).
+
+        v21.0.0a10: ``model`` is an optional alias ('haiku', 'sonnet',
+        'opus') or full model id; None = backend default. Subject to
+        ``[backends.<name>] allowed_models`` whitelist when set.
         """
         grounded = build_grounded_prompt(
             question=question,
@@ -46,4 +51,5 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
             host=host,
             config=config,
             label_prefix="ask",
+            model=model,
         )

@@ -42,6 +42,7 @@ def run_backend(
     host: str | None,
     config: HarbormasterConfig,
     label_prefix: str,
+    model: str | None = None,
 ) -> str:
     """Dispatch a prompt to local or remote backend, return the (possibly
     truncated) result text or an 'Error: ...' string.
@@ -82,6 +83,7 @@ def run_backend(
                 max_turns=max_turns,
                 connect_timeout=connect_timeout,
                 total_timeout=total_timeout,
+                model=model,
             )
             label = f"{label_prefix}-{host}-{name}"
         else:
@@ -89,7 +91,9 @@ def run_backend(
                 cwd = resolve_project(name, config.projects, ignore_patterns=config.ignore.patterns)
             except ValueError as e:
                 return f"Error: {e}"
-            result = backend.ask_local(cwd=cwd, prompt=prompt, max_turns=max_turns)
+            result = backend.ask_local(
+                cwd=cwd, prompt=prompt, max_turns=max_turns, model=model,
+            )
             label = f"{label_prefix}-{name}"
     except BackendError as e:
         return f"Error: {e}"
@@ -408,6 +412,7 @@ def make_local_backend_stream(
     prompt: str,
     max_turns: int,
     config: HarbormasterConfig,
+    model: str | None = None,
 ) -> Iterator[str]:
     """Eagerly validate inputs and return the backend's streaming
     iterator against a local project.
@@ -450,6 +455,7 @@ def make_local_backend_stream(
         cwd=cwd,
         prompt=prompt,
         max_turns=max_turns,
+        model=model,
     )
     return stream
 
@@ -461,6 +467,7 @@ def make_remote_backend_stream(
     max_turns: int,
     host: str,
     config: HarbormasterConfig,
+    model: str | None = None,
 ) -> Iterator[str]:
     """SSH counterpart to make_local_backend_stream — eagerly validates and
     returns the remote streaming iterator.
@@ -498,6 +505,7 @@ def make_remote_backend_stream(
         max_turns=max_turns,
         connect_timeout=connect_timeout,
         total_timeout=total_timeout,
+        model=model,
     )
     return stream
 

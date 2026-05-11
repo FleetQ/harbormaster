@@ -8,6 +8,11 @@
       project: initial.project,
       host: initial.host,
       question: '', maxTurns: 5,
+      // v21.0.0a10: operator-selected model. '' = backend default
+      // (no `--model` flag passed). Supported aliases: haiku / sonnet
+      // / opus; full model ids also accepted but not surfaced in the
+      // dropdown.
+      model: '',
       streamText: '', chunks: 0, error: '',
       usage: null, // v9.0.0a5: typed `usage` event payload
       loading: false, hasResult: false, elapsedMs: 0,
@@ -22,6 +27,10 @@
           const url = new URL(window.location.href);
           const q = url.searchParams.get('q');
           if (q) this.question = q;
+          // v21.0.0a10: honor `?model=<alias>` from the dashboard
+          // Quick Ask handoff or shared links.
+          const m = url.searchParams.get('model');
+          if (m) this.model = m;
         } catch (_) { /* SSR / non-browser context */ }
       },
 
@@ -37,6 +46,9 @@
         try {
           const args = { name: this.project, question: this.question, max_turns: this.maxTurns };
           if (this.host && this.host !== 'local') args.host = this.host;
+          // v21.0.0a10: only forward when operator picked a non-empty
+          // value; '' (auto) leaves backend default behaviour intact.
+          if (this.model) args.model = this.model;
           const r = await hmFetch('/mcp/harbormaster', {
             method: 'POST',
             signal: controller.signal,

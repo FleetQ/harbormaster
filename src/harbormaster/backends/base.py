@@ -150,6 +150,7 @@ class Backend(Protocol):
         cwd: Path,
         prompt: str,
         max_turns: int,
+        model: str | None = None,
     ) -> BackendResult: ...
 
     def ask_remote(
@@ -161,6 +162,7 @@ class Backend(Protocol):
         max_turns: int,
         connect_timeout: int,
         total_timeout: int,
+        model: str | None = None,
     ) -> BackendResult: ...
 
 

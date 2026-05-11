@@ -42,6 +42,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         max_turns: int = 3,
         synthesize: bool = False,
         synthesis_max_turns: int = 5,
+        model: str | None = None,
     ) -> str:
         """Ask the same question of multiple projects in parallel.
 
@@ -64,6 +65,10 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                 extra subprocess + tokens.
             synthesis_max_turns: max_turns for the synthesis pass (default 5,
                 higher than per-target since synthesis is more reasoning-heavy).
+            model: optional alias ('haiku', 'sonnet', 'opus') or full model
+                id passed to every target subprocess. None = backend default.
+                Subject to ``[backends.<name>] allowed_models`` whitelist
+                when set. v21.0.0a10.
 
         Returns:
             Markdown report. Per-target sections + (optionally) a synthesis
@@ -95,6 +100,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                     host=host_arg,
                     config=config,
                     label_prefix="fanout",
+                    model=model,
                 )
             except Exception as e:  # pragma: no cover - defensive
                 out = f"Error: {type(e).__name__}: {e}"
@@ -109,7 +115,8 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         synthesis = None
         if synthesize:
             synthesis = _synthesize(
-                config, question, targets, results, synthesis_max_turns
+                config, question, targets, results, synthesis_max_turns,
+                model=model,
             )
 
         return _format_report(question, targets, results, synthesis=synthesis)
@@ -148,6 +155,8 @@ def _synthesize(
     targets: list[_Target],
     results: dict[_Target, str],
     max_turns: int,
+    *,
+    model: str | None = None,
 ) -> str:
     """Spawn one local backend call that summarizes per-target answers.
 
@@ -186,6 +195,7 @@ def _synthesize(
             cwd=Path.cwd(),
             prompt=synthesis_prompt,
             max_turns=max_turns,
+            model=model,
         )
     except BackendError as e:
         return f"Synthesis failed: {e}"

@@ -94,6 +94,18 @@
            placeholder="What do you want to know?"
            aria-label="Quick ask question"
            class="flex-1 bg-surface-1 border border-border rounded px-2 py-1.5 text-sm focus:border-accent-strong focus:outline-none">
+    {# v21.0.0a10: model alias picker. Empty = backend default — query
+       string omits ?model= so the project page's askForm honours the
+       backend's default_model. #}
+    <select x-model="model"
+            aria-label="Quick ask model"
+            data-quick-ask-model
+            class="md:w-32 bg-surface-1 border border-border rounded px-2 py-1.5 text-sm focus:border-accent-strong focus:outline-none">
+      <option value="">auto</option>
+      <option value="haiku">⚡ haiku</option>
+      <option value="sonnet">⚖ sonnet</option>
+      <option value="opus">🧠 opus</option>
+    </select>
     <button type="submit"
             :disabled="!project || question.trim().length < 2"
             aria-label="Ask project"
@@ -2520,6 +2532,10 @@
       projects: [],
       project: '',
       question: '',
+      // v21.0.0a10: operator-picked model alias. '' = auto (backend
+      // default). The project page's askForm() picks up `?model=` via
+      // its init() (see _ask_form_script.html).
+      model: '',
       error: '',
       async init() {
         try {
@@ -2532,8 +2548,9 @@
       },
       ask() {
         if (!this.project || this.question.trim().length < 2) return;
-        const url = '/projects/' + encodeURIComponent(this.project)
+        let url = '/projects/' + encodeURIComponent(this.project)
           + '?q=' + encodeURIComponent(this.question.trim());
+        if (this.model) url += '&model=' + encodeURIComponent(this.model);
         window.location.href = url;
       },
     };
