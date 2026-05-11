@@ -54,13 +54,54 @@
   </div>
 </div>
 
+<!-- v19.0.0a5: Quick Ask card. Prominent at top of dashboard so
+     operators can fire a question without scrolling to the project grid.
+     Pragmatic implementation: navigates to /projects/{name}?q=... — the
+     project page already wires the askForm() partial (which honours
+     the `?q=` pre-fill via askForm.init()). This avoids duplicating
+     the SSE plumbing on the dashboard while keeping the entry point
+     visible from the new shell layout. -->
+<section x-data="quickAsk()" x-init="init()"
+         aria-label="Quick ask"
+         data-quick-ask
+         class="mb-4 bg-surface-2 border border-border rounded-md p-2.5">
+  <header class="flex items-center justify-between mb-2">
+    <h2 class="text-sm font-bold text-foreground-muted">Quick ask</h2>
+    <kbd class="text-[10px] text-foreground-subtle bg-surface-3 border border-border rounded px-1 py-0.5 font-mono">Cmd-K to expand</kbd>
+  </header>
+  <form @submit.prevent="ask()" class="flex flex-col md:flex-row gap-2">
+    <select x-model="project"
+            aria-label="Quick ask project"
+            class="md:w-56 bg-surface-1 border border-border rounded px-2 py-1.5 text-sm focus:border-accent-strong focus:outline-none">
+      <option value="">— pick project —</option>
+      <template x-for="p in projects" :key="'qa:' + p">
+        <option :value="p" x-text="p"></option>
+      </template>
+    </select>
+    <input type="text" x-model="question"
+           placeholder="What do you want to know?"
+           aria-label="Quick ask question"
+           class="flex-1 bg-surface-1 border border-border rounded px-2 py-1.5 text-sm focus:border-accent-strong focus:outline-none">
+    <button type="submit"
+            :disabled="!project || question.trim().length < 2"
+            aria-label="Ask project"
+            class="bg-accent-strong hover:bg-accent disabled:bg-surface-3 disabled:text-foreground-muted text-white font-bold px-3 py-1.5 rounded text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
+      Ask →
+    </button>
+  </form>
+  <p x-show="error" :aria-hidden="!error" role="alert" class="mt-1 text-xs text-danger" x-text="error"></p>
+</section>
+
 <!-- v8.0.0a5: KPI strip. 5-cell at-a-glance summary atop the
      dashboard so operators see the project / embed / query / bridge
      / dispatcher state without scanning the body. Auto-refreshes
      every 30s; soft-fails per cell if the underlying source is
-     missing. -->
+     missing.
+     v19.0.0a5: kept atop card grid so the at-a-glance row stays
+     above the fold. -->
 <section x-data="kpiStrip()" x-init="loadKpi(); loadBudget(); startPolling()"
          aria-label="Dashboard at-a-glance metrics"
+         data-tour-step="kpi-strip"
          class="mb-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
   <div class="border border-border rounded-md p-2 bg-surface-2/40"
        data-kpi-cell="projects"
@@ -153,10 +194,40 @@
   </div>
 </section>
 
+<!-- v19.0.0a5: card grid. The dashboard widgets below this point
+     flow as cards in a 2-column responsive grid. Wide widgets
+     (reembed table, recall search, graph) span both columns via
+     `md:col-span-2`. -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4" data-card-grid>
+
+<!-- v19.0.0a5: Recent activity card. Mirrors the inspector activity
+     feed for operators who keep the right pane collapsed. Reuses the
+     existing /api/network/events endpoint (last 10 MCP calls). -->
+<section x-data="recentActivityCard()" x-init="load(); start()"
+         data-recent-activity-card
+         class="bg-surface-2 border border-border rounded-md p-2.5">
+  <header class="flex items-center justify-between mb-2">
+    <h3 class="text-sm font-bold text-foreground-muted">Recent activity</h3>
+    <a href="/network" class="text-xs text-accent hover:underline">view all →</a>
+  </header>
+  <ul class="text-xs space-y-1">
+    <template x-for="ev in events" :key="'rac:' + ev.timestamp_ms + ':' + ev.tool + ':' + ev.target">
+      <li class="font-mono text-foreground-muted truncate">
+        <span class="text-foreground-subtle" x-text="ev.time"></span>
+        <span class="text-accent ml-1" x-text="ev.tool"></span>
+        <span class="text-foreground-muted ml-1" x-text="ev.target"></span>
+      </li>
+    </template>
+    <li x-show="!events.length" class="text-foreground-subtle">no recent calls</li>
+  </ul>
+</section>
+
 <!-- v2.1.0a1: bridge + plugin status strip. Sticky on desktop,
-     collapsible on mobile. Loads async, doesn't block project grid. -->
+     collapsible on mobile. Loads async, doesn't block project grid.
+     v19.0.0a5: spans both columns inside the card grid (it has its
+     own internal 2-col bridge/plugins layout). -->
 <section x-data="statusStrip()" x-init="loadAll()"
-         class="mb-4 grid grid-cols-1 md:grid-cols-2 gap-2">
+         class="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-2">
   <article class="border border-border rounded-md p-2.5 bg-surface-2/40">
     <header class="flex items-center justify-between mb-2">
       <h3 class="text-sm font-bold text-foreground-muted">FleetQ Bridge</h3>
@@ -286,9 +357,11 @@
 </section>
 
 <!-- v5.0.0a1: auto-reembed runner status. Polls /api/history/state
-     every 3s while phase is "running"; idles otherwise. -->
+     every 3s while phase is "running"; idles otherwise.
+     v19.0.0a5: spans both columns of the card grid — the runs table
+     is too wide for a single column. -->
 <section x-data="reembedPanel()" x-init="loadOnce()"
-         class="mb-4 border border-border rounded-md p-2.5 bg-surface-2/40"
+         class="md:col-span-2 border border-border rounded-md p-2.5 bg-surface-2/40"
          x-show="state.available && (state.phase !== 'idle' || state.auto_reembed_enabled)">
   <header class="flex items-center justify-between mb-2 gap-2 flex-wrap">
     <h3 class="text-sm font-bold text-foreground-muted">Auto-reembed</h3>
@@ -564,9 +637,10 @@
 </section>
 
 <!-- v2.1.0a3: recall search. Hits /api/recall (which wraps the
-     recall_qa MCP tool) and renders match cards inline. -->
+     recall_qa MCP tool) and renders match cards inline.
+     v19.0.0a5: spans both columns of the card grid. -->
 <section x-data="recallPanel()" x-init="restoreFromUrl()"
-         class="mb-4 border border-border rounded-md p-2.5 bg-surface-2/40">
+         class="md:col-span-2 border border-border rounded-md p-2.5 bg-surface-2/40">
   <header class="mb-2 flex items-center justify-between gap-2 flex-wrap">
     <h2 class="text-lg font-bold">Recall Q&amp;A history</h2>
     <span class="text-xs text-foreground-subtle">
@@ -638,9 +712,10 @@
 
 <!-- v2.1.0a1: project graph render. Mermaid markup comes from
      /api/graph; we re-render with mermaid.run() after the DOM has the
-     fresh markup so the layout adapts to includeDevDeps / transitive. -->
+     fresh markup so the layout adapts to includeDevDeps / transitive.
+     v19.0.0a5: spans both columns of the card grid. -->
 <section x-data="graphPanel()" x-init="loadGraph()"
-         class="mb-4 border border-border rounded-md p-2.5 bg-surface-2/40">
+         class="md:col-span-2 border border-border rounded-md p-2.5 bg-surface-2/40">
   <header class="flex items-center justify-between mb-2 gap-2 flex-wrap">
     <h2 class="text-lg font-bold">Project graph</h2>
     <div class="flex items-center gap-2 text-xs text-foreground-muted">
@@ -697,6 +772,8 @@
     </div>
   </div>
 </section>
+
+</div><!-- /card-grid (v19.0.0a5) -->
 
 <!-- Project grid (carried forward from v2.0).
      v5.0.0a6: text-based filter input + URL state encoding.
@@ -2124,6 +2201,68 @@
           // succeeded; only flip here for the error path.
           this.graphLoading = false;
         }
+      },
+    };
+  }
+
+  // v19.0.0a5: quickAsk — top-of-dashboard prompt entry point. Uses
+  // the navigation-fallback strategy: the project page already wires
+  // askForm() with a `?q=` pre-fill (see _ask_form_script.html init()),
+  // so we just hand off the question via the URL. This avoids the
+  // duplicate SSE plumbing that a fully inline implementation would
+  // need on top of the dashboard's existing scope (kpiStrip, statusStrip,
+  // recallPanel, graphPanel, projectGrid, reembedPanel — already heavy).
+  function quickAsk() {
+    return {
+      projects: [],
+      project: '',
+      question: '',
+      error: '',
+      async init() {
+        try {
+          const r = await hmFetch('/api/projects');
+          if (!r.ok) return;
+          const d = await r.json();
+          const list = Array.isArray(d.projects) ? d.projects : [];
+          this.projects = list.map(p => p.name);
+        } catch (_) { /* soft-fail — empty dropdown */ }
+      },
+      ask() {
+        if (!this.project || this.question.trim().length < 2) return;
+        const url = '/projects/' + encodeURIComponent(this.project)
+          + '?q=' + encodeURIComponent(this.question.trim());
+        window.location.href = url;
+      },
+    };
+  }
+
+  // v19.0.0a5: recentActivityCard — last 10 MCP calls in the dashboard
+  // card grid. Mirrors the inspector's activityFeed() (same endpoint
+  // + same shape) so operators who collapse the inspector still see
+  // recent activity at a glance.
+  function recentActivityCard() {
+    return {
+      events: [],
+      _interval: null,
+      async load() {
+        try {
+          const r = await hmFetch('/api/network/events?limit=10');
+          if (!r.ok) return;
+          const body = await r.json();
+          const list = Array.isArray(body.events) ? body.events : [];
+          this.events = list.map(e => ({
+            timestamp_ms: e.timestamp_ms,
+            tool: e.tool,
+            target: e.target,
+            time: new Date(e.timestamp_ms).toLocaleTimeString([], {
+              hour: '2-digit', minute: '2-digit', second: '2-digit',
+            }),
+          }));
+        } catch (_) { /* soft-fail */ }
+      },
+      start() {
+        if (this._interval) return;
+        this._interval = setInterval(() => this.load(), 10000);
       },
     };
   }
