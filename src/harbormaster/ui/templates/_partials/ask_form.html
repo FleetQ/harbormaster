@@ -9,10 +9,10 @@
    via base.html's hmFetch() helper — when an auth_token meta tag is
    present, the Authorization header is injected automatically.
 #}
-<section x-data="askForm({
+<section x-data='askForm({
            project: {{ project_name | tojson }},
            host: {{ host | tojson }},
-         })"
+         })'
          class="mb-4 border border-border rounded-md p-2.5 bg-surface-2/40">
   <header class="mb-2 flex items-baseline justify-between gap-2 flex-wrap">
     <h3 class="text-base font-bold text-foreground-muted">

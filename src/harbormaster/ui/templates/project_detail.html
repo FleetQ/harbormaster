@@ -1327,10 +1327,10 @@
      and reload trajectories when the dispatched project matches.
      v4.0.0a4: hm:trajectory:append prepends the just-streamed Q&A
      synthetically (instant feedback) before the dirty reload runs. -->
-<section x-data="trajectoryList({
+<section x-data='trajectoryList({
            project: {{ project_name | tojson }},
            host: {{ host | tojson }},
-         })"
+         })'
          x-init="load()"
          x-on:hm:trajectory:dirty.window="if ($event.detail && $event.detail.project === project) load()"
          x-on:hm:trajectory:append.window="if ($event.detail && $event.detail.project === project) prepend($event.detail.entry)"

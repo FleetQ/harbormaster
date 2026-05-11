@@ -3,10 +3,10 @@
    that delegate_task requires. Streams via the same SSE path.
    Expects: project_name (str), host (str).
 #}
-<section x-data="delegateForm({
+<section x-data='delegateForm({
            project: {{ project_name | tojson }},
            host: {{ host | tojson }},
-         })"
+         })'
          class="mb-4 border border-border rounded-md p-2.5 bg-surface-2/40">
   <header class="mb-2 flex items-baseline justify-between gap-2 flex-wrap">
     <h3 class="text-base font-bold text-foreground-muted">
