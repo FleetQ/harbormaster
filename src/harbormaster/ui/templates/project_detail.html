@@ -1577,19 +1577,48 @@
 </script>
   </section>
 
-  <!-- Q&A History tab: project-scoped recall lands in v19.0.0a5. -->
-  <section x-show="active === 'qa-history'" x-transition role="tabpanel" aria-label="Q and A History">
-    <div class="text-sm text-foreground-muted p-8 text-center border border-border rounded bg-surface-2/40">
-      Project-scoped Q&amp;A history search — full impl in v19.0.0a5.
-    </div>
+  <!-- Q&A History tab: project-scoped recall (v21.0.0a2). Wraps the
+       existing /api/recall endpoint with a search form + result list,
+       loaded on first activation via $watch('active'). Single-quote
+       factory-mount pattern avoids the v19.a9 attribute-escaping bug. -->
+  <section x-show="active === 'qa-history'" x-transition role="tabpanel" aria-label="Q and A History"
+           x-data="projectQaHistory('{{ project.name | e if project else '' }}')"
+           x-init="$watch('$root.active', v => { if (v === 'qa-history' && !loaded) load(); })">
+    <header class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-semibold text-foreground">Q&amp;A history</h3>
+      <span class="text-xs text-foreground-muted" x-text="count + ' entries'"></span>
+    </header>
+    <form @submit.prevent="search()" class="flex gap-2 mb-3">
+      <input x-model="query" type="text" placeholder="semantic search…"
+             class="bg-surface-1 border border-border rounded px-2 py-1 text-sm flex-1">
+      <button type="submit" class="bg-accent text-foreground px-3 py-1 text-sm rounded">Search</button>
+    </form>
+    <ul class="space-y-2 text-sm" id="hm-qa-history-results">
+      <template x-for="entry in results" :key="entry.id">
+        <li class="border-l-2 border-accent pl-2">
+          <div class="text-foreground-muted text-xs" x-text="entry.created_at + ' · ' + entry.tool"></div>
+          <div class="font-semibold truncate text-foreground" x-text="entry.question"></div>
+          <details class="text-xs text-foreground-muted">
+            <summary class="cursor-pointer">answer ▾</summary>
+            <pre class="whitespace-pre-wrap mt-1" x-text="entry.answer"></pre>
+          </details>
+        </li>
+      </template>
+      <li x-show="!results.length && loaded" class="text-foreground-muted text-xs">
+        No Q&amp;A history yet. Use the Ask form to query this project.
+      </li>
+    </ul>
   </section>
 
-  <!-- Settings tab: read-only metadata (v19.0.0a2). Per-project budget
-       edit lands in a4+. Renders nothing on remote-host views since
-       `project` is None there (matches the existing header guard). -->
-  <section x-show="active === 'settings'" x-transition role="tabpanel" aria-label="Settings">
+  <!-- Settings tab: metadata + editable per-project daily-call budget
+       (v21.0.0a2). Budget writes to <project>/.harbormaster.toml under
+       [budget] daily_call_budget. Renders nothing on remote-host views. -->
+  <section x-show="active === 'settings'" x-transition role="tabpanel" aria-label="Settings"
+           x-data="projectSettings('{{ project.name | e if project else '' }}')"
+           x-init="loadBudget()">
     {% if project %}
-      <dl class="grid grid-cols-2 gap-2 text-sm border border-border rounded-md p-2.5 bg-surface-2/40">
+      <h3 class="text-sm font-semibold mb-3 text-foreground">Metadata</h3>
+      <dl class="grid grid-cols-2 gap-2 text-sm border border-border rounded-md p-2.5 bg-surface-2/40 mb-4">
         <dt class="text-foreground-muted">Project name</dt>
         <dd class="text-foreground">{{ project.name }}</dd>
         <dt class="text-foreground-muted">Path</dt>
@@ -1600,9 +1629,28 @@
         </dd>
         <dt class="text-foreground-muted">Language</dt>
         <dd class="text-foreground">{{ project.language or 'unknown' }}</dd>
-        <dt class="text-foreground-muted">Daily call budget</dt>
-        <dd class="text-foreground">inherits</dd>
       </dl>
+
+      <h3 class="text-sm font-semibold mb-3 text-foreground">Daily call budget</h3>
+      <form @submit.prevent="save()" class="space-y-2 text-sm" id="hm-project-budget-form">
+        <label class="flex items-center gap-2">
+          <input type="number" x-model="budget" min="1"
+                 class="bg-surface-1 border border-border rounded px-2 py-1 w-32"
+                 placeholder="inherit">
+          <span class="text-foreground-muted text-xs">leave empty = inherit from per-host</span>
+        </label>
+        <div class="flex gap-2 items-center">
+          <button type="submit" :disabled="saving"
+                  class="bg-accent text-foreground px-3 py-1 rounded">Save</button>
+          <span x-show="message" x-text="message" :class="messageClass" class="text-xs"></span>
+        </div>
+      </form>
+      <p class="text-xs text-foreground-muted mt-3">
+        Current effective cap (tightest wins):
+        per-host <code x-text="effective.per_host ?? '—'"></code> ·
+        per-tool <code x-text="effective.per_tool ?? '—'"></code> ·
+        per-project <code x-text="effective.per_project ?? '—'"></code>
+      </p>
     {% else %}
       <p class="text-sm text-foreground-muted p-2.5 text-center border border-border rounded bg-surface-2/40">
         Settings are unavailable for remote-host project views.
@@ -1610,6 +1658,111 @@
     {% endif %}
   </section>
 </div>
+
+<script>
+  // v21.0.0a2: Q&A history (project-scoped recall_qa wrapper).
+  function projectQaHistory(projectName) {
+    return {
+      project: projectName,
+      query: '',
+      results: [],
+      count: 0,
+      loaded: false,
+      async load() {
+        try {
+          const r = await hmFetch(
+            `/api/recall?project=${encodeURIComponent(this.project)}&question=&top_k=20`,
+          );
+          const d = await r.json();
+          this.results = (d.matches || []).map(m => ({
+            id: m.id || m.rowid || (m.created_at + ':' + (m.question || '').slice(0, 32)),
+            question: m.question,
+            answer: m.answer,
+            created_at: m.created_at
+              ? new Date(m.created_at * 1000).toISOString().slice(0, 19).replace('T', ' ')
+              : '',
+            tool: m.tool || 'ask',
+          }));
+          this.count = this.results.length;
+        } catch (e) { /* swallow — list stays empty */ }
+        this.loaded = true;
+      },
+      async search() {
+        if (!this.query) { return this.load(); }
+        try {
+          const r = await hmFetch(
+            `/api/recall?project=${encodeURIComponent(this.project)}` +
+            `&question=${encodeURIComponent(this.query)}&top_k=20`,
+          );
+          const d = await r.json();
+          this.results = (d.matches || []).map(m => ({
+            id: m.id || m.rowid || (m.created_at + ':' + (m.question || '').slice(0, 32)),
+            question: m.question,
+            answer: m.answer,
+            created_at: m.created_at
+              ? new Date(m.created_at * 1000).toISOString().slice(0, 19).replace('T', ' ')
+              : '',
+            tool: m.tool || 'ask',
+          }));
+          this.count = this.results.length;
+          this.loaded = true;
+        } catch (e) { /* swallow */ }
+      },
+    };
+  }
+
+  // v21.0.0a2: project settings — editable per-project daily-call budget.
+  function projectSettings(projectName) {
+    return {
+      project: projectName,
+      budget: '',
+      saving: false,
+      message: '',
+      messageClass: 'text-foreground-muted',
+      effective: {per_host: null, per_tool: null, per_project: null},
+      async loadBudget() {
+        if (!this.project) return;
+        try {
+          const r = await hmFetch(
+            `/api/projects/${encodeURIComponent(this.project)}/budget`,
+          );
+          if (!r.ok) return;
+          const d = await r.json();
+          this.effective = d;
+          this.budget = (d.per_project === null || d.per_project === undefined) ? '' : d.per_project;
+        } catch (e) { /* silent */ }
+      },
+      async save() {
+        if (!this.project) return;
+        this.saving = true;
+        this.message = 'Saving…';
+        this.messageClass = 'text-foreground-muted';
+        const parsed = this.budget === '' || this.budget === null ? null : parseInt(this.budget, 10);
+        const body = JSON.stringify({daily_call_budget: parsed});
+        try {
+          const r = await hmFetch(
+            `/api/projects/${encodeURIComponent(this.project)}/budget`,
+            {method: 'PUT', headers: {'Content-Type': 'application/json'}, body},
+          );
+          this.saving = false;
+          if (r.ok) {
+            this.message = 'Saved';
+            this.messageClass = 'text-foreground';
+            await this.loadBudget();
+            setTimeout(() => { this.message = ''; }, 2000);
+          } else {
+            this.message = 'Save failed: ' + r.status;
+            this.messageClass = 'text-foreground';
+          }
+        } catch (e) {
+          this.saving = false;
+          this.message = 'Save failed';
+          this.messageClass = 'text-foreground';
+        }
+      },
+    };
+  }
+</script>
 
 <script>
   // v19.0.0a2: tab system controller. URL hash (#tab=<id>) drives the

@@ -24,6 +24,7 @@ import asyncio
 import difflib
 import json
 import time
+import tomllib
 from collections.abc import AsyncIterator, Callable
 from importlib import resources
 from pathlib import Path
@@ -32,7 +33,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sse_starlette.sse import EventSourceResponse
 
 from harbormaster import __version__
@@ -422,6 +423,244 @@ def register_routes(
             "window_hours": 24,
             "projects": items,
         }
+
+    # v21.0.0a2: per-project budget GET + PUT. The PUT writes
+    # `[budget] daily_call_budget = N` to `<project>/.harbormaster.toml`
+    # (or removes the key when null). GET returns the *effective* cap
+    # across the per-host / per-tool / per-project axes — tightest wins,
+    # matching the dispatcher's actual budget enforcement.
+    class _ProjectBudgetPutBody(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        daily_call_budget: int | None = Field(default=None)
+
+    def _read_project_budget_toml(project_path: Path) -> int | None:
+        """Parse `<project>/.harbormaster.toml` and return
+        `[budget] daily_call_budget` if present and > 0, else None."""
+        toml_path = project_path / ".harbormaster.toml"
+        if not toml_path.is_file():
+            return None
+        try:
+            with toml_path.open("rb") as f:
+                data = tomllib.load(f)
+        except (OSError, tomllib.TOMLDecodeError):
+            return None
+        budget_section = data.get("budget")
+        if not isinstance(budget_section, dict):
+            return None
+        v = budget_section.get("daily_call_budget")
+        if isinstance(v, int) and v > 0:
+            return v
+        return None
+
+    def _write_project_budget_toml(
+        project_path: Path, value: int | None,
+    ) -> None:
+        """Atomically rewrite `<project>/.harbormaster.toml` with the
+        new `[budget] daily_call_budget`. Preserves any other top-level
+        keys and other tables (e.g. `[markdown]`). Removes the key
+        entirely when ``value`` is None; removes the `[budget]` table
+        if it becomes empty.
+
+        Hand-written serializer — there's no stdlib TOML writer and
+        adding tomli-w for a single 2-line table is over-spec.
+        """
+        toml_path = project_path / ".harbormaster.toml"
+        data: dict[str, Any] = {}
+        if toml_path.is_file():
+            try:
+                with toml_path.open("rb") as f:
+                    data = tomllib.load(f)
+            except (OSError, tomllib.TOMLDecodeError):
+                data = {}
+
+        budget_section = data.get("budget")
+        if not isinstance(budget_section, dict):
+            budget_section = {}
+        if value is None:
+            budget_section.pop("daily_call_budget", None)
+        else:
+            budget_section["daily_call_budget"] = value
+        if budget_section:
+            data["budget"] = budget_section
+        else:
+            data.pop("budget", None)
+
+        # If the file becomes empty AND it was originally absent, leave
+        # it absent. If it originally existed, write an empty file
+        # rather than deleting (operator may have meant to keep it).
+        if not data:
+            if toml_path.is_file():
+                toml_path.write_text("", encoding="utf-8")
+            return
+
+        lines: list[str] = []
+        # Top-level scalars first, then tables.
+        scalars = {k: v for k, v in data.items() if not isinstance(v, dict)}
+        tables = {k: v for k, v in data.items() if isinstance(v, dict)}
+        for k, v in scalars.items():
+            lines.append(f"{k} = {_toml_value(v)}")
+        for tname, tval in tables.items():
+            if lines:
+                lines.append("")
+            lines.append(f"[{tname}]")
+            for k, v in tval.items():
+                if isinstance(v, dict):
+                    # Skip nested tables — schema-policed elsewhere.
+                    continue
+                lines.append(f"{k} = {_toml_value(v)}")
+        content = "\n".join(lines) + "\n"
+
+        tmp = toml_path.with_suffix(toml_path.suffix + ".hm-tmp")
+        try:
+            tmp.write_text(content, encoding="utf-8")
+            tmp.replace(toml_path)
+            import contextlib
+            with contextlib.suppress(OSError):
+                toml_path.chmod(0o644)
+        finally:
+            if tmp.exists():
+                import contextlib
+                with contextlib.suppress(OSError):
+                    tmp.unlink()
+
+    def _toml_value(v: object) -> str:
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, int):
+            return str(v)
+        if isinstance(v, float):
+            return repr(v)
+        if isinstance(v, str):
+            # Basic-string with escaping for the cases we expect.
+            escaped = v.replace("\\", "\\\\").replace('"', '\\"')
+            return f'"{escaped}"'
+        if isinstance(v, list):
+            return "[" + ", ".join(_toml_value(x) for x in v) + "]"
+        return f'"{v!s}"'
+
+    def _effective_budget_for_project(name: str) -> dict[str, object]:
+        """Resolve the three-axis budget for `name` (tightest wins).
+
+        - per_host: minimum across hosts that list this project.
+        - per_tool: tightest cap among project-targeting tools
+          (ask_project / delegate_task) from `[budget]
+          .daily_call_budget_per_tool`.
+        - per_project: value from `<project>/.harbormaster.toml`
+          `[budget] daily_call_budget` if set; otherwise None.
+        """
+        # per_host
+        host_caps: list[int] = []
+        for host_cfg in config.hosts.values():
+            if name in host_cfg.projects and host_cfg.daily_call_budget is not None:
+                host_caps.append(host_cfg.daily_call_budget)
+            elif name in host_cfg.projects:
+                # host with project entry but no daily_call_budget; skip
+                pass
+        per_host = min(host_caps) if host_caps else None
+
+        # per_tool
+        tool_budgets = config.budget.daily_call_budget_per_tool
+        relevant = [
+            v for k, v in tool_budgets.items()
+            if k in {"ask_project", "delegate_task"} and v is not None
+        ]
+        per_tool = min(relevant) if relevant else None
+
+        # per_project — from .harbormaster.toml; if no override, fall
+        # back to the [hosts.*.projects.<name>] cells (tightest wins).
+        from harbormaster.projects import resolve_project as _rp
+
+        per_project: int | None = None
+        try:
+            ppath = _rp(name, config.projects, ignore_patterns=config.ignore.patterns)
+            per_project = _read_project_budget_toml(ppath)
+        except ValueError:
+            ppath = None
+
+        if per_project is None:
+            project_cell_caps: list[int] = []
+            for host_cfg in config.hosts.values():
+                cell = host_cfg.projects.get(name)
+                if cell is not None and cell.daily_call_budget is not None:
+                    project_cell_caps.append(cell.daily_call_budget)
+            if project_cell_caps:
+                per_project = min(project_cell_caps)
+
+        cap_candidates: list[tuple[int, str]] = []
+        if per_host is not None:
+            cap_candidates.append((per_host, "per_host"))
+        if per_tool is not None:
+            cap_candidates.append((per_tool, "per_tool"))
+        if per_project is not None:
+            cap_candidates.append((per_project, "per_project"))
+        if cap_candidates:
+            tightest_value, tightest_axis = min(cap_candidates, key=lambda t: t[0])
+        else:
+            tightest_value = None
+            tightest_axis = None
+
+        return {
+            "project": name,
+            "per_host": per_host,
+            "per_tool": per_tool,
+            "per_project": per_project,
+            "tightest_cap_axis": tightest_axis,
+            "tightest_cap_value": tightest_value,
+        }
+
+    @app.get("/api/projects/{name}/budget")
+    async def get_project_budget(name: str) -> dict[str, object]:
+        """v21.0.0a2: effective per-project budget across all three
+        axes (per-host, per-tool, per-project). Tightest cap wins.
+        Reads per-project override from `<project>/.harbormaster.toml`
+        `[budget] daily_call_budget`.
+        """
+        from harbormaster.projects import (
+            validate_project_name as _validate_project_name,
+        )
+        try:
+            _validate_project_name(name)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return _effective_budget_for_project(name)
+
+    @app.put("/api/projects/{name}/budget")
+    async def put_project_budget(
+        name: str, body: _ProjectBudgetPutBody,
+    ) -> dict[str, object]:
+        """v21.0.0a2: write `[budget] daily_call_budget = N` into the
+        project's `.harbormaster.toml`, or remove the key when null.
+        Returns the recomputed effective budget."""
+        from harbormaster.projects import resolve_project as _resolve_project
+        from harbormaster.projects import (
+            validate_project_name as _validate_project_name,
+        )
+
+        try:
+            _validate_project_name(name)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+        try:
+            project_path = _resolve_project(
+                name, config.projects, ignore_patterns=config.ignore.patterns,
+            )
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+        value = body.daily_call_budget
+        if value is not None and (not isinstance(value, int) or value <= 0):
+            raise HTTPException(
+                400,
+                "daily_call_budget must be a positive integer or null",
+            )
+
+        try:
+            _write_project_budget_toml(project_path, value)
+        except OSError as exc:
+            raise HTTPException(500, "write failed") from exc
+
+        return _effective_budget_for_project(name)
 
     @app.get("/api/network/sources")
     async def network_sources(

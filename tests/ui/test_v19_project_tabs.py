@@ -125,39 +125,24 @@ def test_overview_tab_keeps_existing_header_status_and_forms() -> None:
     assert '{% include "_partials/delegate_form.html" %}' in overview_block
 
 
-@pytest.mark.parametrize(
-    "tab_id,marker",
-    [
-        # v19.0.0a6: Memories tab dropped its placeholder banner — it now
-        # mounts the full memoriesEditor (covered by
-        # tests/ui/test_v19_memories_tab.py). Q&A History keeps its
-        # placeholder until v19.0.0a5 lands the project-scoped recall view.
-        ("qa-history", "v19.0.0a5"),
-    ],
-)
-def test_placeholder_tabs_signal_target_version(tab_id: str, marker: str) -> None:
-    """Q&A History tab still ships as a placeholder in a6; the
-    operator needs to see the target alpha for the full impl so they
-    don't file regressions when those tabs look bare."""
+def test_no_v19_placeholder_versions_remain() -> None:
+    """v21.0.0a2: the Q&A History placeholder pointing to v19.0.0a5 has
+    been replaced by the functional surface (see
+    tests/ui/test_v21_qa_history_and_settings.py). This regression
+    guard prevents anyone from re-introducing the placeholder."""
     src = _read()
-    panel_open = src.find(f"x-show=\"active === '{tab_id}'\"")
-    assert panel_open >= 0
-    # Look forward to the next </section> to bound the panel content.
-    panel_close = src.find("</section>", panel_open)
-    assert panel_close > panel_open
-    panel = src[panel_open:panel_close]
-    assert marker in panel, f"{tab_id} tab missing version marker {marker!r}"
+    assert "full impl in v19.0.0a5" not in src
 
 
-def test_settings_tab_renders_read_only_metadata_grid() -> None:
-    """Settings tab is populated with read-only metadata in a2 (path,
-    last commit, language, budget). a4 will add per-project budget
-    edit; the dl grid is the placeholder shape for that."""
+def test_settings_tab_renders_metadata_and_budget_form() -> None:
+    """v21.0.0a2: Settings tab keeps the metadata block (Project name,
+    Path, Last commit, Language) but the "Daily call budget" row is
+    now an editable form mounted via projectSettings()."""
     src = _read()
     settings_idx = src.find("x-show=\"active === 'settings'\"")
     assert settings_idx >= 0
     settings_block = src[settings_idx:]
-    # Metadata fields the spec requires.
+    # Metadata fields the spec still requires.
     for field in (
         "Project name",
         "Path",
