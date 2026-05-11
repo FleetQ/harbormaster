@@ -48,7 +48,7 @@ os.environ["HARBORMASTER_DISPATCHER_METRICS_DB"] = str(
 # in v15.0.0a4 N-way reembed call counters). Truncating at function
 # scope keeps per-test counts deterministic without forcing every test
 # file to wire up its own reset.
-import contextlib
+import contextlib  # noqa: E402
 from collections.abc import Iterator  # noqa: E402
 
 import pytest  # noqa: E402

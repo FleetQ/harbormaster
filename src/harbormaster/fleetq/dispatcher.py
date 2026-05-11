@@ -294,10 +294,8 @@ class DispatcherStats:
         # want a DB stall to block in-process readers.
         store = self._get_store()
         if store is not None:
-            try:
+            with contextlib.suppress(Exception):
                 store.increment_in_flight(tool)
-            except Exception:  # noqa: BLE001 — best-effort; in-proc counters remain authoritative
-                pass
         return span
 
     def _lookup_trace_id_locked(self, span_id: int) -> int | None:
@@ -359,10 +357,8 @@ class DispatcherStats:
         # v21.0.0a8: cross-process counter write outside the in-proc lock.
         store = self._get_store()
         if store is not None:
-            try:
+            with contextlib.suppress(Exception):
                 store.decrement_in_flight(span.tool, ok)
-            except Exception:  # noqa: BLE001 — best-effort
-                pass
 
     def _fanout_locked(self, event: dict[str, Any]) -> None:
         """Push an event to every live subscriber. Caller holds self._lock."""
@@ -471,10 +467,8 @@ class DispatcherStats:
         # observe a fresh snapshot.
         store = self._get_store()
         if store is not None:
-            try:
+            with contextlib.suppress(Exception):
                 store.reset()
-            except Exception:  # noqa: BLE001
-                pass
 
 
 # Process-wide singleton. Tests can grab it via ``get_dispatcher_stats``

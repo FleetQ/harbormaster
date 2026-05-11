@@ -36,7 +36,7 @@ _STATIC_CSS = (
 
 # --- OKLCH → contrast helpers ---------------------------------------- #
 
-def _oklch_to_linear_rgb(L: float, C: float, h_deg: float) -> tuple[float, float, float]:
+def _oklch_to_linear_rgb(L: float, C: float, h_deg: float) -> tuple[float, float, float]:  # noqa: N803
     """OKLab → linear sRGB. Reference: bottosson.github.io/posts/oklab/."""
     h = math.radians(h_deg)
     a = C * math.cos(h)
@@ -44,7 +44,7 @@ def _oklch_to_linear_rgb(L: float, C: float, h_deg: float) -> tuple[float, float
     l_ = L + 0.3963377774 * a + 0.2158037573 * b
     m_ = L - 0.1055613458 * a - 0.0638541728 * b
     s_ = L - 0.0894841775 * a - 1.2914855480 * b
-    l, m, s = l_ ** 3, m_ ** 3, s_ ** 3
+    l, m, s = l_ ** 3, m_ ** 3, s_ ** 3  # noqa: E741
     r = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s
     g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s
     bl = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
@@ -80,7 +80,7 @@ def _parse_light_tokens() -> dict[str, tuple[float, float, float]]:
     m = re.search(r"html\.theme-light\s*\{([^}]+)\}", src, re.DOTALL)
     assert m, "Could not locate html.theme-light block in tailwind.input.css"
     tokens: dict[str, tuple[float, float, float]] = {}
-    for name, L, C, h in _TOKEN_RE.findall(m.group(1)):
+    for name, L, C, h in _TOKEN_RE.findall(m.group(1)):  # noqa: N806
         tokens[name] = (float(L), float(C), float(h))
     return tokens
 
