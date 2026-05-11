@@ -118,12 +118,15 @@ def test_mobile_css_media_query_below_1024() -> None:
 
 
 def test_desktop_grid_layout_preserved() -> None:
-    """At >=1024px the existing 3-column grid (240px + 1fr + 320px)
-    must remain intact. The drawer media query collapses the grid
-    only below 1024px — desktop must continue using the existing
-    grid-cols-[240px_1fr_320px] / [240px_1fr_0] template strings."""
+    """At >=1024px the 3-column grid (240px + 1fr + inspectorWidth) must
+    remain intact. v21.0.0a5 switched the inspector column from the static
+    Tailwind class `grid-cols-[240px_1fr_320px]` to an inline
+    `:style` binding driven by appShell()'s `inspectorWidth` state so the
+    operator can drag-resize. Collapsed branch still pins 0. The drawer
+    media query continues to collapse the grid only below 1024px."""
     src = _read("base.html")
-    assert "grid-cols-[240px_1fr_320px]" in src
-    assert "grid-cols-[240px_1fr_0]" in src
+    # Inline style binding drives the three-column template.
+    assert "grid-template-columns: 240px 1fr ${inspectorWidth}px" in src
+    assert "grid-template-columns: 240px 1fr 0" in src
     # The shell grid id is what the @media block targets.
     assert 'id="hm-shell-grid"' in src
