@@ -98,14 +98,20 @@ def test_trajectories_tab_contains_trajectory_list_component() -> None:
     location no longer exists outside the tab system."""
     src = _read()
     traj_open_idx = src.find("x-show=\"active === 'trajectories'\"")
-    traj_factory_idx = src.find('x-data="trajectoryList({')
+    # v20.0.0a1 switched x-data outer quotes from " to ' (the tojson-in-
+    # double-quoted-attribute bug class). Match either style.
+    traj_factory_idx = max(
+        src.find('x-data="trajectoryList({'),
+        src.find("x-data='trajectoryList({"),
+    )
     assert traj_open_idx >= 0, "Trajectories tab panel missing"
     assert traj_factory_idx >= 0, "trajectoryList component missing"
     assert traj_factory_idx > traj_open_idx, (
         "trajectoryList must render inside the Trajectories tab panel"
     )
     # And there must be only one trajectoryList — no accidental duplicate.
-    assert src.count('x-data="trajectoryList({') == 1
+    total = src.count('x-data="trajectoryList({') + src.count("x-data='trajectoryList({")
+    assert total == 1, f"Expected exactly 1 trajectoryList mount, found {total}"
 
 
 def test_overview_tab_keeps_existing_header_status_and_forms() -> None:
