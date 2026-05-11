@@ -1925,6 +1925,13 @@ def register_routes(
         # Schedule without awaiting — uvicorn must finish startup fast.
         _asyncio.create_task(_asyncio.to_thread(_prime))
 
+    # v21.0.5: user-managed hide list — operator clicks "Hide" in sidebar,
+    # the name lands in ~/.harbormaster/user_hidden.json, and /api/projects
+    # filters it out from the next response. Separate from [ignore].patterns
+    # (TOML config, static, version-controllable) — this is the dynamic
+    # per-click sibling.
+    from harbormaster.ui.user_hidden import get_default_store as _user_hidden_store
+
     @app.get("/api/projects")
     async def list_projects() -> list[dict[str, object]]:
         nonlocal _last_dirs
@@ -1939,7 +1946,14 @@ def register_routes(
         # `discover_projects()` (~0.9 s for 62 projects post-T3). Offload
         # to a thread so the miss doesn't stall every other /api/* request
         # that wants the event loop.
-        return await asyncio.to_thread(projects_cache.get, _build, _last_dirs)
+        rows = await asyncio.to_thread(projects_cache.get, _build, _last_dirs)
+        # v21.0.5: filter user_hidden post-cache so toggling Hide/Unhide
+        # never invalidates the projects_cache (which is keyed off the
+        # set of project directories on disk, not the operator's view).
+        hidden = set(_user_hidden_store().list())
+        if hidden:
+            rows = [r for r in rows if r.get("name") not in hidden]
+        return rows
 
     # v11.0.0a6: 60s TTL memo for /api/ignored-projects. Two
     # discovery passes per call is non-trivial work and the sidebar
@@ -1993,6 +2007,11 @@ def register_routes(
 
         # v21.0.3 perf: run the two discovery passes on a worker thread
         # so a cold cache miss (~3 s total) doesn't block the event loop.
+        # v21.0.5: exclude user-hidden names from this set — they have
+        # their own sidebar section ("Hidden by you"), so listing them
+        # here too would double-count and confuse the operator.
+        user_hidden = set(_user_hidden_store().list())
+
         def _compute_ignored() -> dict[str, object]:
             all_names = {
                 p.name for p in discover_projects(
@@ -2004,7 +2023,7 @@ def register_routes(
                     config.projects, ignore_patterns=config.ignore.patterns,
                 )
             }
-            ignored = sorted(all_names - visible_names)
+            ignored = sorted((all_names - visible_names) - user_hidden)
             return {
                 "patterns": list(config.ignore.patterns),
                 "count": len(ignored),
@@ -2015,6 +2034,47 @@ def register_routes(
         _ignored_cache["value"] = payload
         _ignored_cache["cached_at"] = now_t
         return payload
+
+    # v21.0.5: user-managed hide list — endpoints. POST + DELETE bust
+    # the /api/ignored-projects cache because the diff between
+    # config-ignored and user-hidden changes whenever a name moves
+    # between the two sets.
+    class _UserHiddenAdd(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        name: str = Field(..., min_length=1, max_length=128)
+
+    @app.get("/api/user-hidden")
+    async def list_user_hidden() -> dict[str, object]:
+        """Return the operator's per-project hide list."""
+        names = _user_hidden_store().list()
+        return {"count": len(names), "names": names}
+
+    @app.post("/api/user-hidden")
+    async def add_user_hidden(body: _UserHiddenAdd) -> dict[str, object]:
+        """Hide a project from the operator's view. Idempotent — adding
+        a name that's already hidden returns 200 with `added=False`."""
+        try:
+            added = _user_hidden_store().add(body.name)
+        except ValueError as exc:
+            raise HTTPException(400, "invalid project name") from exc
+        # Cache-bust: the /api/ignored-projects diff depends on this set.
+        _ignored_cache["value"] = None
+        _ignored_cache["cached_at"] = 0.0
+        return {"name": body.name, "added": added}
+
+    @app.delete("/api/user-hidden/{name}")
+    async def remove_user_hidden(name: str) -> dict[str, object]:
+        """Unhide a project. Idempotent — removing a name that wasn't
+        hidden returns 200 with `removed=False`."""
+        # Use the same regex the store enforces, but fail fast on the
+        # URL component before touching state.
+        from harbormaster.projects import _PROJECT_NAME_RE
+        if not _PROJECT_NAME_RE.match(name):
+            raise HTTPException(400, "invalid project name")
+        removed = _user_hidden_store().remove(name)
+        _ignored_cache["value"] = None
+        _ignored_cache["cached_at"] = 0.0
+        return {"name": name, "removed": removed}
 
     # ----- v10.0.0a5: per-project memories viewer (read-only) ----------
     # `GET /api/projects/{name}/memories` — list available memory files.

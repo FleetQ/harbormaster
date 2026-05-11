@@ -39,6 +39,13 @@ os.environ["HARBORMASTER_DISPATCHER_METRICS_DB"] = str(
     Path(_DISPATCHER_METRICS_TMPDIR) / "dispatcher_metrics.db"
 )
 
+# v21.0.5: redirect the user-hidden state file to a per-test-run tmp
+# path so test toggles never leak into ``~/.harbormaster/user_hidden.json``.
+_USER_HIDDEN_TMPDIR = tempfile.mkdtemp(prefix="hm-tests-user-hidden-")
+os.environ["HARBORMASTER_USER_HIDDEN_FILE"] = str(
+    Path(_USER_HIDDEN_TMPDIR) / "user_hidden.json"
+)
+
 
 # v16.0.0a1: autouse fixture promoting the ad-hoc reset pattern from
 # tests/ui/test_network_event_filtering.py up to session-wide. The

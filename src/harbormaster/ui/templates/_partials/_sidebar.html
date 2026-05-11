@@ -37,12 +37,20 @@
     <h3 class="text-[10px] uppercase tracking-wide text-foreground-subtle mb-1">Pinned</h3>
     <ul class="space-y-0.5">
       <template x-for="p in visiblePinned()" :key="'pin:' + p.name">
-        <li>
+        <li class="flex items-center group">
           <a :href="`/projects/${encodeURIComponent(p.name)}`"
-             class="flex items-center gap-1.5 text-xs text-foreground-muted hover:bg-surface-3/50 hover:text-accent px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
+             class="flex-1 flex items-center gap-1.5 text-xs text-foreground-muted hover:bg-surface-3/50 hover:text-accent px-2 py-1 rounded truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
             <span aria-hidden="true" class="text-warning">★</span>
             <span class="truncate" x-text="p.name"></span>
           </a>
+          {# v21.0.5: unpin button. Was a decorative span — operators
+             couldn't unpin from the Pinned section without scrolling
+             back to the language list. #}
+          <button type="button" @click="togglePin(p.name)"
+                  :aria-label="`Unpin ${p.name}`"
+                  class="text-warning text-xs px-1 hover:text-foreground-muted transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
+            <span aria-hidden="true">★</span>
+          </button>
         </li>
       </template>
     </ul>
@@ -89,6 +97,15 @@
                       class="text-xs px-1 hover:text-warning transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
                 <span aria-hidden="true">★</span>
               </button>
+              {# v21.0.5: hide button — POSTs to /api/user-hidden,
+                 then refreshes /api/projects so the project drops out
+                 of the sidebar. Persists server-side. #}
+              <button type="button" @click="hideProject(p.name)"
+                      :aria-label="`Hide ${p.name}`"
+                      title="Hide from sidebar"
+                      class="text-foreground-subtle group-hover:text-foreground-subtle text-xs px-1 hover:text-danger transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
+                <span aria-hidden="true">×</span>
+              </button>
             </li>
           </template>
         </ul>
@@ -125,17 +142,51 @@
   <p x-show="loading" :aria-hidden="!loading" class="text-xs text-foreground-muted">loading…</p>
   <p x-show="error" :aria-hidden="!error" role="alert" aria-live="assertive" class="text-xs text-danger" x-text="error"></p>
 
-  <!-- Ignored projects indicator. -->
+  <!-- v21.0.5: Hidden by you (server-side, click-driven). Distinct
+       from the read-only "Ignored by config" section below. Each row
+       has an Unhide button that DELETEs from /api/user-hidden then
+       refreshes /api/projects. -->
+  <section x-show="userHidden.length > 0"
+           data-sidebar-group="user-hidden"
+           class="mt-2 pt-3 border-t border-border-strong/60">
+    <button type="button"
+            @click="userHiddenOpen = !userHiddenOpen"
+            :aria-expanded="userHiddenOpen"
+            aria-label="Toggle hidden projects list"
+            class="text-[10px] uppercase tracking-wide text-foreground-subtle hover:text-foreground-muted mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
+      <span aria-hidden="true" x-text="userHiddenOpen ? '▾' : '▸'"></span>
+      <span x-text="`Hidden by you (${userHidden.length})`"></span>
+    </button>
+    <ul x-show="userHiddenOpen" class="space-y-0.5">
+      <template x-for="name in userHidden" :key="'uhid:' + name">
+        <li class="flex items-center group">
+          <span class="flex-1 text-[11px] text-foreground-subtle px-2 py-0.5 truncate"
+                :title="name"
+                x-text="name"></span>
+          <button type="button" @click="unhideProject(name)"
+                  :aria-label="`Unhide ${name}`"
+                  title="Restore to sidebar"
+                  class="text-foreground-subtle group-hover:text-accent text-xs px-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
+            <span aria-hidden="true">↺</span>
+          </button>
+        </li>
+      </template>
+    </ul>
+  </section>
+
+  <!-- Ignored by config — read-only diagnostic. Driven by
+       `[ignore].patterns` in the operator TOML. To manage these,
+       edit the config file and restart. -->
   <section x-show="ignored.count > 0"
            data-sidebar-group="ignored"
            class="mt-2 pt-3 border-t border-border-strong/60">
     <button type="button"
             @click="ignoredOpen = !ignoredOpen"
             :aria-expanded="ignoredOpen"
-            aria-label="Toggle ignored projects list"
+            aria-label="Toggle config-ignored projects list"
             class="text-[10px] uppercase tracking-wide text-foreground-subtle hover:text-foreground-muted mb-1 flex items-center gap-1 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
       <span aria-hidden="true" x-text="ignoredOpen ? '▾' : '▸'"></span>
-      <span x-text="`Ignored (${ignored.count})`"></span>
+      <span x-text="`Ignored by config (${ignored.count})`"></span>
     </button>
     <ul x-show="ignoredOpen" class="space-y-0.5">
       <template x-for="name in ignored.names" :key="'ign:' + name">
@@ -146,7 +197,7 @@
       <li x-show="ignored.patterns.length > 0"
           class="text-[10px] text-foreground-subtle px-2 pt-1 italic"
           :title="`patterns: ${ignored.patterns.join(', ')}`">
-        via <span x-text="ignored.patterns.length"></span> pattern(s)
+        via <span x-text="ignored.patterns.length"></span> pattern(s) in <code>[ignore]</code>
       </li>
     </ul>
   </section>
@@ -171,6 +222,10 @@
       availableHosts: ['__all__', 'local'],
       ignored: { patterns: [], count: 0, names: [] },
       ignoredOpen: false,
+      // v21.0.5: server-side per-project hide list (POST/DELETE
+      // /api/user-hidden). Distinct from `[ignore].patterns`.
+      userHidden: [],
+      userHiddenOpen: false,
 
       async init() {
         this._loadPersisted();
@@ -179,6 +234,7 @@
           this._loadProjects(),
           this._loadRecent(),
           this._loadIgnored(),
+          this._loadUserHidden(),
         ]);
       },
 
@@ -221,6 +277,41 @@
           this.availableHosts = Array.from(hosts);
         } catch (e) { this.error = e.message; }
         finally { this.loading = false; }
+      },
+
+      async _loadUserHidden() {
+        try {
+          const r = await hmFetch('/api/user-hidden');
+          if (!r.ok) return;
+          const data = await r.json();
+          this.userHidden = Array.isArray(data.names) ? data.names : [];
+        } catch (_) { /* silent — feature degrades gracefully if endpoint
+                        is unreachable (e.g. older backend) */ }
+      },
+
+      async hideProject(name) {
+        try {
+          const r = await hmFetch('/api/user-hidden', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+          });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          // Refresh both surfaces — projects to drop the now-hidden
+          // row, user-hidden to surface it in the new section.
+          await Promise.all([this._loadProjects(), this._loadUserHidden()]);
+        } catch (e) { this.error = `Hide failed: ${e.message}`; }
+      },
+
+      async unhideProject(name) {
+        try {
+          const r = await hmFetch(
+            `/api/user-hidden/${encodeURIComponent(name)}`,
+            { method: 'DELETE' },
+          );
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          await Promise.all([this._loadProjects(), this._loadUserHidden()]);
+        } catch (e) { this.error = `Unhide failed: ${e.message}`; }
       },
 
       async _loadIgnored() {
