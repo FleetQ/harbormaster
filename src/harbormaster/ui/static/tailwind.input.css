@@ -114,6 +114,20 @@
  * v19.0.0a4 — light-mode values mirror the violet hue (290) at inverted
  * lightness so the light theme stays on-brand with the dark default.
  */
+/* v21.0.0a4: light-mode token tuning for WCAG AA contrast.
+ *
+ * Audit (tests/ui/test_v21_light_mode_contrast.py) flagged three gaps in
+ * the v12.0.0a7 starter values:
+ *   • `accent` (L=0.55) failed AA-text on surface-2/3 (4.37, 3.87 < 4.5)
+ *   • `foreground-subtle` (L=0.55) failed AA-text on surface-1/2/3
+ *   • `border-strong` (L=0.72) failed UI-component 3:1 on every surface
+ *
+ * The fix darkens those three tokens to L=0.50 / 0.48 / 0.65 respectively.
+ * Hue and chroma are unchanged so the on-brand violet stays recognisable;
+ * only luminance moves so contrast jumps above the AA floor. The lighter
+ * `border` / `border-subtle` keep their decorative values — they don't
+ * convey state.
+ */
 @media (prefers-color-scheme: light) {
     :root {
         --color-surface-0: oklch(0.99 0.003 280);
@@ -122,13 +136,13 @@
         --color-surface-3: oklch(0.90 0.010 280);
         --color-foreground:        oklch(0.18 0.005 280);
         --color-foreground-muted:  oklch(0.40 0.005 280);
-        --color-foreground-subtle: oklch(0.55 0.005 280);
+        --color-foreground-subtle: oklch(0.48 0.005 280);
         --color-foreground-dim:    oklch(0.48 0.005 280);
-        --color-accent:        oklch(0.55 0.18 290);
-        --color-accent-strong: oklch(0.46 0.21 290);
+        --color-accent:        oklch(0.50 0.18 290);
+        --color-accent-strong: oklch(0.42 0.21 290);
         --color-border-subtle: oklch(0.90 0.005 280);
         --color-border:        oklch(0.85 0.008 280);
-        --color-border-strong: oklch(0.72 0.010 280);
+        --color-border-strong: oklch(0.58 0.010 280);
     }
 }
 html.theme-light {
@@ -139,13 +153,13 @@ html.theme-light {
     --color-surface-3: oklch(0.90 0.010 280);
     --color-foreground:        oklch(0.18 0.005 280);
     --color-foreground-muted:  oklch(0.40 0.005 280);
-    --color-foreground-subtle: oklch(0.55 0.005 280);
+    --color-foreground-subtle: oklch(0.48 0.005 280);
     --color-foreground-dim:    oklch(0.48 0.005 280);
-    --color-accent:        oklch(0.55 0.18 290);
-    --color-accent-strong: oklch(0.46 0.21 290);
+    --color-accent:        oklch(0.50 0.18 290);
+    --color-accent-strong: oklch(0.42 0.21 290);
     --color-border-subtle: oklch(0.90 0.005 280);
     --color-border:        oklch(0.85 0.008 280);
-    --color-border-strong: oklch(0.72 0.010 280);
+    --color-border-strong: oklch(0.58 0.010 280);
 }
 html.theme-dark {
     color-scheme: dark;
