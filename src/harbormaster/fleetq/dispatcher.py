@@ -184,13 +184,21 @@ class DispatcherStats:
     """Thread-safe live metrics for the in-process MCP dispatcher.
 
     Designed for low overhead — every call to ``dispatch`` mutates
-    two counters and ~once per call walks a small list. There's no
-    background thread, no persistent storage; on process restart the
-    counters reset. That's acceptable for a sidecar-metrics endpoint
-    whose primary consumer is a 30s-polling KPI strip.
+    two counters and ~once per call walks a small list.
+
+    v21.0.0a8: counter mutations are forwarded to a cross-process
+    ``DispatcherMetricsStore`` (SQLite-backed) so that ``snapshot()``
+    reflects the union of every harbormaster process. The in-process
+    ``_tools`` dict is kept as a fallback fast path used only when
+    no store is wired (test harnesses / library mode) — it mirrors
+    the cross-process counters so callers that depend on the legacy
+    behaviour still get the same shape.
+
+    Spans (running list, completed ring, SSE subscribers) remain
+    in-process; they are inherently single-process UI surfaces.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, store: Any = None) -> None:
         from collections import deque
 
         self._lock = threading.Lock()
@@ -200,6 +208,28 @@ class DispatcherStats:
         self._last_dispatched_at: float | None = None
         self._next_span_id: int = 1
         self._subscribers: list[_SpanSubscription] = []
+        # Cross-process counter store. Optional injected override;
+        # when None, ``_get_store()`` defers to the module-level
+        # singleton on every call so tests that reset that singleton
+        # (via ``set_metrics_store(None)``) immediately observe the
+        # new store on the next dispatch.
+        self._store_override: Any = store
+
+    def _get_store(self) -> Any:
+        """Resolve the cross-process metrics store.
+
+        Returns the injected override when set; otherwise the lazy
+        module singleton. Returns None when resolution fails (e.g.
+        read-only home directory) so callers fall back to the
+        in-process dict.
+        """
+        if self._store_override is not None:
+            return self._store_override
+        try:
+            from harbormaster.dispatcher_metrics_store import get_metrics_store
+            return get_metrics_store()
+        except Exception:  # noqa: BLE001 — best-effort; fall back to in-proc
+            return None
 
     def record_start(
         self,
@@ -259,6 +289,15 @@ class DispatcherStats:
                 "started_at": span.started_at,
             }
             self._fanout_locked(event)
+        # v21.0.0a8: cross-process counter write happens OUTSIDE the
+        # in-process lock — SQLite has its own locking and we don't
+        # want a DB stall to block in-process readers.
+        store = self._get_store()
+        if store is not None:
+            try:
+                store.increment_in_flight(tool)
+            except Exception:  # noqa: BLE001 — best-effort; in-proc counters remain authoritative
+                pass
         return span
 
     def _lookup_trace_id_locked(self, span_id: int) -> int | None:
@@ -317,6 +356,13 @@ class DispatcherStats:
                 "ok": ok,
             }
             self._fanout_locked(event)
+        # v21.0.0a8: cross-process counter write outside the in-proc lock.
+        store = self._get_store()
+        if store is not None:
+            try:
+                store.decrement_in_flight(span.tool, ok)
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
 
     def _fanout_locked(self, event: dict[str, Any]) -> None:
         """Push an event to every live subscriber. Caller holds self._lock."""
@@ -363,6 +409,12 @@ class DispatcherStats:
         ``queue_depth`` is always 0 for the in-process dispatcher;
         the field is preserved so consumers don't have to special-case
         the in-process vs. pool-backed deployment.
+
+        v21.0.0a8: ``tools``, ``active_workers``, and
+        ``last_dispatched_at`` are sourced from the cross-process
+        ``DispatcherMetricsStore`` when available (so the UI sees every
+        process's counters). ``running`` remains in-process — each
+        process only knows its own live spans.
         """
         with self._lock:
             running = [
@@ -373,7 +425,7 @@ class DispatcherStats:
                 }
                 for s in self._running
             ]
-            tools = {
+            in_proc_tools = {
                 name: {
                     "in_flight": c.in_flight,
                     "total_completed": c.total_completed,
@@ -381,14 +433,28 @@ class DispatcherStats:
                 }
                 for name, c in self._tools.items()
             }
-            active_workers = sum(c.in_flight for c in self._tools.values())
-            return {
-                "running": running,
-                "active_workers": active_workers,
-                "queue_depth": 0,
-                "last_dispatched_at": self._last_dispatched_at,
-                "tools": tools,
-            }
+            in_proc_active = sum(c.in_flight for c in self._tools.values())
+            in_proc_last = self._last_dispatched_at
+        store = self._get_store()
+        if store is not None:
+            try:
+                cross = store.snapshot()
+                return {
+                    "running": running,
+                    "active_workers": cross["active_workers"],
+                    "queue_depth": 0,
+                    "last_dispatched_at": cross["last_dispatched_at"],
+                    "tools": cross["tools"],
+                }
+            except Exception:  # noqa: BLE001 — fall back to in-proc view
+                pass
+        return {
+            "running": running,
+            "active_workers": in_proc_active,
+            "queue_depth": 0,
+            "last_dispatched_at": in_proc_last,
+            "tools": in_proc_tools,
+        }
 
     def reset(self) -> None:
         """Clear all counters. Test helper — production code never calls this."""
@@ -401,6 +467,14 @@ class DispatcherStats:
             # Subscribers stay attached — tests that assert SSE fan-out
             # build subscribers BEFORE reset() to capture a deterministic
             # event sequence.
+        # v21.0.0a8: also clear the cross-process store so tests
+        # observe a fresh snapshot.
+        store = self._get_store()
+        if store is not None:
+            try:
+                store.reset()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 # Process-wide singleton. Tests can grab it via ``get_dispatcher_stats``
