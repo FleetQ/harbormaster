@@ -305,10 +305,28 @@ class IgnoreConfig(BaseModel):
     patterns: list[str] = Field(default_factory=list)
 
 
+class UIConfig(BaseModel):
+    """v21.0.0a3 — operator-tunable accent color.
+
+    `accent_hue` is the OKLCH hue (0-360); `accent_chroma` is the
+    OKLCH chroma (0-0.30). Defaults match the v19.0.0a4 Linear-style
+    violet baked into base.html (hue=290, chroma=0.22). When the
+    operator overrides these via the dashboard accent picker, the
+    PUT /api/settings/accent endpoint rewrites this section atomically
+    in `~/.config/harbormaster/config.toml`.
+    """
+
+    model_config = _FORBID_EXTRA
+
+    accent_hue: float = 290.0
+    accent_chroma: float = 0.22
+
+
 class HarbormasterConfig(BaseModel):
     model_config = _FORBID_EXTRA
 
     server: ServerConfig = Field(default_factory=ServerConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
     projects: ProjectsConfig = Field(default_factory=ProjectsConfig)
     ignore: IgnoreConfig = Field(default_factory=IgnoreConfig)
     backends: dict[str, BackendConfig] = Field(default_factory=lambda: {"claude": BackendConfig()})

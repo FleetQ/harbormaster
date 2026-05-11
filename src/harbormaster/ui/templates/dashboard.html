@@ -218,7 +218,11 @@
         <span class="text-foreground-muted ml-1" x-text="ev.target"></span>
       </li>
     </template>
-    <li x-show="!events.length" class="text-foreground-subtle">no recent calls</li>
+    <li x-show="!events.length"
+        class="text-foreground-dim text-[11px] leading-snug border border-border-subtle bg-surface-2/40 rounded p-2">
+      <span class="block text-foreground-muted font-semibold mb-0.5">No recent activity.</span>
+      Ask any project something via your MCP client and the call will appear here in real-time.
+    </li>
   </ul>
 </section>
 
@@ -303,9 +307,16 @@
        class="text-xs text-warning mb-2"
        x-text="plugins.error"></p>
     <div x-show="!pluginsError" class="text-xs space-y-1">
-      <p class="text-foreground-subtle" x-show="(plugins.plugins || []).length === 0">
-        No entry points discovered.
-      </p>
+      <div x-show="(plugins.plugins || []).length === 0"
+           class="text-foreground-dim leading-snug border border-border-subtle bg-surface-2/40 rounded p-2"
+           data-empty-state="plugins.none">
+        <p class="text-foreground-muted font-semibold mb-0.5">No plugins installed.</p>
+        <p class="text-foreground-dim">
+          Plugins extend Harbormaster with new MCP tools. Install via
+          <span class="font-mono text-accent">pip install harbormaster-plugin-&lt;name&gt;</span>
+          then restart.
+        </p>
+      </div>
       <template x-for="row in (plugins.plugins || [])" :key="row.entry_point + ':' + row.dist_name">
         <div class="flex items-baseline gap-2">
           <!-- v12.0.0a2: per-plugin status badge migrated to shared
@@ -2481,10 +2492,74 @@
           <span class="text-foreground-muted" x-text="ev.target"></span>
         </li>
       </template>
-      <li x-show="!events.length" class="text-foreground-subtle">no recent calls</li>
+      <li x-show="!events.length"
+          class="text-foreground-dim text-[11px] leading-snug border border-border-subtle bg-surface-2/40 rounded p-2">
+        <span class="block text-foreground-muted font-semibold mb-0.5">No recent activity.</span>
+        Run <span class="font-mono text-accent">ask_project</span> or
+        <span class="font-mono text-accent">delegate_task</span> from your
+        MCP client and live calls will land here.
+      </li>
     </ul>
     <a href="/network" class="text-xs text-accent block mt-2">view all →</a>
   </section>
+
+  <!-- v21.0.0a3: operator-tunable accent picker.
+       Persists to ~/.config/harbormaster/config.toml [ui] section via
+       PUT /api/settings/accent. Live preview without page reload by
+       injecting / updating the <style id="hm-custom-accent"> tag. -->
+  <details class="mt-4 border-t border-border pt-3"
+           data-tour-step="accent-picker"
+           data-inspector-accent>
+    <summary class="text-xs uppercase tracking-wide text-foreground-subtle cursor-pointer hover:text-accent">
+      Accent color
+    </summary>
+    <div class="mt-2 space-y-2 text-xs"
+         x-data="accentPicker()" x-init="load()">
+      <div class="flex items-center gap-2">
+        <label class="w-12 text-foreground-muted">Hue</label>
+        <input type="range" min="0" max="360" step="1"
+               x-model.number="hue" @input="preview()"
+               aria-label="Accent hue (OKLCH degrees)"
+               class="flex-1">
+        <span class="font-mono w-10 text-right text-foreground-muted"
+              x-text="hue + '°'"></span>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="w-12 text-foreground-muted">Chroma</label>
+        <input type="range" min="0" max="0.30" step="0.01"
+               x-model.number="chroma" @input="preview()"
+               aria-label="Accent chroma"
+               class="flex-1">
+        <span class="font-mono w-12 text-right text-foreground-muted"
+              x-text="chroma.toFixed(2)"></span>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="w-6 h-6 rounded border border-border-subtle"
+             :style="`background: oklch(62% ${chroma} ${hue})`"
+             aria-hidden="true"></div>
+        <span class="text-foreground-subtle font-mono text-[10px]"
+              x-text="`oklch(62% ${chroma.toFixed(2)} ${hue})`"></span>
+      </div>
+      <div class="flex gap-2">
+        <button type="button" @click="save()"
+                :disabled="saving"
+                aria-label="Save accent color"
+                data-accent-save
+                class="px-2 py-1 rounded border border-accent-strong bg-accent-soft/30 text-accent hover:bg-accent-soft/50 disabled:opacity-50">
+          <span x-text="saving ? 'Saving...' : 'Save'"></span>
+        </button>
+        <button type="button" @click="reset()"
+                aria-label="Reset accent to violet default"
+                data-accent-reset
+                class="px-2 py-1 rounded border border-border text-foreground-muted hover:bg-surface-2 hover:text-foreground">
+          Reset
+        </button>
+      </div>
+      <p x-show="message" x-text="message"
+         :class="messageClass"
+         class="text-[11px] leading-tight"></p>
+    </div>
+  </details>
 </div>
 <script>
   // v19.0.0a3: kpiInspector — slim mirror of /api/kpi for the right pane.
@@ -2600,6 +2675,77 @@
         if (this._interval) { clearInterval(this._interval); this._interval = null; }
         if (this._clearFlashTimer) { clearTimeout(this._clearFlashTimer); this._clearFlashTimer = null; }
         this.connected = false;
+      },
+    };
+  }
+
+  // v21.0.0a3: accentPicker — inspector widget for OKLCH accent override.
+  // GET /api/settings/accent on init, PUT on Save, live preview via
+  // mutating the #hm-custom-accent <style> tag in <head>.
+  function accentPicker() {
+    return {
+      hue: 290,
+      chroma: 0.22,
+      saving: false,
+      message: '',
+      messageClass: 'text-foreground-muted',
+      async load() {
+        try {
+          const r = await hmFetch('/api/settings/accent');
+          if (r.ok) {
+            const d = await r.json();
+            this.hue = (d.hue != null) ? d.hue : 290;
+            this.chroma = (d.chroma != null) ? d.chroma : 0.22;
+            this.applyToDOM();
+          }
+        } catch (_) { /* soft-fail — keep defaults */ }
+      },
+      preview() { this.applyToDOM(); },
+      applyToDOM() {
+        let s = document.getElementById('hm-custom-accent');
+        if (!s) {
+          s = document.createElement('style');
+          s.id = 'hm-custom-accent';
+          document.head.appendChild(s);
+        }
+        const c = Number(this.chroma) || 0;
+        const h = Number(this.hue) || 0;
+        const cSoft = (c * 0.6).toFixed(4);
+        s.textContent =
+          ':root { ' +
+          `--color-accent-strong: oklch(62% ${c} ${h}); ` +
+          `--color-accent: oklch(78% ${cSoft} ${h}); ` +
+          `--hm-accent: oklch(78% ${cSoft} ${h}); ` +
+          `--hm-accent-strong: oklch(62% ${c} ${h}); ` +
+          '}';
+      },
+      async save() {
+        this.saving = true;
+        this.message = '';
+        try {
+          const body = JSON.stringify({hue: this.hue, chroma: this.chroma});
+          const r = await hmFetch('/api/settings/accent', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body,
+          });
+          this.message = r.ok ? 'Saved' : `Failed (${r.status})`;
+          this.messageClass = r.ok ? 'text-success' : 'text-danger';
+        } catch (e) {
+          this.message = 'Save failed';
+          this.messageClass = 'text-danger';
+        } finally {
+          this.saving = false;
+          setTimeout(() => { this.message = ''; }, 2000);
+        }
+      },
+      async reset() {
+        try {
+          this.hue = 290;
+          this.chroma = 0.22;
+          this.applyToDOM();
+          await this.save();
+        } catch (_) { /* swallowed — save() already records message */ }
       },
     };
   }
