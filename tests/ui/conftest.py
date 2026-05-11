@@ -50,6 +50,13 @@ def ui_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     # Seed one project so /api/projects has at least one element to render.
     (cfg_dir / "projects" / "demo-browser").mkdir()
     (cfg_dir / "projects" / "demo-browser" / "README.md").write_text("# demo")
+    # v19 sidebar groups projects by detected language. A bare project
+    # with only README.md gets no language → may not render in any group
+    # by default. Seed a minimal pyproject.toml so language=python is
+    # detected and the project surfaces under the PYTHON group.
+    (cfg_dir / "projects" / "demo-browser" / "pyproject.toml").write_text(
+        '[project]\nname = "demo-browser"\nversion = "0.0.1"\n'
+    )
 
     env = os.environ.copy()
     proc = subprocess.Popen(
