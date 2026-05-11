@@ -382,28 +382,54 @@ def _maybe_record_qa(
         )
     except Exception:
         logger.exception("history record failed; swallowing")
-    finally:
-        try:
-            # v12.0.0a3: `[retention]` overrides the [history] caps
-            # when set, so all retention knobs can live in one place.
-            # Default `None` preserves the historical [history] values.
-            recent_k = (
-                config.retention.qa_log_recent_k
-                if config.retention.qa_log_recent_k is not None
-                else config.history.retain_recent_k
-            )
-            top_r = (
-                config.retention.qa_log_top_recalled_r
-                if config.retention.qa_log_top_recalled_r is not None
-                else config.history.retain_top_recalled_r
-            )
-            store.prune(
-                retain_recent_k=recent_k,
-                retain_top_recalled_r=top_r,
-            )
-        except Exception:
-            logger.exception("history prune failed; swallowing")
-        store.close()
+
+    # v21.0.6: also mirror this call into the UI's network_log so the
+    # dashboard Activity / Timeline tabs surface stdio-driven activity,
+    # not just HTTP /mcp/{server} requests. Lazy import — when the [ui]
+    # extra isn't installed (pure stdio MCP setup) the ImportError is
+    # swallowed and we no-op, preserving the no-required-ui invariant.
+    # Failures inside record() are also swallowed; logging mustn't
+    # break the hot path.
+    try:
+        from harbormaster.ui.network_log import (
+            current_caller_project,
+            network_log,
+        )
+
+        network_log.record(
+            caller=current_caller_project() or "operator",
+            target=project_name,
+            tool=tool,
+            status="ok",
+            question_preview=prompt,
+            duration_ms=duration_ms,
+        )
+    except ImportError:
+        pass
+    except Exception:
+        logger.exception("network_log mirror failed; swallowing")
+
+    try:
+        # v12.0.0a3: `[retention]` overrides the [history] caps
+        # when set, so all retention knobs can live in one place.
+        # Default `None` preserves the historical [history] values.
+        recent_k = (
+            config.retention.qa_log_recent_k
+            if config.retention.qa_log_recent_k is not None
+            else config.history.retain_recent_k
+        )
+        top_r = (
+            config.retention.qa_log_top_recalled_r
+            if config.retention.qa_log_top_recalled_r is not None
+            else config.history.retain_top_recalled_r
+        )
+        store.prune(
+            retain_recent_k=recent_k,
+            retain_top_recalled_r=top_r,
+        )
+    except Exception:
+        logger.exception("history prune failed; swallowing")
+    store.close()
 
 
 def make_local_backend_stream(
