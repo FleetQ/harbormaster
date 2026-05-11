@@ -80,9 +80,16 @@ def test_memories_tab_mounts_new_editor_factory() -> None:
     """The Memories tab section binds the new `memoriesEditor` factory
     via x-data + x-init, scoped to the current project name."""
     src = _read()
-    # The tab section uses the new factory, with project_name as the
-    # constructor arg.
-    assert 'x-data="memoriesEditor({{ project_name | tojson }})"' in src
+    # The factory mounts on an inner wrapper div (NOT the section) — see
+    # the v19.0.0a8 fix-up note in the template: putting x-data + x-init
+    # on the same element as x-show + x-transition leaves
+    # `style="display:none"` stuck inline and the editor never paints.
+    # We use single-quoted string literal interpolation rather than
+    # `| tojson` so the resulting attribute stays valid HTML (tojson
+    # emits double quotes that collide with the surrounding
+    # `x-data="..."` attribute quotes — Jinja escapes via `| e` instead).
+    assert "x-data=\"memoriesEditor('{{ project_name | e }}')\"" in src
+    assert 'x-init="loadFiles()"' in src
     assert 'x-init="loadFiles()"' in src
     # And only one Memories panel exists at runtime (the legacy one is
     # inside `{% if false %}`, which is detected separately above).
@@ -214,11 +221,14 @@ def test_diff_endpoint_requests_html_format() -> None:
 def test_memories_editor_section_has_role_tabpanel() -> None:
     """The Memories tab section keeps role='tabpanel' so the projectTabs
     accessibility contract (asserted in test_v19_project_tabs.py) holds.
-    A regression here would make all 5 panels stop counting as tabpanels."""
+    A regression here would make all 5 panels stop counting as tabpanels.
+    v19.0.0a8: the section now wraps a separate x-data div (the editor
+    state moved off the section to dodge the x-show + x-transition race)."""
     src = _read()
     # Target the new editor section specifically — it's the only Memories
     # tab section now (the legacy one is inside `{% if false %}`).
     assert (
-        'aria-label="Memories"\n           x-data="memoriesEditor'
+        'aria-label="Memories">\n'
+        '    <!-- v19.0.0a8: x-data lives on this inner wrapper'
         in src
     )

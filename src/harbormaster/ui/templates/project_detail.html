@@ -91,10 +91,15 @@
   <section x-show="active === 'memories'"
            x-transition
            role="tabpanel"
-           aria-label="Memories"
-           x-data="memoriesEditor({{ project_name | tojson }})"
-           x-init="loadFiles()">
-    <div class="grid gap-3" style="grid-template-columns: 220px 1fr; min-height: calc(100vh - 16rem);">
+           aria-label="Memories">
+    <!-- v19.0.0a8: x-data lives on this inner wrapper, not on the
+         section — Alpine's x-transition + x-show + x-data + x-init on
+         the same element race and leave `display:none` stuck inline.
+         The wrapper carries the editor state instead. -->
+    <div x-data="memoriesEditor('{{ project_name | e }}')"
+         x-init="loadFiles()"
+         class="grid gap-3"
+         style="grid-template-columns: 220px 1fr; min-height: calc(100vh - 16rem);">
 
       <!-- LEFT: file list -->
       <aside class="border border-border rounded-md bg-surface-2/40 p-2 overflow-y-auto">
