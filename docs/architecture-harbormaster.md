@@ -192,7 +192,7 @@ Schemas use pydantic models. JSON Schema is auto-generated for MCP advertisement
   "error": {
     "code": "ssh_connect_failed | timeout | project_not_found | backend_failure | invalid_config",
     "message": "human-readable",
-    "context": { "host": "friday", "project": "pinporn" }
+    "context": { "host": "friday", "project": "accounting-fleetq" }
   }
 }
 ```
@@ -272,7 +272,7 @@ The Live UI (§7) does **not** call MCP tools over HTTP/SSE — it imports them 
 
 ```
 event: query_started
-data: {"run_id":"01HJ...","project":"pinporn","host":"local","question":"...","ts":"2026-05-08T..."}
+data: {"run_id":"01HJ...","project":"accounting-fleetq","host":"local","question":"...","ts":"2026-05-08T..."}
 
 event: query_chunk
 data: {"run_id":"01HJ...","chunk":"...streaming markdown..."}

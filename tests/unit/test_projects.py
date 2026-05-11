@@ -16,7 +16,7 @@ from harbormaster.projects import (
 # ----- validate_project_name -------------------------------------------------
 
 
-@pytest.mark.parametrize("good", ["pinporn", "my-project", "client_1.2", "Project99", "a", "harbormaster"])
+@pytest.mark.parametrize("good", ["accounting-fleetq", "my-project", "client_1.2", "Project99", "a", "harbormaster"])
 def test_validate_project_name_accepts_safe_names(good):
     validate_project_name(good)  # should not raise
 

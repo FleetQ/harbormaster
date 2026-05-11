@@ -32,8 +32,8 @@
 
 ```python
 {
-  "name": "pinporn",
-  "path": "/Users/katsarov/htdocs/pinporn",
+  "name": "accounting-fleetq",
+  "path": "/Users/katsarov/htdocs/accounting-fleetq",
   "last_commit": {"hash": "abc123", "subject": "...", "date": "2026-05-07"},
   "has_serena": true,
   "has_claude_md": true,
@@ -48,7 +48,7 @@ Filter: `path/.git` exists OR `path/CLAUDE.md` exists. Пропуска dotfiles
 Read-only. Връща структуриран markdown:
 
 ```
-## pinporn — current state
+## accounting-fleetq — current state
 - Last commit: <hash> "<subject>" (<relative time>)
 - Branch: <current>, <N> ahead/behind origin
 - Serena memories: <list of memory file names, no content>
@@ -89,13 +89,13 @@ Reference: memory `claude_p_headless_gotchas.md` (bypassPermissions required, ma
 ```
 Claude Code (главна сесия, в проект A)
    │
-   │  tool_use: ask_project("pinporn", "какъв е статусът на cron?")
+   │  tool_use: ask_project("accounting-fleetq", "какъв е статусът на cron?")
    ▼
 project-router-mcp (stdio, локален Python процес)
    │
-   ├─ subprocess.run(["claude", "-p", "--cwd", "~/htdocs/pinporn", ...])
-   │  ├─ Claude Code child процес стартира в ~/htdocs/pinporn
-   │  ├─ Зарежда ~/htdocs/pinporn/CLAUDE.md + Serena memories
+   ├─ subprocess.run(["claude", "-p", "--cwd", "~/htdocs/accounting-fleetq", ...])
+   │  ├─ Claude Code child процес стартира в ~/htdocs/accounting-fleetq
+   │  ├─ Зарежда ~/htdocs/accounting-fleetq/CLAUDE.md + Serena memories
    │  ├─ Отговаря на въпроса с проектен контекст
    │  └─ Връща JSON {result: "..."}
    │

@@ -7,7 +7,7 @@
 ## Forcing questions
 
 ### Кой страда сега? Какво прави днес?
-Аз. Работя по ~10 активни проекта в `~/htdocs/*` (pinporn, openclaw-friday, fleetq, dotclaude, monitoring, dashboards, и т.н.). Текущ workflow:
+Аз. Работя по ~10 активни проекта в `~/htdocs/*` (accounting-fleetq, openclaw-friday, fleetq, dotclaude, monitoring, dashboards, и т.н.). Текущ workflow:
 
 1. Започвам сесия за проект А.
 2. Сещам се за нещо в проект Б.
@@ -42,7 +42,7 @@
 | Use case | Read + Write (status + delegate) |
 | Scope | Auto-discover ~/htdocs/* |
 | Host | Jarvis локално, stdio transport |
-| Success | "статус на pinporn" → <300 думи без cd |
+| Success | "статус на accounting-fleetq" → <300 думи без cd |
 | Risk gate | `delegate_task` изисква `allow_writes=True` явно |
 
 ## Out of scope for v1

@@ -124,8 +124,8 @@ Manual + scripted, run before each tag.
 |----|----------|---------------|
 | E1 | `uvx harbormaster-mcp` cold install + register in Claude Code | `claude mcp list` shows `harbormaster: ✓ Connected` |
 | E2 | `list_projects` over 50+ projects | < 1s, all expected projects present |
-| E3 | `ask_project pinporn "summarize last commits"` (local) | ≤ 35s, non-empty markdown reply |
-| E4 | `ask_project pinporn ... host=friday` (SSH) | ≤ 40s, non-empty reply, no shell-escape leak |
+| E3 | `ask_project accounting-fleetq "summarize last commits"` (local) | ≤ 35s, non-empty markdown reply |
+| E4 | `ask_project accounting-fleetq ... host=friday` (SSH) | ≤ 40s, non-empty reply, no shell-escape leak |
 | E5 | `fan_out_ask` over 10 projects | ≤ 60s, per-project + aggregate sections present |
 | E6 | UI: load `/`, see project grid + fleet view | < 1s TTFB, no JS errors in console |
 | E7 | UI: ask via form, see live SSE stream | tokens appear progressively, completion event lands |

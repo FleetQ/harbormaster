@@ -85,11 +85,11 @@ def test_build_targets_remote_with_project_filter(tmp_path: Path):
         hosts={"friday": HostConfig(ssh_host="f")},
     )
     targets = _build_targets(
-        project_filter=["pinporn", "agent-fleet"],
+        project_filter=["accounting-fleetq", "agent-fleet"],
         host_filter=["friday"],
         config=cfg,
     )
-    assert {t.project for t in targets} == {"pinporn", "agent-fleet"}
+    assert {t.project for t in targets} == {"accounting-fleetq", "agent-fleet"}
     assert all(t.host == "friday" for t in targets)
 
 

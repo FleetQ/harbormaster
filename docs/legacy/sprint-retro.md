@@ -32,7 +32,7 @@
 
 ## Surprises
 
-- `pinporn` is not at `~/htdocs/pinporn/` — it lives elsewhere (probably `pinlove`). The router returned a clean error with available projects, validating the error path serendipitously. Memory note: confirm project paths before assuming.
+- `accounting-fleetq` is not at `~/htdocs/accounting-fleetq/` — it lives elsewhere (probably `crm-fleetq`). The router returned a clean error with available projects, validating the error path serendipitously. Memory note: confirm project paths before assuming.
 - 52 projects in `~/htdocs/`. Larger blast radius than expected. `list_projects` may need pagination/caching in v2 if it grows past 100.
 
 ## Decision gate: Опция 3 (Letta Code self-host)?

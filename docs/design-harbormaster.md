@@ -76,7 +76,7 @@ The MCP server is invisible plumbing. The UI is the **viral surface** — what p
 **What it shows**:
 
 1. **Project grid** — 50 cards, each with: project name, last commit, framework badge (Laravel/Next/Python/...), Serena memories count, last-asked timestamp, "Ask…" button.
-2. **Live query feed (SSE)** — real-time stream of in-flight queries: `pinporn ← "did the cron run?" — 4.2s elapsed — streaming answer…`. Like `htop` for AI queries.
+2. **Live query feed (SSE)** — real-time stream of in-flight queries: `accounting-fleetq ← "did the cron run?" — 4.2s elapsed — streaming answer…`. Like `htop` for AI queries.
 3. **History / audit** — past Q&A log, searchable, with token / cost / duration per call. Click to replay.
 4. **Fleet view** — local + remote hosts as a list/map. Online/offline status, claude version per host, queue depth.
 5. **Cost panel** — tokens + $ per project, per host, time-series.
