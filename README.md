@@ -110,6 +110,8 @@ operator console. All surfaces speak the same SSE event stream that powers
 the MCP transport, so what you see in the UI matches what your MCP clients
 see.
 
+![Harbormaster dashboard — 3-column workspace, KPI strip, Quick Ask, card grid, live inspector](docs/screenshots/dashboard.png)
+
 ### Workspace shell (v19+)
 
 Every page renders inside a fixed three-column workspace borrowed in spirit
@@ -152,21 +154,49 @@ Linear-violet OKLCH palette, compact density, light/dark theme toggle.
   **Settings**. Number keys `1`–`5` jump tabs; `#tab=<id>` URL hash
   makes shareable deep links. Inspector shows project metadata +
   24h budget consumption.
+
+  ![Project page — Overview tab with metadata and status block, inspector showing live metadata + budget](docs/screenshots/project-page.png)
+
 - **Memories tab** — split-pane editor: file list (left) + raw markdown
   textarea (centre) + bleach-sanitised live HTML preview (right).
   Toolbar: Save / Undo (`Cmd-Z`) / Redo (`Cmd-Shift-Z`) / `diff vs:`
   revision selector. Last-20 per-file history, side-by-side HTML diff,
   optional tag chip editor.
+
+  ![Memories editor — split-pane: file list + raw markdown + rendered HTML preview, with revision-diff toolbar](docs/screenshots/memories-editor.png)
+
 - **Network (`/network`)** — inter-project call graph rendered with a
   vendored Cytoscape build. Edge weights track real Harbormaster MCP
   calls (caller → target). Filters by host / project / tool / window;
   switchable graph / chat list view; SSE-driven live append. Aggregate
   stats at `/api/network/stats?window=…`.
+
+  ![Network surface — Graph/Chat/Timeline view toggle, stats summary, filter controls, live event feed](docs/screenshots/network.png)
+
 - **Dispatcher trace (`/dispatcher`)** — live in-flight spans +
   last-100 completed spans rendered as a waterfall with parent / child
   nesting. Each span exposes tool, project, host, duration, and (where
   the backend emits it) tool-call sub-spans for the model's own tool
   use. Real backend token usage in the SSE `usage` event.
+
+  ![Dispatcher trace surface — in-flight spans + recent traces panel with streaming indicator](docs/screenshots/dispatcher.png)
+
+### Mobile (< 1024px)
+
+Below 1024px the 3-column shell collapses into drawers. A hamburger (☰)
+toggles the sidebar; an info button (ⓘ) toggles the inspector. Click the
+backdrop or press `Esc` to dismiss.
+
+<table>
+<tr>
+<td><img src="docs/screenshots/dashboard-mobile.png" alt="Mobile dashboard — drawers closed, hamburger + info buttons in topbar" width="320"></td>
+<td><img src="docs/screenshots/dashboard-mobile-drawer.png" alt="Mobile dashboard — sidebar drawer open with backdrop overlay" width="320"></td>
+</tr>
+<tr>
+<td align="center"><sub>Drawers closed</sub></td>
+<td align="center"><sub>Sidebar drawer open</sub></td>
+</tr>
+</table>
 - **Cmd-K command palette** — bigram fuzzy-matched action launcher;
   shareable URLs via `?q=` pre-fill; pulls actions from a single catalog
   so every page surface adds itself for free.
