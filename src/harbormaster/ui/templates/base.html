@@ -230,12 +230,12 @@
 
 <!-- 3-column grid below topbar. -->
 <div id="hm-shell-grid"
-     class="pt-12 grid min-h-screen"
+     class="pt-12 grid min-h-screen relative"
      x-data="appShell()"
      @hm-toggle-sidebar.window="sidebarOpen = !sidebarOpen; if (sidebarOpen) inspectorOpen = false"
      @hm-toggle-inspector.window="inspectorOpen = !inspectorOpen; if (inspectorOpen) sidebarOpen = false"
      @keydown.escape.window="sidebarOpen = false; inspectorOpen = false"
-     :class="inspectorCollapsed ? 'grid-cols-[240px_1fr_0]' : 'grid-cols-[240px_1fr_320px]'">
+     :style="inspectorCollapsed ? 'grid-template-columns: 240px 1fr 0' : `grid-template-columns: 240px 1fr ${inspectorWidth}px`">
 
   <!-- v21.0.0a1: mobile drawer backdrop overlay -->
   <div x-show="sidebarOpen || inspectorOpen"
@@ -267,10 +267,16 @@
   <aside id="inspector"
          data-tour-step="inspector"
          :data-drawer-open="inspectorOpen ? 'true' : 'false'"
-         class="bg-surface-2 border-l border-border overflow-y-auto h-[calc(100vh-3rem)] sticky top-12 transition-all"
+         class="relative bg-surface-2 border-l border-border overflow-y-auto h-[calc(100vh-3rem)] sticky top-12 transition-all"
          x-show="!inspectorCollapsed || inspectorOpen"
          x-transition:enter-start="opacity-0"
          x-transition:enter-end="opacity-100">
+    <!-- v21.0.0a5: drag-resize handle (desktop only, hidden in drawer mode <1024px) -->
+    <div class="hidden lg:block absolute top-0 bottom-0 left-0 w-1 cursor-col-resize hover:bg-accent transition-colors z-10"
+         @pointerdown="startResize($event)"
+         aria-label="Resize inspector"
+         role="separator"
+         aria-orientation="vertical"></div>
     <div class="p-2 border-b border-border flex items-center justify-between">
       <span class="text-xs opacity-60">INSPECTOR</span>
       <button @click="toggleInspector()"
@@ -302,6 +308,37 @@
       inspectorCollapsed: localStorage.getItem('hm-inspector-collapsed') === '1',
       sidebarOpen: false,
       inspectorOpen: false,
+      // v21.0.0a5: inspector drag-resize. Range 240..480, default 320, persisted in localStorage.
+      inspectorWidth: Math.min(480, Math.max(240, parseInt(localStorage.getItem('hm-inspector-width') || '320', 10))),
+      init() {
+        this.applyInspectorWidth();
+      },
+      applyInspectorWidth() {
+        document.documentElement.style.setProperty('--inspector-width', this.inspectorWidth + 'px');
+      },
+      startResize(e) {
+        e.preventDefault();
+        const startX = e.clientX;
+        const startW = this.inspectorWidth;
+        let rafId = null;
+        const onMove = (ev) => {
+          if (rafId) return;
+          rafId = requestAnimationFrame(() => {
+            rafId = null;
+            // Inspector is on the right; drag-left = wider
+            const dx = startX - ev.clientX;
+            this.inspectorWidth = Math.min(480, Math.max(240, startW + dx));
+            this.applyInspectorWidth();
+          });
+        };
+        const onUp = () => {
+          document.removeEventListener('pointermove', onMove);
+          document.removeEventListener('pointerup', onUp);
+          localStorage.setItem('hm-inspector-width', String(this.inspectorWidth));
+        };
+        document.addEventListener('pointermove', onMove);
+        document.addEventListener('pointerup', onUp);
+      },
       toggleInspector() {
         this.inspectorCollapsed = !this.inspectorCollapsed;
         localStorage.setItem('hm-inspector-collapsed', this.inspectorCollapsed ? '1' : '0');
@@ -550,6 +587,106 @@
             window.location.href = r.href;
           } else if (r.action) {
             r.action();
+          }
+        });
+      },
+    };
+  }
+</script>
+
+<!-- v21.0.0a5: Keyboard shortcuts cheatsheet ("?" / Shift+/) -->
+<div x-data="shortcutsCheatsheet()"
+     x-init="init()"
+     @keydown.escape.window="open = false"
+     class="fixed inset-0 z-50 pointer-events-none"
+     x-cloak>
+  <div x-show="open" x-transition.opacity
+       @click="open = false"
+       class="absolute inset-0 bg-black/60 pointer-events-auto"></div>
+  <div x-show="open" x-transition
+       role="dialog"
+       aria-modal="true"
+       aria-label="Keyboard shortcuts"
+       class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-surface-2 border border-border rounded-lg shadow-2xl p-4 pointer-events-auto max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+    <header class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-semibold">Keyboard shortcuts</h2>
+      <button @click="open = false" aria-label="Close cheatsheet" class="text-foreground-muted hover:text-foreground text-xl leading-none">×</button>
+    </header>
+    <template x-for="group in groups" :key="group.name">
+      <section class="mb-4">
+        <h3 class="text-xs uppercase text-foreground-subtle mb-2" x-text="group.name"></h3>
+        <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+          <template x-for="row in group.rows" :key="row.action">
+            <div class="contents">
+              <dt class="font-mono text-accent" x-text="row.key"></dt>
+              <dd class="text-foreground-muted" x-text="row.action"></dd>
+            </div>
+          </template>
+        </dl>
+      </section>
+    </template>
+    <footer class="border-t border-border pt-2 text-[10px] text-foreground-subtle">
+      Press <kbd class="bg-surface-3 border border-border rounded px-1 font-mono">Esc</kbd> to close.
+    </footer>
+  </div>
+</div>
+<script>
+  // v21.0.0a5: keyboard shortcut cheatsheet ("?") + Cmd+Shift+L theme toggle handler.
+  function shortcutsCheatsheet() {
+    return {
+      open: false,
+      groups: [
+        {
+          name: 'Global',
+          rows: [
+            { key: '?', action: 'Open this cheatsheet' },
+            { key: 'Esc', action: 'Close cheatsheet / drawer' },
+            { key: 'Cmd+K', action: 'Open command palette' },
+            { key: 'Cmd+Shift+L', action: 'Toggle light/dark theme' },
+          ],
+        },
+        {
+          name: 'Project page tabs',
+          rows: [
+            { key: '1', action: 'Overview tab' },
+            { key: '2', action: 'Memories tab' },
+            { key: '3', action: 'Trajectories tab' },
+            { key: '4', action: 'Q&A History tab' },
+            { key: '5', action: 'Settings tab' },
+          ],
+        },
+        {
+          name: 'Memory editor',
+          rows: [
+            { key: 'Cmd+S', action: 'Save current memory' },
+            { key: 'Cmd+Z', action: 'Undo' },
+            { key: 'Cmd+Shift+Z', action: 'Redo' },
+          ],
+        },
+      ],
+      init() {
+        window.addEventListener('keydown', (e) => {
+          // Ignore when typing in inputs
+          const t = e.target;
+          if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+          if (e.key === '?' && e.shiftKey) {
+            e.preventDefault();
+            this.open = true;
+            return;
+          }
+          // Cmd+Shift+L theme toggle
+          if (e.key && e.key.toLowerCase() === 'l' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+            e.preventDefault();
+            const html = document.documentElement;
+            if (html.classList.contains('theme-light')) {
+              html.classList.remove('theme-light');
+              html.classList.add('theme-dark');
+              localStorage.setItem('hm-theme', 'dark');
+            } else {
+              html.classList.remove('theme-dark');
+              html.classList.add('theme-light');
+              localStorage.setItem('hm-theme', 'light');
+            }
           }
         });
       },

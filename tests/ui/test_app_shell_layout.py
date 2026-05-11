@@ -41,12 +41,14 @@ def test_topbar_is_fixed_with_id_and_height() -> None:
 
 
 def test_grid_has_three_columns_with_inspector_toggle() -> None:
-    """The shell is a CSS grid: 240px nav + 1fr main + 320px inspector
-    (or 0 when collapsed). Both column templates must be present so
-    the inspector-collapse toggle has both states to swap between."""
+    """The shell is a CSS grid: 240px nav + 1fr main + dynamic inspector
+    column (default 320px, operator-resizable in [240, 480]; 0 when
+    collapsed). v21.0.0a5 replaced the static Tailwind classes with an
+    inline `:style` binding driven by appShell().inspectorWidth so the
+    drag-resize handle can update the column live."""
     src = _read("base.html")
-    assert "grid-cols-[240px_1fr_320px]" in src
-    assert "grid-cols-[240px_1fr_0]" in src
+    assert "grid-template-columns: 240px 1fr ${inspectorWidth}px" in src
+    assert "grid-template-columns: 240px 1fr 0" in src
     assert 'pt-12 grid' in src
 
 
