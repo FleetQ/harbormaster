@@ -1844,10 +1844,14 @@ def register_routes(
     # rename/deletion still invalidates within the TTL window.
     from harbormaster.ui.manifest_cache import (
         ProjectsCache,
+        default_persist_path,
         project_dirs_from_infos,
     )
 
-    projects_cache = ProjectsCache()
+    # v21.0.0a8: persist to ~/.harbormaster/projects_cache.json so the
+    # cache is shared with peer harbormaster processes (UI + MCP) and
+    # survives a UI restart.
+    projects_cache = ProjectsCache(persist_path=default_persist_path())
     # Track the last set of dirs we discovered so the next request can
     # build an mtime signature without re-walking. Empty on first call
     # (so the first hit is always a miss → walk → cache).

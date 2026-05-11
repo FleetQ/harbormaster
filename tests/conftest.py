@@ -25,6 +25,20 @@ os.environ["HARBORMASTER_MEMORY_REVISIONS_DB"] = str(
     Path(_MEMORY_REVISIONS_TMPDIR) / "memory_revisions.db"
 )
 
+# v21.0.0a8: redirect the cross-process projects cache + dispatcher
+# metrics DB to per-test-run tmp dirs. Without this redirect the new
+# persistence layer leaks state into the developer's real
+# ``~/.harbormaster/`` and across consecutive test invocations — e.g.
+# test A's project listing gets served to test B.
+_PROJECTS_CACHE_TMPDIR = tempfile.mkdtemp(prefix="hm-tests-projects-cache-")
+os.environ["HARBORMASTER_PROJECTS_CACHE"] = str(
+    Path(_PROJECTS_CACHE_TMPDIR) / "projects_cache.json"
+)
+_DISPATCHER_METRICS_TMPDIR = tempfile.mkdtemp(prefix="hm-tests-dispatcher-metrics-")
+os.environ["HARBORMASTER_DISPATCHER_METRICS_DB"] = str(
+    Path(_DISPATCHER_METRICS_TMPDIR) / "dispatcher_metrics.db"
+)
+
 
 # v16.0.0a1: autouse fixture promoting the ad-hoc reset pattern from
 # tests/ui/test_network_event_filtering.py up to session-wide. The
@@ -57,3 +71,32 @@ def _reset_network_log() -> Iterator[None]:
     with _nl.network_log._lock:  # type: ignore[attr-defined]
         _nl.network_log._conn.execute("DELETE FROM mcp_calls")  # type: ignore[attr-defined]
         _nl.network_log._conn.commit()  # type: ignore[attr-defined]
+
+
+@pytest.fixture(autouse=True)
+def _reset_v21_persistent_caches() -> Iterator[None]:
+    """v21.0.0a8: clear the cross-process projects cache file + reset
+    the dispatcher-metrics-store singleton between tests. Without this
+    each test inherits the previous test's project listing / counters
+    via the shared on-disk state.
+    """
+    cache_file = Path(os.environ.get("HARBORMASTER_PROJECTS_CACHE", ""))
+    if cache_file:
+        try:
+            cache_file.unlink()
+        except FileNotFoundError:
+            pass
+        # Also drop the sidecar lock file so a stale flock doesn't
+        # outlive its writer.
+        lock = cache_file.with_suffix(cache_file.suffix + ".lock")
+        try:
+            lock.unlink()
+        except FileNotFoundError:
+            pass
+    # Force the metrics-store singleton to re-resolve on next access.
+    try:
+        from harbormaster.dispatcher_metrics_store import set_metrics_store
+        set_metrics_store(None)
+    except Exception:
+        pass
+    yield
