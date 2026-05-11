@@ -170,8 +170,36 @@ class CodexBackend:
 
     # ----- public Protocol surface ------------------------------------------
 
-    def ask_local(self, *, cwd: Path, prompt: str, max_turns: int) -> BackendResult:
-        cmd = [self.cfg.binary, *self.cfg.extra_args, prompt]
+    def _resolve_model(self, model: str | None) -> str | None:
+        """v21.0.0a10: same shape as ClaudeBackend._resolve_model.
+
+        Codex's `model_aliases` default to the claude shorthand
+        (haiku/sonnet/opus) — operators wiring codex up should override
+        the aliases in TOML to map to gpt-5 / o1 / etc. The whitelist
+        + None-passthrough behaviour is identical.
+        """
+        effective = model or self.cfg.default_model
+        if effective is None:
+            return None
+        full_id = self.cfg.model_aliases.get(effective, effective)
+        if self.cfg.allowed_models and full_id not in self.cfg.allowed_models:
+            raise BackendError(
+                f"model {effective!r} not in allowed_models list",
+                code="model_not_allowed",
+            )
+        return full_id
+
+    def ask_local(
+        self,
+        *,
+        cwd: Path,
+        prompt: str,
+        max_turns: int,
+        model: str | None = None,
+    ) -> BackendResult:
+        resolved = self._resolve_model(model)
+        model_args = ["--model", resolved] if resolved else []
+        cmd = [self.cfg.binary, *self.cfg.extra_args, *model_args, prompt]
         start = time.monotonic()
         try:
             proc = subprocess.run(
@@ -213,8 +241,10 @@ class CodexBackend:
         max_turns: int,
         connect_timeout: int,
         total_timeout: int,
+        model: str | None = None,
     ) -> BackendResult:
-        remote_cmd = self._build_remote_command(remote_cwd, prompt)
+        resolved = self._resolve_model(model)
+        remote_cmd = self._build_remote_command(remote_cwd, prompt, model_id=resolved)
         start = time.monotonic()
         try:
             proc = run_ssh(
@@ -241,15 +271,22 @@ class CodexBackend:
 
     # ----- private helpers --------------------------------------------------
 
-    def _build_remote_command(self, remote_cwd: str, prompt: str) -> str:
+    def _build_remote_command(
+        self, remote_cwd: str, prompt: str,
+        *, model_id: str | None = None,
+    ) -> str:
         """Compose the bash command sent to the remote host. All
-        user-supplied values pass through `shlex.quote` before assembly."""
+        user-supplied values pass through `shlex.quote` before assembly.
+
+        v21.0.0a10: when `model_id` is non-None it is appended as
+        `--model <id>` after `extra_args`."""
         qcwd = shlex.quote(remote_cwd)
         qprompt = shlex.quote(prompt)
         qbin = shlex.quote(self.cfg.binary)
         qextra = " ".join(shlex.quote(a) for a in self.cfg.extra_args)
         space = " " if qextra else ""
-        return f"cd {qcwd} && {qbin}{space}{qextra} -- {qprompt}"
+        model_part = f" --model {shlex.quote(model_id)}" if model_id else ""
+        return f"cd {qcwd} && {qbin}{space}{qextra}{model_part} -- {qprompt}"
 
     @staticmethod
     def _sanitize_output(stdout: str) -> str:
@@ -272,6 +309,7 @@ class CodexBackend:
 
     def ask_local_stream(
         self, *, cwd: Path, prompt: str, max_turns: int,
+        model: str | None = None,
     ) -> Iterator[str]:
         """Stream codex's stdout as text deltas, line-by-line.
 
@@ -297,7 +335,9 @@ class CodexBackend:
 
         The iterator MUST be drained so the subprocess is reaped.
         """
-        cmd = [self.cfg.binary, *self.cfg.extra_args, prompt]
+        resolved = self._resolve_model(model)
+        model_args = ["--model", resolved] if resolved else []
+        cmd = [self.cfg.binary, *self.cfg.extra_args, *model_args, prompt]
         usage = StreamUsage()
         try:
             proc = subprocess.Popen(
@@ -367,6 +407,7 @@ class CodexBackend:
         max_turns: int,
         connect_timeout: int,
         total_timeout: int,
+        model: str | None = None,
     ) -> Iterator[str]:
         """SSH variant of ask_local_stream — pipe codex stdout through
         ssh and yield lines as deltas as they arrive. Same usage-soft-fall
@@ -374,7 +415,8 @@ class CodexBackend:
         """
         from harbormaster.ssh import build_ssh_argv
 
-        remote_cmd = self._build_remote_command(remote_cwd, prompt)
+        resolved = self._resolve_model(model)
+        remote_cmd = self._build_remote_command(remote_cwd, prompt, model_id=resolved)
         argv = build_ssh_argv(host, remote_cmd, connect_timeout=connect_timeout)
         ssh_idx = argv.index("ssh")
         argv = [*argv[:ssh_idx + 1], "-T", "-q", *argv[ssh_idx + 1:]]

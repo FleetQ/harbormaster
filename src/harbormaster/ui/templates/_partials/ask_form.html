@@ -33,6 +33,18 @@
         <input type="number" min="1" max="10" x-model.number="maxTurns"
                class="w-14 bg-surface-1 border border-border rounded px-2 py-1 text-center">
       </label>
+      {# v21.0.0a10: model selection dropdown. Empty = backend default. #}
+      <label class="flex items-center gap-1.5" data-ask-form-model>
+        model
+        <select x-model="model"
+                aria-label="Model selection"
+                class="bg-surface-1 border border-border rounded px-1 py-0.5 text-xs">
+          <option value="">auto</option>
+          <option value="haiku">⚡ haiku (fast)</option>
+          <option value="sonnet">⚖ sonnet (default)</option>
+          <option value="opus">🧠 opus (smart)</option>
+        </select>
+      </label>
       <span class="text-foreground-muted" x-show="loading">streaming…</span>
       <span class="text-foreground-muted ml-auto" x-show="!loading && hasResult"
             x-text="`${chunks} chunks · ${(elapsedMs/1000).toFixed(1)}s`"></span>

@@ -103,9 +103,39 @@ class ClaudeBackend:
 
     # ----- public Protocol surface ------------------------------------------
 
-    def ask_local(self, *, cwd: Path, prompt: str, max_turns: int) -> BackendResult:
-        cmd = [
-            self.cfg.binary, "-p",
+    def _resolve_model(self, model: str | None) -> str | None:
+        """v21.0.0a10: resolve a user-supplied model name through the
+        backend's aliases + whitelist.
+
+        Returns None when no `--model` arg should be passed to the
+        binary (= backend default). Raises BackendError("model_not_allowed")
+        when `allowed_models` is non-empty and the resolved id is not in
+        the whitelist.
+        """
+        effective = model or self.cfg.default_model
+        if effective is None:
+            return None
+        full_id = self.cfg.model_aliases.get(effective, effective)
+        if self.cfg.allowed_models and full_id not in self.cfg.allowed_models:
+            raise BackendError(
+                f"model {effective!r} not in allowed_models list",
+                code="model_not_allowed",
+            )
+        return full_id
+
+    def ask_local(
+        self,
+        *,
+        cwd: Path,
+        prompt: str,
+        max_turns: int,
+        model: str | None = None,
+    ) -> BackendResult:
+        cmd = [self.cfg.binary, "-p"]
+        resolved = self._resolve_model(model)
+        if resolved:
+            cmd += ["--model", resolved]
+        cmd += [
             "--permission-mode", "bypassPermissions",
             "--max-turns", str(max_turns),
             "--output-format", "json",
@@ -142,8 +172,12 @@ class ClaudeBackend:
         max_turns: int,
         connect_timeout: int,
         total_timeout: int,
+        model: str | None = None,
     ) -> BackendResult:
-        remote_cmd = self._build_remote_command(remote_cwd, prompt, max_turns)
+        resolved = self._resolve_model(model)
+        remote_cmd = self._build_remote_command(
+            remote_cwd, prompt, max_turns, model_id=resolved,
+        )
         start = time.monotonic()
         try:
             proc = run_ssh(
@@ -169,6 +203,7 @@ class ClaudeBackend:
 
     def ask_local_stream(
         self, *, cwd: Path, prompt: str, max_turns: int,
+        model: str | None = None,
     ) -> Iterator[str]:
         """Stream-json variant of ask_local: yields assistant text chunks
         as `claude -p` produces them, instead of buffering the entire
@@ -194,8 +229,11 @@ class ClaudeBackend:
         The iterator is exhausted when stdout closes; callers MUST drain
         it (or use a context that does) so the subprocess is reaped.
         """
-        cmd = [
-            self.cfg.binary, "-p",
+        cmd = [self.cfg.binary, "-p"]
+        resolved = self._resolve_model(model)
+        if resolved:
+            cmd += ["--model", resolved]
+        cmd += [
             "--permission-mode", "bypassPermissions",
             "--max-turns", str(max_turns),
             "--output-format", "stream-json",
@@ -316,6 +354,7 @@ class ClaudeBackend:
         max_turns: int,
         connect_timeout: int,
         total_timeout: int,
+        model: str | None = None,
     ) -> Iterator[str]:
         """SSH variant of ask_local_stream — pipe stream-json output through
         ssh and yield assistant text deltas as they arrive.
@@ -347,8 +386,11 @@ class ClaudeBackend:
         qprompt = shlex.quote(prompt)
         qbin = shlex.quote(self.cfg.binary)
         qmaxturns = shlex.quote(str(max_turns))
+        resolved = self._resolve_model(model)
+        model_part = f"--model {shlex.quote(resolved)} " if resolved else ""
         remote_cmd = (
             f"cd {qcwd} && {qbin} -p "
+            f"{model_part}"
             f"--permission-mode bypassPermissions "
             f"--max-turns {qmaxturns} "
             f"--output-format stream-json --verbose "
@@ -426,16 +468,25 @@ class ClaudeBackend:
     # ----- private helpers --------------------------------------------------
 
     def _build_remote_command(
-        self, remote_cwd: str, prompt: str, max_turns: int
+        self, remote_cwd: str, prompt: str, max_turns: int,
+        *, model_id: str | None = None,
     ) -> str:
         """Compose the bash command sent to the remote host. All user-supplied
-        values pass through shlex.quote before assembly."""
+        values pass through shlex.quote before assembly.
+
+        v21.0.0a10: when `model_id` is non-None it is injected as
+        `--model <id>` immediately after `-p`. The caller is responsible
+        for resolving aliases / whitelist enforcement via
+        `_resolve_model` before passing the value in.
+        """
         qcwd = shlex.quote(remote_cwd)
         qprompt = shlex.quote(prompt)
         qbin = shlex.quote(self.cfg.binary)
         qmaxturns = shlex.quote(str(max_turns))
+        model_part = f"--model {shlex.quote(model_id)} " if model_id else ""
         return (
             f"cd {qcwd} && {qbin} -p "
+            f"{model_part}"
             f"--permission-mode bypassPermissions "
             f"--max-turns {qmaxturns} "
             f"--output-format json "

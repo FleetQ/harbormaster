@@ -3122,6 +3122,22 @@ def _validate_max_turns(arguments: dict[str, Any], default: int) -> int:
     return max_turns
 
 
+def _resolve_model_arg(arguments: dict[str, Any]) -> str | None:
+    """v21.0.0a10: pull the optional ``model`` arg from MCP tool args.
+
+    Accepts a non-empty string (treated as alias or full id by the
+    backend's `_resolve_model`) or None. Empty string / missing key
+    is normalised to None so the backend default applies.
+    """
+    raw = arguments.get("model")
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValueError("params.arguments.model must be a string or null")
+    stripped = raw.strip()
+    return stripped or None
+
+
 async def _stream_local_tool(
     config: HarbormasterConfig,
     arguments: dict[str, Any],
@@ -3159,6 +3175,7 @@ async def _stream_local_tool(
     try:
         full_prompt = prompt_builder(arguments)
         max_turns = _validate_max_turns(arguments, max_turns_default)
+        model = _resolve_model_arg(arguments)
     except ValueError as e:
         yield {
             "event": "error",
@@ -3171,7 +3188,7 @@ async def _stream_local_tool(
     try:
         sync_iter = make_local_backend_stream(
             project_name=project_name, prompt=full_prompt,
-            max_turns=max_turns, config=config,
+            max_turns=max_turns, config=config, model=model,
         )
     except ValueError as e:
         yield {
@@ -3182,7 +3199,9 @@ async def _stream_local_tool(
         }
         return
     except BackendError as e:
-        status = 400 if e.code == "config_error" else 502
+        # v21.0.0a10: model_not_allowed is a client-side error
+        # (operator picked a model that's not in the whitelist).
+        status = 400 if e.code in ("config_error", "model_not_allowed") else 502
         yield {
             "event": "error",
             "data": json.dumps(
@@ -3229,6 +3248,7 @@ async def _stream_remote_tool(
     try:
         full_prompt = prompt_builder(arguments)
         max_turns = _validate_max_turns(arguments, max_turns_default)
+        model = _resolve_model_arg(arguments)
     except ValueError as e:
         yield {
             "event": "error",
@@ -3241,7 +3261,7 @@ async def _stream_remote_tool(
     try:
         sync_iter = make_remote_backend_stream(
             project_name=project_name, prompt=full_prompt,
-            max_turns=max_turns, host=host, config=config,
+            max_turns=max_turns, host=host, config=config, model=model,
         )
     except ValueError as e:
         yield {
@@ -3252,7 +3272,9 @@ async def _stream_remote_tool(
         }
         return
     except BackendError as e:
-        status = 400 if e.code == "config_error" else 502
+        # v21.0.0a10: model_not_allowed is a client-side error
+        # (operator picked a model that's not in the whitelist).
+        status = 400 if e.code in ("config_error", "model_not_allowed") else 502
         yield {
             "event": "error",
             "data": json.dumps(

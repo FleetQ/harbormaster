@@ -16,6 +16,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         deliverable: str,
         allow_writes: bool = False,
         host: str | None = None,
+        model: str | None = None,
     ) -> str:
         """Delegate a task to a project's Claude Code subagent (read-only in v1).
 
@@ -26,6 +27,10 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         When `[history] auto_ground = true`, the task description is prepended
         with a "Prior context" section listing the top-K past Q&A matches for
         this project (v1.2 phase 4).
+
+        v21.0.0a10: ``model`` is an optional alias ('haiku', 'sonnet',
+        'opus') or full model id; None = backend default. Subject to
+        ``[backends.<name>] allowed_models`` whitelist when set.
         """
         if allow_writes:
             return (
@@ -56,4 +61,5 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
             host=host,
             config=config,
             label_prefix="delegate",
+            model=model,
         )

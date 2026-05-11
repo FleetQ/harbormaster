@@ -38,6 +38,22 @@ class BackendConfig(BaseModel):
     timeout_local: int = Field(default=60, gt=0)
     timeout_remote: int = Field(default=120, gt=0)
     output_word_cap: int = Field(default=800, gt=0)
+    # v21.0.0a10: per-backend model selection. None = backend's own
+    # default (no `--model` flag added). When `default_model` is set,
+    # every call passes `--model <resolved>` unless the MCP tool /
+    # UI overrides it. `allowed_models` (when non-empty) is a hard
+    # whitelist enforced inside `_resolve_model`. `model_aliases`
+    # lets operators expose short labels (haiku/sonnet/opus) that map
+    # to the full provider model id.
+    default_model: str | None = None
+    allowed_models: list[str] = Field(default_factory=list)
+    model_aliases: dict[str, str] = Field(
+        default_factory=lambda: {
+            "haiku": "claude-haiku-4-5-20251001",
+            "sonnet": "claude-sonnet-4-6",
+            "opus": "claude-opus-4-7",
+        }
+    )
 
 
 class HostProjectBudget(BaseModel):
