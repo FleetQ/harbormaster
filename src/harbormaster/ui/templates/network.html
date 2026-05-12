@@ -46,7 +46,26 @@
     </select>
   </header>
   <p x-show="error" role="alert" class="text-xs text-danger" x-text="error"></p>
-  <dl x-show="stats" class="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+  {# v21.0.9: when total_calls === 0, hide the 5-cell grid (whose
+     "by tool / by source / top projects" cells render as empty
+     unlabelled boxes) and show a clear empty-state instead. The
+     window selector above still works so the operator can widen the
+     range from here. #}
+  <div x-show="stats && stats.total_calls === 0"
+       role="status"
+       data-empty-state="stats.no-traffic-in-window"
+       class="border border-border-subtle bg-surface-2/40 text-foreground-dim rounded px-3 py-6 text-center text-xs leading-snug">
+    <p class="text-foreground-muted font-semibold mb-1">
+      No MCP calls in the
+      <span x-text="window === 'all' ? 'recorded history' : 'last ' + window"></span>.
+    </p>
+    <p class="text-foreground-dim">
+      Try a wider window using the selector above, or ask a project something
+      via your MCP client to populate stats.
+    </p>
+  </div>
+  <dl x-show="stats && stats.total_calls > 0"
+      class="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
     <div class="border border-border rounded p-2 bg-surface-1/40">
       <dt class="text-foreground-subtle">total calls</dt>
       <dd class="text-accent font-bold text-lg" x-text="stats?.total_calls ?? 0"></dd>
@@ -303,7 +322,37 @@
         </button>
       </div>
     </div>
-    <svg :viewBox="`0 0 ${timelineBuckets.length * 8} 100`"
+    {# v21.0.9: nested empty-state for "events exist, but none in the
+       selected window". Previously an empty-but-non-zero events array
+       still rendered the SVG with all-zero bars — operators read this
+       as "broken dashboard". Now the SVG is gated on
+       timelineEventsTotal>0 and a clear empty-state with a CTA to
+       switch the window takes over when the in-window count is 0. #}
+    <div x-show="timelineEventsTotal === 0"
+         role="status"
+         data-empty-state="network.no-events-in-window"
+         class="border border-border-subtle bg-surface-2/40 text-foreground-dim rounded px-3 py-6 text-center text-xs leading-snug">
+      <p class="text-foreground-muted font-semibold mb-1">
+        No events in the
+        <span x-text="timelineWindow === '1h' ? 'last hour' : 'last 24h'"></span>.
+      </p>
+      <p class="text-foreground-dim mb-2"
+         x-show="timelineWindow === '1h'">
+        Switch to a wider window to see older traffic.
+      </p>
+      <p class="text-foreground-dim mb-2"
+         x-show="timelineWindow !== '1h'">
+        Run an MCP tool against a project to populate the timeline.
+      </p>
+      <button type="button"
+              x-show="timelineWindow === '1h'"
+              @click="timelineWindow = '24h'"
+              class="text-xs px-3 py-1 rounded border border-accent-strong bg-accent-soft/30 hover:bg-accent-soft/50 text-accent transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1">
+        Switch to 24h
+      </button>
+    </div>
+    <svg x-show="timelineEventsTotal > 0"
+         :viewBox="`0 0 ${timelineBuckets.length * 8} 100`"
          preserveAspectRatio="none"
          class="w-full h-32 bg-surface-1/40 rounded"
          role="img"
@@ -318,7 +367,8 @@
         </rect>
       </template>
     </svg>
-    <p class="text-[11px] text-foreground-subtle mt-2">
+    <p x-show="timelineEventsTotal > 0"
+       class="text-[11px] text-foreground-subtle mt-2">
       <span x-text="timelineEventsTotal"></span> events ·
       peak bucket: <span x-text="timelineMaxBucket"></span>
     </p>
@@ -925,43 +975,64 @@
 {% block inspector %}
 <div class="p-2" x-data="networkInspector()" x-init="load(); start()"
      data-tour-step="inspector-content">
-  <section>
-    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Last 1h</h3>
-    <dl class="grid grid-cols-2 gap-x-2 gap-y-1 text-xs mb-2">
-      <dt class="text-foreground-muted">total calls</dt>
-      <dd class="text-accent font-mono font-bold" x-text="stats?.total_calls ?? '—'"></dd>
-      <dt class="text-foreground-muted">error rate</dt>
-      <dd class="text-warning font-mono font-bold"
-          x-text="((stats?.error_rate ?? 0) * 100).toFixed(1) + '%'"></dd>
-    </dl>
-  </section>
-  <section class="border-t border-border pt-3 mb-2">
-    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">By tool</h3>
-    <ul class="text-xs space-y-1">
-      <template x-for="(count, tool) in (stats?.by_tool ?? {})" :key="'i-tool:' + tool">
-        <li class="font-mono text-foreground-muted truncate">
-          <span class="text-accent" x-text="tool"></span>
-          <span class="text-foreground-subtle">×</span>
-          <span x-text="count"></span>
-        </li>
-      </template>
-      <li x-show="!stats || Object.keys(stats?.by_tool ?? {}).length === 0"
-          class="text-foreground-subtle">no calls in window</li>
-    </ul>
-  </section>
-  <section class="border-t border-border pt-3">
-    <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Top projects</h3>
-    <ul class="text-xs space-y-1">
-      <template x-for="row in (stats?.top_projects_by_calls ?? []).slice(0, 5)" :key="'i-p:' + row.project">
-        <li class="font-mono text-foreground-muted truncate">
-          <span class="text-accent" x-text="row.project"></span>
-          <span class="text-foreground-subtle ml-1" x-text="'×' + row.count"></span>
-        </li>
-      </template>
-      <li x-show="(stats?.top_projects_by_calls ?? []).length === 0"
-          class="text-foreground-subtle">no projects active</li>
-    </ul>
-  </section>
+  {# v21.0.9: when the 1h window is genuinely empty (total_calls === 0)
+     the previous version rendered three sections of zeros — operators
+     read this as "broken dashboard" (literal report 2026-05-12). Now
+     a single clear empty-state replaces the grid until traffic
+     arrives, and the per-section breakdowns return automatically
+     when the stats endpoint sees non-zero data. #}
+  <div x-show="stats && stats.total_calls === 0"
+       role="status"
+       data-empty-state="inspector.no-recent-traffic"
+       class="border border-border-subtle bg-surface-2/40 text-foreground-dim rounded px-3 py-4 text-xs leading-snug">
+    <p class="text-foreground-muted font-semibold mb-1">No MCP calls in the last hour.</p>
+    <p class="text-foreground-dim">
+      Inspector pins a 1h rolling window. Widen the main stats panel below
+      (last 24h / 7d / all time) to see longer-range traffic, or run an
+      MCP tool against a project to populate the feed.
+    </p>
+  </div>
+  <template x-if="!stats || stats.total_calls > 0">
+    <div>
+      <section>
+        <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Last 1h</h3>
+        <dl class="grid grid-cols-2 gap-x-2 gap-y-1 text-xs mb-2">
+          <dt class="text-foreground-muted">total calls</dt>
+          <dd class="text-accent font-mono font-bold" x-text="stats?.total_calls ?? '—'"></dd>
+          <dt class="text-foreground-muted">error rate</dt>
+          <dd class="text-warning font-mono font-bold"
+              x-text="((stats?.error_rate ?? 0) * 100).toFixed(1) + '%'"></dd>
+        </dl>
+      </section>
+      <section class="border-t border-border pt-3 mb-2">
+        <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">By tool</h3>
+        <ul class="text-xs space-y-1">
+          <template x-for="(count, tool) in (stats?.by_tool ?? {})" :key="'i-tool:' + tool">
+            <li class="font-mono text-foreground-muted truncate">
+              <span class="text-accent" x-text="tool"></span>
+              <span class="text-foreground-subtle">×</span>
+              <span x-text="count"></span>
+            </li>
+          </template>
+          <li x-show="!stats || Object.keys(stats?.by_tool ?? {}).length === 0"
+              class="text-foreground-subtle">no calls in window</li>
+        </ul>
+      </section>
+      <section class="border-t border-border pt-3">
+        <h3 class="text-xs uppercase tracking-wide text-foreground-subtle mb-2">Top projects</h3>
+        <ul class="text-xs space-y-1">
+          <template x-for="row in (stats?.top_projects_by_calls ?? []).slice(0, 5)" :key="'i-p:' + row.project">
+            <li class="font-mono text-foreground-muted truncate">
+              <span class="text-accent" x-text="row.project"></span>
+              <span class="text-foreground-subtle ml-1" x-text="'×' + row.count"></span>
+            </li>
+          </template>
+          <li x-show="(stats?.top_projects_by_calls ?? []).length === 0"
+              class="text-foreground-subtle">no projects active</li>
+        </ul>
+      </section>
+    </div>
+  </template>
 </div>
 <script>
   // v19.0.0a3: networkInspector — compact /api/network/stats summary
