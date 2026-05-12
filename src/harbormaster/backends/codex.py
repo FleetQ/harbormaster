@@ -211,8 +211,19 @@ class CodexBackend:
                 check=False,
             )
         except subprocess.TimeoutExpired as e:
+            # v21.0.7: include elapsed + stderr_tail so the agent /
+            # operator can see what was happening when codex got killed.
+            elapsed = time.monotonic() - start
+            stderr_tail = ""
+            if e.stderr:
+                raw = e.stderr if isinstance(e.stderr, str) else e.stderr.decode(
+                    "utf-8", errors="replace",
+                )
+                stderr_tail = raw[-300:]
+            tail_hint = f" stderr_tail={stderr_tail!r}" if stderr_tail else ""
             raise BackendError(
-                f"timeout: {self.cfg.binary} exceeded {self.cfg.timeout_local}s",
+                f"timeout: {self.cfg.binary} exceeded {self.cfg.timeout_local}s "
+                f"(elapsed={elapsed:.1f}s){tail_hint}",
                 code="timeout",
             ) from e
         except FileNotFoundError as e:
@@ -254,7 +265,15 @@ class CodexBackend:
                 connect_timeout=connect_timeout,
             )
         except SshTimeoutError as e:
-            raise BackendError(str(e), code="timeout") from e
+            # v21.0.7: distinguish "ssh connect never succeeded" from
+            # "remote codex hung" via elapsed vs configured timeouts.
+            elapsed = time.monotonic() - start
+            raise BackendError(
+                f"{e} (elapsed={elapsed:.1f}s, "
+                f"connect_timeout={connect_timeout}s, "
+                f"total_timeout={total_timeout}s)",
+                code="timeout",
+            ) from e
 
         ssh_err = diagnose_ssh_failure(host, proc)
         if ssh_err:

@@ -21,6 +21,7 @@ This module is only loaded when the [ui] extra is installed — pure stdio
 users never hit this import path.
 """
 import asyncio
+import contextlib
 import difflib
 import json
 import time
@@ -3515,11 +3516,43 @@ async def _emit_chunks_then_result(
         try:
             chunk = await asyncio.to_thread(_next_or_sentinel)
         except BackendError as e:
+            # v21.0.7: mid-stream BackendError needs the same forensic
+            # treatment as the sync `run_backend` path — log a
+            # structured warning + mirror to network_log so the
+            # dashboard Activity tab shows the failure. Generate a
+            # correlation id so the agent's error event matches the
+            # log line + db row.
+            from harbormaster.tools._helpers import (
+                _new_correlation_id,
+                _record_backend_failure,
+            )
+
+            cid = _new_correlation_id()
+            elapsed_ms = int((time.monotonic() - start_monotonic) * 1000)
+            if record_ctx is not None:
+                # Instrumentation must never break the in-flight error
+                # response — _record_backend_failure already swallows
+                # internally, but suppress here as a belt-and-braces.
+                with contextlib.suppress(Exception):
+                    _record_backend_failure(
+                        project_name=str(record_ctx["project_name"]),
+                        host=record_ctx.get("host"),
+                        prompt=str(record_ctx["prompt"]),
+                        tool=str(record_ctx["tool"]),
+                        error=e,
+                        elapsed_ms=elapsed_ms,
+                        correlation_id=cid,
+                    )
             yield {
                 "event": "error",
                 "id": next_id.next(),
                 "data": json.dumps(
-                    {"status": 502, "detail": f"BackendError({e.code}): {e}"}
+                    {
+                        "status": 502,
+                        "detail": f"BackendError({e.code}): {e}",
+                        "correlation_id": cid,
+                        "elapsed_ms": elapsed_ms,
+                    }
                 ),
             }
             return

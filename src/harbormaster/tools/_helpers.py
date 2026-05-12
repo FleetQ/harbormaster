@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -19,6 +20,78 @@ from harbormaster.projects import resolve_project, validate_project_name
 from harbormaster.ssh import is_remote
 
 logger = logging.getLogger("harbormaster.tools._helpers")
+
+
+def _new_correlation_id() -> str:
+    """Short, unique-enough token to cross-reference an error string
+    returned to the agent against the corresponding log line + network_log
+    row. 8 hex chars = 4B entropy — collisions effectively impossible
+    within a session's failure window."""
+    return secrets.token_hex(4)
+
+
+def _record_backend_failure(
+    *,
+    project_name: str,
+    host: str | None,
+    prompt: str,
+    tool: str,
+    error: BackendError,
+    elapsed_ms: int,
+    correlation_id: str,
+) -> None:
+    """v21.0.7: capture forensic data when a backend call fails.
+
+    Emits one structured WARNING log line and mirrors the failure into
+    the UI network_log (``mcp_calls`` table) with ``status='error'`` so
+    the dashboard Activity / Timeline tabs surface failed calls — not
+    just successful ones. Mirrors the success-path tool-dispatch
+    logging pattern established in v21.0.6 (see
+    v21.0.3-v21.0.6-patch-arc memory: tool-dispatch-layer logging,
+    never transport-layer).
+
+    Best-effort: any failure inside this helper is swallowed. The hot
+    path (returning the error string to the agent) must never be
+    blocked by instrumentation.
+    """
+    logger.warning(
+        "backend_failure cid=%s tool=%s project=%s host=%s code=%s "
+        "elapsed_ms=%d message=%r",
+        correlation_id,
+        tool,
+        project_name,
+        host or "local",
+        error.code,
+        elapsed_ms,
+        # Cap the captured message at 500 chars in case it includes a
+        # long stderr tail (claude -p rate-limit JSON, etc.). The full
+        # text is still in the agent-facing return string; the
+        # operator can rerun with DEBUG log level for more detail.
+        str(error)[:500],
+    )
+
+    # Mirror to network_log so dashboard Activity / Timeline include
+    # this failure. Lazy import — when [ui] extra isn't installed
+    # (pure stdio MCP setup) the ImportError is swallowed and we
+    # no-op, preserving the no-required-ui invariant.
+    try:
+        from harbormaster.ui.network_log import (
+            current_caller_project,
+            network_log,
+        )
+
+        network_log.record(
+            caller=current_caller_project() or "operator",
+            target=project_name,
+            tool=tool,
+            status="error",
+            question_preview=prompt,
+            duration_ms=elapsed_ms,
+        )
+    except ImportError:
+        pass
+    except Exception:
+        logger.exception("network_log error-mirror failed; swallowing")
 
 
 def _dump_dir() -> Path:
@@ -70,6 +143,7 @@ def run_backend(
         )
     cap = backend.cfg.output_word_cap
 
+    start = time.monotonic()
     try:
         if is_remote(host):
             host_cfg = config.hosts.get(host)
@@ -96,7 +170,35 @@ def run_backend(
             )
             label = f"{label_prefix}-{name}"
     except BackendError as e:
-        return f"Error: {e}"
+        # v21.0.7: surface debug info on backend failures.
+        # Before this patch, the agent received "Error: <message>" with
+        # no project name, no elapsed, no correlation id — and nothing
+        # was logged or recorded for the operator to investigate. Now
+        # we tag every failure with a short id, write a structured
+        # WARNING log line, mirror it into the network_log so the
+        # dashboard Activity tab shows it, and return a richer string
+        # to the agent so it can pinpoint which call failed.
+        cid = _new_correlation_id()
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        _record_backend_failure(
+            project_name=name,
+            host=host,
+            prompt=prompt,
+            tool=label_prefix,
+            error=e,
+            elapsed_ms=elapsed_ms,
+            correlation_id=cid,
+        )
+        loc = host or "local"
+        # NOTE: must start with the literal "Error:" — fan_out.py
+        # filters target answers on this prefix, and external MCP
+        # agents have historically pattern-matched on it too. The
+        # correlation id and metadata live AFTER the colon.
+        return (
+            f"Error: {label_prefix}(name={name!r}, host={loc!r}) "
+            f"failed after {elapsed_ms} ms [cid={cid}] "
+            f"— code={e.code}: {e}"
+        )
 
     _maybe_writeback_to_fleetq(
         config=config,

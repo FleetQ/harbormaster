@@ -148,8 +148,21 @@ class ClaudeBackend:
                 timeout=self.cfg.timeout_local,
             )
         except subprocess.TimeoutExpired as e:
+            # v21.0.7: surface partial stderr from the killed subprocess.
+            # claude -p often writes API errors (rate-limit, auth) to
+            # stderr right before the wall-clock kill; previously those
+            # were dropped on the floor.
+            elapsed = time.monotonic() - start
+            stderr_tail = ""
+            if e.stderr:
+                raw = e.stderr if isinstance(e.stderr, str) else e.stderr.decode(
+                    "utf-8", errors="replace",
+                )
+                stderr_tail = raw[-300:]
+            tail_hint = f" stderr_tail={stderr_tail!r}" if stderr_tail else ""
             raise BackendError(
-                f"timeout: claude -p exceeded {self.cfg.timeout_local}s",
+                f"timeout: claude -p exceeded {self.cfg.timeout_local}s "
+                f"(elapsed={elapsed:.1f}s){tail_hint}",
                 code="timeout",
             ) from e
 
@@ -186,7 +199,16 @@ class ClaudeBackend:
                 connect_timeout=connect_timeout,
             )
         except SshTimeoutError as e:
-            raise BackendError(str(e), code="timeout") from e
+            # v21.0.7: distinguish "connect never succeeded" (elapsed
+            # ≈ connect_timeout) from "ssh connected but remote claude
+            # hung" (elapsed ≈ total_timeout). Operator-visible.
+            elapsed = time.monotonic() - start
+            raise BackendError(
+                f"{e} (elapsed={elapsed:.1f}s, "
+                f"connect_timeout={connect_timeout}s, "
+                f"total_timeout={total_timeout}s)",
+                code="timeout",
+            ) from e
 
         ssh_err = diagnose_ssh_failure(host, proc)
         if ssh_err:
