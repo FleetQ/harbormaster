@@ -197,10 +197,37 @@
       class="border border-border rounded bg-surface-1 divide-y divide-gray-900 overflow-y-auto"
       style="max-height: 60vh;">
     <template x-for="(ev, i) in chatOrder()" :key="'ce:' + i + ':' + ev.timestamp_ms">
-      <li x-data="{ open: false }"
+      {# v21.0.8: each row owns a tiny lazy-fetch state machine for
+         the full request body. Clicking the toggle button transitions
+         `open` to true and invokes loadFull(), which issues a single
+         GET /api/network/events/{id}/full and caches the result. Rows
+         without an id (legacy SSE pushes) or where the column is
+         NULL keep showing the preview as the fallback. #}
+      <li x-data="{
+            open: false,
+            full: null,
+            loading: false,
+            loadError: '',
+            async loadFull() {
+              if (this.full !== null || this.loading) return;
+              if (typeof ev.id !== 'number') return;
+              this.loading = true;
+              this.loadError = '';
+              try {
+                const r = await hmFetch('/api/network/events/' + ev.id + '/full');
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const d = await r.json();
+                this.full = d.question_full ?? d.question_preview ?? '';
+              } catch (e) {
+                this.loadError = e.message || String(e);
+              } finally {
+                this.loading = false;
+              }
+            },
+          }"
           class="px-3 py-1.5 text-xs hover:bg-surface-2/30">
         <button type="button"
-                @click="open = !open"
+                @click="open = !open; if (open) loadFull()"
                 :aria-expanded="open"
                 aria-label="Toggle event details"
                 class="w-full text-left flex items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
@@ -225,8 +252,18 @@
           <span x-show="ev.status === 'error'"
                 class="ml-auto text-danger shrink-0">err</span>
         </button>
-        <div x-show="open" class="mt-1 ml-12 text-[11px] text-foreground-muted whitespace-pre-wrap"
-             x-text="ev.question_preview || '(no preview)'"></div>
+        <div x-show="open" class="mt-1 ml-12 text-[11px] text-foreground-muted">
+          <div x-show="loading" class="italic text-foreground-subtle">loading full request…</div>
+          <div x-show="loadError" role="alert" class="text-danger"
+               x-text="'failed to load: ' + loadError"></div>
+          <div x-show="!loading && !loadError"
+               class="whitespace-pre-wrap break-words"
+               x-text="full !== null ? full : (ev.question_preview || '(no preview)')"></div>
+          <div x-show="!loading && !loadError && full === null && ev.question_preview"
+               class="mt-1 text-[10px] text-foreground-subtle italic">
+            (showing preview — full body not stored for this older event)
+          </div>
+        </div>
       </li>
     </template>
   </ul>

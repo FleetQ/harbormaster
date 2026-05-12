@@ -237,6 +237,30 @@ def register_routes(
             },
         }
 
+    @app.get("/api/network/events/{event_id}/full")
+    async def get_network_event_full(event_id: int) -> dict[str, object]:
+        """v21.0.8: fetch the untrimmed request body for one ``mcp_calls``
+        row. Used by the dashboard chat tab to lazy-load the full
+        prompt when the operator expands a row (the list endpoint above
+        only ships ``question_preview`` — the 200-char cap stays in
+        place to keep the list payload small).
+
+        Returns ``{event_id, question_full, question_preview}`` where
+        ``question_full`` is ``null`` for rows recorded before
+        v21.0.8 (the column existed but wasn't populated by any
+        call site). 404 on unknown ``event_id``.
+        """
+        from harbormaster.ui.network_log import network_log
+
+        row = network_log.get_full(event_id)
+        if row is None:
+            raise HTTPException(404, f"event {event_id} not found")
+        return {
+            "event_id": event_id,
+            "question_full": row["question_full"],
+            "question_preview": row["question_preview"],
+        }
+
     @app.get("/api/network/stats")
     async def network_stats(window: str = "24h") -> dict[str, object]:
         """v11.0.0a6: aggregate metrics over the last 1h / 24h / 7d.
@@ -3651,6 +3675,9 @@ async def _emit_chunks_then_result(
                 tool=str(record_ctx["tool"]),
                 status="ok" if assembled else "error",
                 question_preview=str(record_ctx["prompt"]),
+                # v21.0.8: persist the full request body so the
+                # chat tab can lazy-fetch it on row expand.
+                question_full=str(record_ctx["prompt"]),
             )
         except Exception:  # noqa: BLE001
             pass
@@ -3766,6 +3793,10 @@ def _record_mcp_dispatch(
     )
     preview = question if isinstance(question, str) else ""
     caller_name = caller or "operator"
+    # v21.0.8: ``preview`` here is actually the FULL question text
+    # (network_store.record applies the 200-char cap on the preview
+    # column itself). Pass it as both kwargs so the chat tab's row
+    # expand can lazy-fetch the untrimmed body.
     if tool_name == "fan_out_ask":
         projects = arguments.get("projects") or []
         if isinstance(projects, list) and projects:
@@ -3776,6 +3807,7 @@ def _record_mcp_dispatch(
                     caller=caller_name, target=proj,
                     tool=tool_name, status=status,
                     question_preview=preview,
+                    question_full=preview,
                 )
             return
         # No project list → record an aggregate event so the chat
@@ -3784,6 +3816,7 @@ def _record_mcp_dispatch(
             caller=caller_name, target="(all)",
             tool=tool_name, status=status,
             question_preview=preview,
+            question_full=preview,
         )
         return
     network_log.record(
@@ -3792,6 +3825,7 @@ def _record_mcp_dispatch(
         tool=tool_name,
         status=status,
         question_preview=preview,
+        question_full=preview,
     )
 
 

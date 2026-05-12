@@ -86,6 +86,10 @@ def _record_backend_failure(
             tool=tool,
             status="error",
             question_preview=prompt,
+            # v21.0.8: persist the full request body too so the
+            # dashboard chat tab can lazy-fetch it on row expand
+            # (the preview keeps the same 200-char cap).
+            question_full=prompt,
             duration_ms=elapsed_ms,
         )
     except ImportError:
@@ -504,6 +508,10 @@ def _maybe_record_qa(
             tool=tool,
             status="ok",
             question_preview=prompt,
+            # v21.0.8: persist the full request body too so the
+            # dashboard chat tab can lazy-fetch it on row expand
+            # (the preview keeps the same 200-char cap).
+            question_full=prompt,
             duration_ms=duration_ms,
         )
     except ImportError:

@@ -242,7 +242,12 @@ async def test_streaming_call_records_caller_from_record_ctx() -> None:
 
 
 def test_db_file_columns_match_spec(tmp_path: Path) -> None:
-    """Belt-and-braces: the on-disk schema matches the v11.0.0a1 spec."""
+    """Belt-and-braces: the on-disk schema matches the spec.
+
+    v21.0.8 added ``question_full`` (TEXT, nullable) to support the
+    dashboard chat tab's lazy-fetch of the untrimmed request body.
+    The v11.0.0a1 columns are unchanged.
+    """
     db = tmp_path / "net.db"
     NetworkStore(db_path=db)
     conn = sqlite3.connect(str(db))
@@ -258,6 +263,7 @@ def test_db_file_columns_match_spec(tmp_path: Path) -> None:
         ("status", "TEXT"),
         ("duration_ms", "INTEGER"),
         ("question_preview", "TEXT"),
+        ("question_full", "TEXT"),
     ]
 
 

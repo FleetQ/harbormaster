@@ -41,10 +41,27 @@ def test_chat_rows_show_caller_arrow_target_format() -> None:
 
 def test_chat_rows_expand_to_full_preview_on_click() -> None:
     src = _read_template()
-    # The row is collapsible: a button with x-data {open:false} and
-    # an inner div bound to ev.question_preview.
-    assert "{ open: false }" in src
+    # The row is collapsible: a button toggles `open` and shows
+    # ev.question_preview (preview fallback when the v21.0.8
+    # full-fetch hasn't completed yet).
+    assert "open: false" in src
     assert "ev.question_preview" in src
+
+
+def test_chat_rows_lazy_fetch_full_request_on_expand() -> None:
+    """v21.0.8: clicking a row to expand triggers an HTTP fetch to
+    /api/network/events/{id}/full and replaces the preview text with
+    the untrimmed body. Rows that lack an id (legacy SSE pushes) or
+    rows where the server has no full body cached fall back to the
+    preview."""
+    src = _read_template()
+    assert "loadFull()" in src
+    assert "/api/network/events/' + ev.id + '/full" in src
+    # Loading + error + fallback states all present.
+    assert "loading full request" in src
+    assert "failed to load" in src
+    # Fallback hint for rows recorded before v21.0.8.
+    assert "full body not stored for this older event" in src
 
 
 def test_view_toggle_persists_to_localstorage() -> None:

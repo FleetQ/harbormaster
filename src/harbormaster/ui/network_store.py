@@ -68,6 +68,12 @@ class NetworkEvent:
 
     Field shape preserved from v10.0.0a7 so existing UI consumers
     (graph + chat view) work without changes.
+
+    v21.0.8: optional ``id`` field (the row's autoincrement primary
+    key) — populated by ``record()`` after insert and by ``recent()``
+    on read. The UI uses it to call
+    ``GET /api/network/events/{id}/full`` for the lazy-loaded full
+    request text on chat row expand.
     """
 
     timestamp_ms: int
@@ -77,6 +83,7 @@ class NetworkEvent:
     status: str
     question_preview: str
     duration_ms: int | None = None
+    id: int | None = None
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -108,6 +115,14 @@ def _connect(db_path: Path) -> sqlite3.Connection:
           ON mcp_calls(timestamp DESC);
         """
     )
+    # v21.0.8: question_full column was added after the initial v11
+    # schema. PRAGMA table_info is the cheapest idempotent migration
+    # path — ALTER TABLE ADD COLUMN errors on duplicate. Older
+    # databases gain the column; rows pre-dating the migration keep
+    # question_full=NULL and the UI falls back to question_preview.
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(mcp_calls)")}
+    if "question_full" not in existing_cols:
+        conn.execute("ALTER TABLE mcp_calls ADD COLUMN question_full TEXT")
     conn.commit()
     # Tighten file permissions to match other ~/.harbormaster state files.
     try:
@@ -150,40 +165,81 @@ class NetworkStore:
         tool: str,
         status: str = "ok",
         question_preview: str = "",
+        question_full: str | None = None,
         duration_ms: int | None = None,
     ) -> NetworkEvent:
+        """Insert one MCP-call event.
+
+        v21.0.8: ``question_full`` (optional) — the untrimmed request
+        text. Stored alongside ``question_preview`` so the chat tab can
+        lazy-load the full body on row expand via
+        ``GET /api/network/events/{id}/full``. When omitted (legacy
+        callers, or call sites with no full text on hand), only the
+        preview is persisted and the lazy fetch returns
+        ``question_full = null``.
+        """
         ts_ms = int(time.time() * 1000)
+        preview = question_preview[:200]
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO mcp_calls "
+                "(timestamp, source, target, tool, status, duration_ms, "
+                " question_preview, question_full) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    ts_ms,
+                    caller or "operator",
+                    target,
+                    tool,
+                    status,
+                    duration_ms,
+                    preview,
+                    question_full,
+                ),
+            )
+            row_id = int(cur.lastrowid) if cur.lastrowid is not None else None
+            self._conn.commit()
+            self._insert_count += 1
+            if self._insert_count % PRUNE_EVERY == 0:
+                self._prune_locked()
         ev = NetworkEvent(
             timestamp_ms=ts_ms,
             caller=caller or "operator",
             target=target,
             tool=tool,
             status=status,
-            question_preview=question_preview[:200],
+            question_preview=preview,
             duration_ms=duration_ms,
+            id=row_id,
         )
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO mcp_calls "
-                "(timestamp, source, target, tool, status, duration_ms, "
-                " question_preview) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    ev.timestamp_ms,
-                    ev.caller,
-                    ev.target,
-                    ev.tool,
-                    ev.status,
-                    ev.duration_ms,
-                    ev.question_preview,
-                ),
-            )
-            self._conn.commit()
-            self._insert_count += 1
-            if self._insert_count % PRUNE_EVERY == 0:
-                self._prune_locked()
         self._notify(ev)
         return ev
+
+    def get_full(self, event_id: int) -> dict[str, str | None] | None:
+        """v21.0.8: fetch the full request text for a single row.
+
+        Used by ``GET /api/network/events/{id}/full`` when the
+        operator expands a chat row. Returns
+        ``{"question_full", "question_preview"}`` or ``None`` if the
+        row doesn't exist. Rows from older builds (pre-v21.0.8) that
+        never recorded the full text return ``question_full=None``;
+        the UI falls back to the preview in that case.
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT question_full, question_preview FROM mcp_calls "
+                "WHERE id = ?",
+                (event_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        full = row[0]
+        preview = row[1]
+        return {
+            "question_full": str(full) if full is not None else None,
+            "question_preview": str(preview or ""),
+        }
 
     def _prune_locked(self) -> None:
         # Keep the last `max_rows` rows by id. SQLite handles the
@@ -249,7 +305,7 @@ class NetworkStore:
         with self._lock:
             cursor = self._conn.execute(
                 "SELECT timestamp, source, target, tool, status, "
-                " duration_ms, question_preview "
+                " duration_ms, question_preview, id "
                 f"FROM mcp_calls {where} "
                 "ORDER BY id DESC "
                 "LIMIT ?",
@@ -267,6 +323,7 @@ class NetworkStore:
                 status=str(r[4]),
                 duration_ms=int(r[5]) if r[5] is not None else None,
                 question_preview=str(r[6] or ""),
+                id=int(r[7]),
             )
             for r in rows
         ]
