@@ -1,10 +1,12 @@
 """Thread-safe SQLite store for async delegated jobs (v22.0.0a2)."""
 from __future__ import annotations
 
+import contextlib
 import secrets
 import sqlite3
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -114,6 +116,18 @@ class JobStore:
         self._conn.execute("PRAGMA synchronous = NORMAL")
         self._conn.executescript(SCHEMA)
         self._lock = threading.Lock()
+        # v22.1.0: blocking-await primitives. Per-job ``Event`` so a
+        # waiter on a specific id wakes on that id's completion; per-
+        # inbox ``Condition`` so a waiter on an inbox wakes when ANY
+        # job in that inbox lands. Lazily created — no event/condition
+        # exists until either a waiter asks for one (via the wait_for
+        # methods) or a completion fires (via _fire_completion).
+        self._job_events: dict[str, threading.Event] = {}
+        self._inbox_conditions: dict[str, threading.Condition] = {}
+        # v22.2.0 hook: subscribers callable on every job state change.
+        # Currently unused by JobStore; the resource-subscription
+        # surface (v22.2.0) registers a callback here.
+        self._subscribers: list[Callable[[Job], None]] = []
         self._apply_migrations()
 
     def _apply_migrations(self) -> None:
@@ -225,6 +239,7 @@ class JobStore:
                 "WHERE id = ?",
                 (STATUS_COMPLETED, output, now, duration_ms, job_id),
             )
+        self._fire_completion(job_id)
 
     def fail(
         self,
@@ -243,6 +258,125 @@ class JobStore:
                 "WHERE id = ?",
                 (STATUS_FAILED, error, cid, now, duration_ms, job_id),
             )
+        self._fire_completion(job_id)
+
+    def _fire_completion(self, job_id: str) -> None:
+        """v22.1.0: wake any waiters parked on this job's Event or
+        its inbox's Condition. Also (v22.2.0) invokes registered
+        subscribers with the final ``Job`` view. Side-effects only —
+        called from ``complete()`` and ``fail()`` after the SQL update
+        commits.
+        """
+        job = self.get(job_id)
+        if job is None:  # pragma: no cover — we just wrote the row
+            return
+        # Per-job Event: sticky one-shot, so order doesn't matter —
+        # ``Event.wait()`` returns immediately if set before the wait.
+        with self._lock:
+            ev = self._job_events.get(job_id)
+            cond = self._inbox_conditions.get(job.inbox_id)
+            subs = list(self._subscribers)
+        if ev is not None:
+            ev.set()
+        if cond is not None:
+            with cond:
+                cond.notify_all()
+        # Subscribers run outside the JobStore lock; any exception
+        # they raise is swallowed (instrumentation must never break
+        # the hot path — pattern from v21.0.6 + v21.0.7).
+        for sub in subs:
+            with contextlib.suppress(Exception):  # pragma: no cover — defensive
+                sub(job)
+
+    def add_subscriber(self, callback: Callable[[Job], None]) -> None:
+        """v22.2.0: register a callable invoked on every job
+        completion/failure with the final ``Job`` view. Subscribers
+        run on the worker thread that completed the job, AFTER all
+        blocking waiters have been notified.
+
+        Idempotent only by identity — call once per subscriber.
+        """
+        with self._lock:
+            if callback not in self._subscribers:
+                self._subscribers.append(callback)
+
+    def remove_subscriber(self, callback: Callable[[Job], None]) -> None:
+        with self._lock, contextlib.suppress(ValueError):
+            self._subscribers.remove(callback)
+
+    def wait_for_job(
+        self, job_id: str, *, timeout_seconds: float,
+    ) -> Job | None:
+        """v22.1.0: block until ``job_id`` completes or fails or
+        ``timeout_seconds`` elapses.
+
+        Returns the current ``Job`` either way — caller checks
+        ``status`` to distinguish "completed within window" from
+        "still running at timeout". Returns ``None`` if the job_id
+        does not exist.
+
+        Fast-path: returns immediately if the job is already in a
+        terminal state when called.
+        """
+        job = self.get(job_id)
+        if job is None:
+            return None
+        if job.status in (STATUS_COMPLETED, STATUS_FAILED):
+            return job
+        with self._lock:
+            ev = self._job_events.get(job_id)
+            if ev is None:
+                ev = threading.Event()
+                self._job_events[job_id] = ev
+        ev.wait(timeout=timeout_seconds)
+        return self.get(job_id)
+
+    def wait_for_inbox(
+        self,
+        inbox_id: str,
+        *,
+        timeout_seconds: float,
+        since: float | None = None,
+    ) -> list[Job]:
+        """v22.1.0: block until at least one job in ``inbox_id`` lands
+        in a terminal state, or ``timeout_seconds`` elapses.
+
+        ``since`` (unix seconds, optional) filters out completions the
+        caller has already seen — pass the largest ``completed_at``
+        from the previous batch. ``None`` means "any unread terminal
+        job in the inbox".
+
+        Returns the unread terminal jobs. Empty list on timeout. The
+        condition is acquired BEFORE the initial pending check to
+        close the race where a job completes between check and wait.
+        """
+        cond = self._get_or_create_inbox_condition(inbox_id)
+
+        def _matching() -> list[Job]:
+            jobs = self.list_pending_for_inbox(inbox_id)
+            if since is not None:
+                jobs = [
+                    j for j in jobs
+                    if j.completed_at is not None and j.completed_at > since
+                ]
+            return jobs
+
+        with cond:
+            existing = _matching()
+            if existing:
+                return existing
+            cond.wait(timeout=timeout_seconds)
+        return _matching()
+
+    def _get_or_create_inbox_condition(
+        self, inbox_id: str,
+    ) -> threading.Condition:
+        with self._lock:
+            cond = self._inbox_conditions.get(inbox_id)
+            if cond is None:
+                cond = threading.Condition()
+                self._inbox_conditions[inbox_id] = cond
+            return cond
 
     def list_recent(
         self,

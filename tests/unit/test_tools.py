@@ -26,6 +26,8 @@ def test_all_v10_tools_registered():
         "recall_qa",  # added in v1.0.0a17 (v1.2 phase 1)
         "get_delegated_task",  # added in v22.0.0a2
         "recall_pending_results",  # added in v22.0.0a3
+        "await_delegated_task",  # added in v22.1.0
+        "await_inbox",  # added in v22.1.0
     }
     missing = expected - names
     assert not missing, f"missing tools: {missing}"
