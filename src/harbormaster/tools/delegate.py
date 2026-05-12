@@ -1,11 +1,14 @@
 """delegate_task MCP tool — delegates work to a project's Claude Code subagent.
 
-The caller (agent A) authorises edits via the ``allow_writes`` parameter.
-The default stays ``False`` so existing call sites keep their read-only
-semantics, but ``allow_writes=True`` now executes the task with edits
-enabled instead of returning an error.
+The caller (agent A) authorises edits via ``allow_writes`` and chooses
+between blocking (``mode="sync"``, default) and fire-and-forget
+(``mode="async"``) execution. Async jobs land in a SQLite-backed
+JobStore; agent A retrieves the result with ``get_delegated_task`` (or,
+in v22.0.0a3+, ``recall_pending_results``).
 """
 from __future__ import annotations
+
+from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
 
@@ -38,6 +41,8 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         allow_writes: bool = False,
         host: str | None = None,
         model: str | None = None,
+        mode: Literal["sync", "async"] = "sync",
+        inbox_id: str = "default",
     ) -> str:
         """Delegate a task to a project's Claude Code subagent.
 
@@ -47,6 +52,19 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         prompt: the subagent edits files directly and returns a summary of
         what changed. The underlying ``--permission-mode bypassPermissions``
         flag is unchanged in both modes; the prompt is what gates behaviour.
+
+        ``mode`` controls blocking vs fire-and-forget:
+
+        - ``"sync"`` (default) blocks until the subagent finishes, then
+          returns the result string — same shape as v22.0.0a1.
+        - ``"async"`` enqueues the task in the JobStore, returns a
+          handle string of the form ``"queued <job_id> (inbox=<id>)"``,
+          and lets a background worker run it. Poll status with
+          ``get_delegated_task(job_id)`` or fetch completed results
+          with ``recall_pending_results(inbox_id)`` (v22.0.0a3+).
+
+        ``inbox_id`` groups async jobs for ``recall_pending_results``;
+        it has no effect when ``mode="sync"``.
 
         When ``[history] auto_ground = true``, the task description is
         prepended with a "Prior context" section listing the top-K past
@@ -60,9 +78,29 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         ``allow_writes=True``, the subagent edits files on the remote host
         and the operator is responsible for pulling/diffing those changes.
         """
-        # Use task + deliverable as the question for recall purposes —
-        # together they describe what we're asking the subagent to do,
-        # which is what matters for matching prior trajectories.
+        if mode == "async":
+            # Late import to break the tools.delegate ↔ jobs.worker
+            # ↔ tools._grounding circular path. The async subsystem
+            # touches tool-helper modules at construction time.
+            from harbormaster.jobs import get_subsystem
+            sub = get_subsystem(config)
+            job = sub.store.enqueue(
+                project=name,
+                host=host,
+                task=task,
+                deliverable=deliverable,
+                allow_writes=allow_writes,
+                model=model,
+                inbox_id=inbox_id,
+            )
+            return (
+                f"queued {job.id} (inbox={job.inbox_id}). "
+                f"Poll with get_delegated_task({job.id!r}) or fetch "
+                f"completed results with recall_pending_results("
+                f"inbox_id={job.inbox_id!r})."
+            )
+
+        # mode == "sync" — existing v22.0.0a1 behaviour.
         grounded = build_grounded_prompt(
             question=f"{task}\n\nDeliverable: {deliverable}",
             project=name,
