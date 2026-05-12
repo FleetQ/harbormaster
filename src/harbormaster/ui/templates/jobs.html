@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block page_title %}Delegated Jobs{% endblock %}
+
+{% block content %}
+<section class="px-6 py-4 max-w-7xl mx-auto"
+         x-data="jobsBoard()"
+         x-init="loadSummary(); loadJobs()">
+
+  <header class="flex items-baseline justify-between mb-4 flex-wrap gap-3">
+    <h2 class="text-lg font-semibold">Async delegated jobs</h2>
+    <div class="flex items-baseline gap-3 text-xs text-foreground-muted">
+      <span x-text="`${summary.queued} queued`"
+            class="px-2 py-0.5 rounded bg-surface-2 border border-border"></span>
+      <span x-text="`${summary.running} running`"
+            class="px-2 py-0.5 rounded bg-surface-2 border border-border"></span>
+      <span x-text="`${summary.completed_today} completed (24h)`"
+            class="px-2 py-0.5 rounded bg-surface-2 border border-border"></span>
+      <span x-text="`${summary.failed_today} failed (24h)`"
+            class="px-2 py-0.5 rounded bg-surface-2 border border-border"></span>
+      <button @click="loadSummary(); loadJobs()"
+              class="ml-2 px-2 py-0.5 rounded border border-border hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              aria-label="Reload jobs and summary"
+              title="Reload">↻</button>
+    </div>
+  </header>
+
+  {# Status filter chips. #}
+  <nav class="flex gap-2 mb-3 flex-wrap" aria-label="Filter by status">
+    <template x-for="opt in statusOptions" :key="opt.value">
+      <button type="button"
+              @click="statusFilter = opt.value; loadJobs()"
+              :aria-label="`Filter: ${opt.label}`"
+              :aria-pressed="statusFilter === opt.value"
+              :class="['px-3 py-1 rounded-full text-xs border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                       statusFilter === opt.value
+                         ? 'bg-accent text-on-accent border-accent'
+                         : 'bg-surface-2 border-border hover:bg-surface-3']"
+              x-text="opt.label"></button>
+    </template>
+  </nav>
+
+  {# Empty / loading states. #}
+  <div x-show="loading && !jobs.length"
+       class="text-sm text-foreground-muted py-8 text-center"
+       data-empty-state="jobs.loading">Loading…</div>
+
+  <div x-show="!loading && !jobs.length"
+       class="text-sm text-foreground-muted py-12 text-center border border-dashed border-border rounded"
+       data-empty-state="jobs.no-jobs">
+    <p class="mb-1">No delegated jobs yet.</p>
+    <p class="text-xs">
+      Call <code class="text-accent">delegate_task(..., mode="async")</code>
+      from an MCP-connected agent to enqueue work — it lands here
+      while the worker processes it.
+    </p>
+  </div>
+
+  {# Table. #}
+  <table x-show="jobs.length" class="w-full text-sm border-collapse">
+    <thead class="text-xs uppercase text-foreground-muted">
+      <tr class="border-b border-border">
+        <th class="text-left py-2 pr-2 w-6"></th>
+        <th class="text-left py-2 pr-2">Project</th>
+        <th class="text-left py-2 pr-2">Task</th>
+        <th class="text-left py-2 pr-2">Inbox</th>
+        <th class="text-left py-2 pr-2">Status</th>
+        <th class="text-right py-2 pr-2">Duration</th>
+        <th class="text-right py-2">Age</th>
+      </tr>
+    </thead>
+    <tbody>
+      <template x-for="job in jobs" :key="job.job_id">
+        <template x-if="true">
+          <tr-block style="display: contents">
+            <tr class="border-b border-border hover:bg-surface-2 cursor-pointer"
+                @click="toggleExpand(job.job_id)">
+              <td class="py-2 pr-2 align-top text-foreground-muted"
+                  x-text="expanded[job.job_id] ? '▾' : '▸'"></td>
+              <td class="py-2 pr-2 align-top">
+                <a :href="`/projects/${job.project}`"
+                   class="text-accent hover:underline"
+                   @click.stop
+                   x-text="job.project"></a>
+                <template x-if="job.host">
+                  <span class="ml-1 text-xs text-foreground-muted"
+                        x-text="`@${job.host}`"></span>
+                </template>
+              </td>
+              <td class="py-2 pr-2 align-top max-w-md truncate"
+                  :title="job.task"
+                  x-text="job.task"></td>
+              <td class="py-2 pr-2 align-top text-xs text-foreground-muted"
+                  x-text="job.inbox_id"></td>
+              <td class="py-2 pr-2 align-top">
+                <span :class="statusBadgeClasses(job.status)"
+                      x-text="job.status"></span>
+                <template x-if="job.allow_writes">
+                  <span class="ml-1 text-xs px-1 py-0.5 rounded bg-surface-3 border border-border"
+                        title="allow_writes=true">writes</span>
+                </template>
+              </td>
+              <td class="py-2 pr-2 align-top text-right text-xs text-foreground-muted"
+                  x-text="job.duration_ms !== null ? `${(job.duration_ms / 1000).toFixed(1)}s` : '—'"></td>
+              <td class="py-2 align-top text-right text-xs text-foreground-muted"
+                  x-text="formatAge(job)"></td>
+            </tr>
+            <template x-if="expanded[job.job_id]">
+              <tr class="bg-surface-2 border-b border-border">
+                <td colspan="7" class="py-3 px-4">
+                  <div x-data="{ full: null, loadError: null, busy: true }"
+                       x-init="loadFull(job.job_id, $data)">
+                    <template x-if="busy">
+                      <div class="text-xs text-foreground-muted">Loading full payload…</div>
+                    </template>
+                    <template x-if="loadError">
+                      <div class="text-xs text-error" x-text="`Failed to load: ${loadError}`"></div>
+                    </template>
+                    <template x-if="full && !busy">
+                      <div class="space-y-2">
+                        <div class="text-xs grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-foreground-muted">
+                          <div><strong class="text-foreground">job_id:</strong>
+                            <code x-text="full.job_id"></code></div>
+                          <div><strong class="text-foreground">cid:</strong>
+                            <code x-text="full.cid || '—'"></code></div>
+                          <div><strong class="text-foreground">model:</strong>
+                            <span x-text="full.model || '(default)'"></span></div>
+                          <div><strong class="text-foreground">deliverable:</strong>
+                            <span x-text="full.deliverable"></span></div>
+                        </div>
+                        <template x-if="full.output">
+                          <details class="bg-surface-1 rounded border border-border" open>
+                            <summary class="cursor-pointer text-xs px-2 py-1 text-foreground-muted">
+                              output
+                            </summary>
+                            <pre class="px-3 py-2 text-xs whitespace-pre-wrap overflow-x-auto"
+                                 x-text="full.output"></pre>
+                          </details>
+                        </template>
+                        <template x-if="full.error">
+                          <details class="bg-error/10 rounded border border-error" open>
+                            <summary class="cursor-pointer text-xs px-2 py-1 text-error">
+                              error
+                            </summary>
+                            <pre class="px-3 py-2 text-xs whitespace-pre-wrap overflow-x-auto"
+                                 x-text="full.error"></pre>
+                          </details>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tr-block>
+        </template>
+      </template>
+    </tbody>
+  </table>
+</section>
+
+<script>
+  function jobsBoard() {
+    return {
+      jobs: [],
+      summary: {queued: 0, running: 0, completed_today: 0, failed_today: 0},
+      statusFilter: 'all',
+      loading: true,
+      expanded: {},
+      statusOptions: [
+        { value: 'all',       label: 'All' },
+        { value: 'queued',    label: 'Queued' },
+        { value: 'running',   label: 'Running' },
+        { value: 'completed', label: 'Completed' },
+        { value: 'failed',    label: 'Failed' },
+      ],
+
+      async loadJobs() {
+        this.loading = true;
+        const params = new URLSearchParams({limit: 200});
+        if (this.statusFilter !== 'all') params.set('status', this.statusFilter);
+        try {
+          const r = await fetch(`/api/delegated-jobs?${params}`);
+          if (!r.ok) throw new Error(`${r.status}`);
+          const j = await r.json();
+          this.jobs = j.jobs || [];
+        } catch (e) {
+          this.jobs = [];
+        } finally {
+          this.loading = false;
+        }
+      },
+
+      async loadSummary() {
+        try {
+          const r = await fetch('/api/delegated-jobs/summary');
+          if (r.ok) this.summary = await r.json();
+        } catch (e) { /* keep previous values */ }
+      },
+
+      toggleExpand(jobId) {
+        if (this.expanded[jobId]) {
+          delete this.expanded[jobId];
+        } else {
+          this.expanded[jobId] = true;
+        }
+      },
+
+      statusBadgeClasses(status) {
+        const base = 'inline-block px-2 py-0.5 rounded text-xs font-medium border';
+        return {
+          queued:    `${base} bg-surface-2 border-border text-foreground-muted`,
+          running:   `${base} bg-accent/10 border-accent text-accent`,
+          completed: `${base} bg-success/10 border-success text-success`,
+          failed:    `${base} bg-error/10 border-error text-error`,
+        }[status] || base;
+      },
+
+      formatAge(job) {
+        const t = job.completed_at || job.started_at || job.queued_at;
+        if (!t) return '';
+        const secs = Math.floor(Date.now() / 1000 - t);
+        if (secs < 60) return `${secs}s ago`;
+        if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+        if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+        return `${Math.floor(secs / 86400)}d ago`;
+      },
+    };
+  }
+
+  async function loadFull(jobId, scope) {
+    scope.busy = true;
+    scope.loadError = null;
+    try {
+      const r = await fetch(`/api/delegated-jobs/${encodeURIComponent(jobId)}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      scope.full = await r.json();
+    } catch (e) {
+      scope.loadError = String(e);
+    } finally {
+      scope.busy = false;
+    }
+  }
+</script>
+{% endblock %}
