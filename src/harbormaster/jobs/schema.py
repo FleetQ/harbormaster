@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS delegated_jobs (
     started_at REAL,
     completed_at REAL,
     duration_ms INTEGER,
-    read_at REAL
+    read_at REAL,
+    max_turns INTEGER NOT NULL DEFAULT 10
 );
 
 CREATE INDEX IF NOT EXISTS idx_delegated_jobs_status
@@ -40,3 +41,15 @@ STATUS_FAILED = "failed"
 VALID_STATUSES = frozenset({
     STATUS_QUEUED, STATUS_RUNNING, STATUS_COMPLETED, STATUS_FAILED,
 })
+
+# Idempotent ``ALTER TABLE ADD COLUMN`` migrations applied on
+# ``JobStore`` open, in addition to the ``CREATE TABLE IF NOT EXISTS``
+# above. Each entry is ``(column_name, full_column_definition)``.
+# Pattern carried over from v21.0.8's network_log.db: PRAGMA
+# table_info + ALTER when missing.
+MIGRATIONS: list[tuple[str, str]] = [
+    # v22.0.1 — caller-supplied turn budget. Default 10 matches the
+    # pre-v22.0.1 hardcoded value so existing rows keep the same
+    # behaviour after upgrade.
+    ("max_turns", "max_turns INTEGER NOT NULL DEFAULT 10"),
+]

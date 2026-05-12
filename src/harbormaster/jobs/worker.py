@@ -103,7 +103,7 @@ class JobWorker:
             result = run_backend(
                 name=job.project,
                 prompt=prompt,
-                max_turns=10,
+                max_turns=job.max_turns,
                 host=job.host,
                 config=self._config,
                 label_prefix="delegate.async",

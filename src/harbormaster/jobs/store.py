@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from harbormaster.jobs.schema import (
+    MIGRATIONS,
     SCHEMA,
     STATUS_COMPLETED,
     STATUS_FAILED,
@@ -39,6 +40,7 @@ class Job:
     completed_at: float | None
     duration_ms: int | None
     read_at: float | None
+    max_turns: int = 10
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable view (booleans normalised, no nulls
@@ -61,6 +63,7 @@ class Job:
             "completed_at": self.completed_at,
             "duration_ms": self.duration_ms,
             "read_at": self.read_at,
+            "max_turns": self.max_turns,
         }
 
 
@@ -83,6 +86,7 @@ def _row_to_job(row: sqlite3.Row) -> Job:
         completed_at=row["completed_at"],
         duration_ms=row["duration_ms"],
         read_at=row["read_at"],
+        max_turns=row["max_turns"],
     )
 
 
@@ -110,6 +114,30 @@ class JobStore:
         self._conn.execute("PRAGMA synchronous = NORMAL")
         self._conn.executescript(SCHEMA)
         self._lock = threading.Lock()
+        self._apply_migrations()
+
+    def _apply_migrations(self) -> None:
+        """v22.0.1: idempotently ``ALTER TABLE ADD COLUMN`` for any
+        entry in ``MIGRATIONS`` not already present. Pattern carried
+        over from v21.0.8's ``network_log.db`` — PRAGMA table_info
+        names every existing column, ALTER TABLE ADD only the missing
+        ones.
+
+        Schema-only migrations (column adds with simple defaults) are
+        the only shape supported here. Anything that needs a data
+        backfill belongs in an explicit one-shot helper.
+        """
+        with self._lock:
+            existing = {
+                row["name"] for row in self._conn.execute(
+                    "PRAGMA table_info(delegated_jobs)",
+                ).fetchall()
+            }
+            for name, ddl in MIGRATIONS:
+                if name not in existing:
+                    self._conn.execute(
+                        f"ALTER TABLE delegated_jobs ADD COLUMN {ddl}",
+                    )
 
     @staticmethod
     def _new_job_id() -> str:
@@ -129,8 +157,13 @@ class JobStore:
         allow_writes: bool,
         model: str | None,
         inbox_id: str = "default",
+        max_turns: int = 10,
     ) -> Job:
         """Insert a ``queued`` row and return its typed view.
+
+        ``max_turns`` (v22.0.1) is the per-job turn budget the worker
+        passes to ``run_backend``. Default 10 matches the pre-v22.0.1
+        hardcoded value, so existing callers see identical behaviour.
 
         The worker thread polls for queued rows and claims them
         atomically via :meth:`claim_next_queued`.
@@ -141,11 +174,12 @@ class JobStore:
             self._conn.execute(
                 "INSERT INTO delegated_jobs ("
                 "id, inbox_id, project, host, task, deliverable, "
-                "allow_writes, model, status, queued_at"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "allow_writes, model, status, queued_at, max_turns"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     job_id, inbox_id, project, host, task, deliverable,
                     1 if allow_writes else 0, model, STATUS_QUEUED, now,
+                    max_turns,
                 ),
             )
         job = self.get(job_id)

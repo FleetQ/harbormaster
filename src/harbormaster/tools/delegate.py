@@ -43,6 +43,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         model: str | None = None,
         mode: Literal["sync", "async"] = "sync",
         inbox_id: str = "default",
+        max_turns: int = 10,
     ) -> str:
         """Delegate a task to a project's Claude Code subagent.
 
@@ -77,6 +78,16 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         SSH/remote writes share the same gate — if ``host`` is set and
         ``allow_writes=True``, the subagent edits files on the remote host
         and the operator is responsible for pulling/diffing those changes.
+
+        ``max_turns`` (v22.0.1) caps how many tool-use turns the
+        subagent gets before ``claude -p`` exits. Default 10 matches
+        the historical hardcoded value — fine for short read-only
+        questions. Non-trivial writes (multi-file edits, tests,
+        commit) typically need 30-80 turns; set explicitly per call
+        rather than guessing. Hitting the cap surfaces as
+        ``code=exit_nonzero: claude -p exit 1: (no stderr)`` because
+        the subagent reaches ``max_turns_reached`` before producing
+        a final result.
         """
         if mode == "async":
             # Late import to break the tools.delegate ↔ jobs.worker
@@ -92,6 +103,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                 allow_writes=allow_writes,
                 model=model,
                 inbox_id=inbox_id,
+                max_turns=max_turns,
             )
             return (
                 f"queued {job.id} (inbox={job.inbox_id}). "
@@ -112,7 +124,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         return run_backend(
             name=name,
             prompt=full_prompt,
-            max_turns=10,
+            max_turns=max_turns,
             host=host,
             config=config,
             label_prefix="delegate",

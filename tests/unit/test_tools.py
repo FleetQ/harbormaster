@@ -51,6 +51,29 @@ def test_delegate_task_read_only_prompt_when_writes_disallowed(monkeypatch):
     assert "You may edit files" not in captured["prompt"]
 
 
+def test_delegate_task_passes_max_turns_to_run_backend(monkeypatch):
+    """v22.0.1: ``max_turns`` parameter overrides the historical
+    hardcoded 10 on the sync path."""
+    from harbormaster.tools import delegate as _delegate
+
+    captured: dict[str, int] = {}
+
+    def fake_run_backend(*, max_turns, **_kwargs):
+        captured["max_turns"] = max_turns
+        return "ok"
+
+    monkeypatch.setattr(_delegate, "run_backend", fake_run_backend)
+
+    mcp = build_server(HarbormasterConfig())
+    fn = _tools_by_name(mcp)["delegate_task"].fn
+    # Default — backward-compat with v22.0.0.
+    fn(name="anything", task="t", deliverable="d")
+    assert captured["max_turns"] == 10
+    # Explicit override.
+    fn(name="anything", task="t", deliverable="d", max_turns=50)
+    assert captured["max_turns"] == 50
+
+
 def test_delegate_task_writes_prompt_when_allowed(monkeypatch):
     """allow_writes=True (v22.0.0a1) renders the writes-allowed prompt
     instead of returning a v1-era 'fails closed' error."""

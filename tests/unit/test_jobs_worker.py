@@ -72,6 +72,37 @@ def test_worker_completes_queued_job(tmp_path: Path, monkeypatch):
     assert final.duration_ms is not None and final.duration_ms >= 0
 
 
+def test_worker_passes_job_max_turns_to_run_backend(tmp_path, monkeypatch):
+    """v22.0.1: each job's persisted max_turns is what the worker
+    feeds run_backend, NOT a hardcoded 10."""
+    from harbormaster.jobs import worker as _worker
+
+    captured: dict[str, int] = {}
+
+    def fake_run(*, max_turns, **_kw):
+        captured["max_turns"] = max_turns
+        return "ok"
+
+    monkeypatch.setattr(_worker, "run_backend", fake_run)
+    monkeypatch.setattr(_worker, "build_grounded_prompt", lambda **k: "x")
+
+    store = JobStore(tmp_path / "jobs.db")
+    job = store.enqueue(
+        project="alpha", host=None, task="t", deliverable="d",
+        allow_writes=False, model=None, max_turns=42,
+    )
+    w = JobWorker(config=HarbormasterConfig(), store=store, poll_interval_s=0.01)
+    w.start()
+    try:
+        assert _wait_until(
+            lambda: (g := store.get(job.id)) is not None and g.status == STATUS_COMPLETED,
+        )
+    finally:
+        w.stop(timeout=1.0)
+
+    assert captured["max_turns"] == 42
+
+
 def test_worker_records_failure_when_run_backend_returns_error_string(
     tmp_path: Path, monkeypatch,
 ):

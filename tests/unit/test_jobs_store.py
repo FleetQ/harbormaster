@@ -166,6 +166,58 @@ def test_list_recent_filters_by_project_and_status(store: JobStore):
     assert {j.project for j in queued_jobs} == {"beta"}
 
 
+def test_enqueue_stores_max_turns(store: JobStore):
+    """v22.0.1: per-job max_turns is persisted and round-trips."""
+    default_job = store.enqueue(
+        project="alpha", host=None, task="t", deliverable="d",
+        allow_writes=False, model=None,
+    )
+    custom_job = store.enqueue(
+        project="alpha", host=None, task="t", deliverable="d",
+        allow_writes=False, model=None, max_turns=75,
+    )
+    assert default_job.max_turns == 10
+    assert custom_job.max_turns == 75
+    reloaded_default = store.get(default_job.id)
+    reloaded_custom = store.get(custom_job.id)
+    assert reloaded_default is not None and reloaded_default.max_turns == 10
+    assert reloaded_custom is not None and reloaded_custom.max_turns == 75
+
+
+def test_migration_adds_max_turns_to_pre_v22_0_1_db(tmp_path):
+    """An existing v22.0.0 DB lacking max_turns gets the column
+    on next open. Reproduces the upgrade-in-place path."""
+    import sqlite3
+
+    db = tmp_path / "legacy.db"
+    # Hand-craft a v22.0.0 schema (no max_turns column).
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        """
+        CREATE TABLE delegated_jobs (
+            id TEXT PRIMARY KEY,
+            inbox_id TEXT NOT NULL DEFAULT 'default',
+            project TEXT NOT NULL,
+            host TEXT, task TEXT NOT NULL, deliverable TEXT NOT NULL,
+            allow_writes INTEGER NOT NULL, model TEXT,
+            status TEXT NOT NULL, output TEXT, error TEXT, cid TEXT,
+            queued_at REAL NOT NULL, started_at REAL, completed_at REAL,
+            duration_ms INTEGER, read_at REAL
+        );
+        INSERT INTO delegated_jobs (
+          id, project, task, deliverable, allow_writes, status, queued_at
+        ) VALUES ('d_legacy01', 'alpha', 't', 'd', 0, 'completed', 1.0);
+        """
+    )
+    conn.close()
+
+    # Open through JobStore — _apply_migrations should ADD COLUMN.
+    store = JobStore(db)
+    job = store.get("d_legacy01")
+    assert job is not None
+    assert job.max_turns == 10  # default backfill
+
+
 def test_inbox_pending_excludes_running_and_read(store: JobStore):
     j1 = store.enqueue(
         project="alpha", host=None, task="t", deliverable="d",
