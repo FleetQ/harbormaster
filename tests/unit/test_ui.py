@@ -1408,32 +1408,35 @@ async def test_stream_local_tool_delegate_task_yields_chunks(
     assert "Read-only mode" in prompt
 
 
-@pytest.mark.asyncio
-async def test_stream_local_tool_delegate_task_400_on_allow_writes(populated_config):
-    """delegate_task with allow_writes=true is disabled in v1; must
-    surface as a 400 error event before any subprocess is spawned."""
-    import json as _json
+def test_delegate_task_prompt_renders_writes_suffix_when_allowed():
+    """v22.0.0a1: allow_writes=true is no longer a 400 — the prompt
+    builder renders the writes-allowed suffix and the stream path runs
+    normally."""
+    from harbormaster.ui.routes import _delegate_task_prompt
 
-    from harbormaster.ui.routes import _delegate_task_prompt, _stream_local_tool
-
-    events = []
-    async for evt in _stream_local_tool(
-        populated_config,
+    prompt = _delegate_task_prompt(
         {
             "name": "alpha",
             "task": "edit auth.py",
             "deliverable": "patch",
             "allow_writes": True,
-        },
-        _delegate_task_prompt, max_turns_default=10,
-    ):
-        events.append(evt)
+        }
+    )
+    assert "Task: edit auth.py" in prompt
+    assert "Deliverable: patch" in prompt
+    assert "You may edit files" in prompt
+    assert "Read-only mode" not in prompt
 
-    assert len(events) == 1
-    assert events[0]["event"] == "error"
-    err = _json.loads(events[0]["data"])
-    assert err["status"] == 400
-    assert "allow_writes" in err["detail"]
+
+def test_delegate_task_prompt_renders_read_only_suffix_by_default():
+    """allow_writes is False by default — the read-only suffix is rendered."""
+    from harbormaster.ui.routes import _delegate_task_prompt
+
+    prompt = _delegate_task_prompt(
+        {"name": "alpha", "task": "audit", "deliverable": "report"}
+    )
+    assert "Read-only mode" in prompt
+    assert "You may edit files" not in prompt
 
 
 @pytest.mark.asyncio

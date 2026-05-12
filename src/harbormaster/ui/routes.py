@@ -3039,14 +3039,15 @@ def register_routes(
                     "id": f"delegate-{project_name}",
                     "name": "Delegate",
                     "description": (
-                        f"Delegate a read-only task to the {project_name} "
-                        "subagent. v1 fails closed when allow_writes=true; "
-                        "the subagent reports what it would do without "
-                        "actually editing files. Streams partial output "
-                        "via SSE when invoked with Accept: "
-                        "text/event-stream."
+                        f"Delegate a task to the {project_name} subagent. "
+                        "Pass allow_writes=true to authorise edits "
+                        "(the subagent applies them directly and returns "
+                        "a change-summary); allow_writes=false (default) "
+                        "keeps it read-only and the subagent returns a "
+                        "plan. Streams partial output via SSE when invoked "
+                        "with Accept: text/event-stream."
                     ),
-                    "tags": ["read", "claude-code", "streaming"],
+                    "tags": ["claude-code", "streaming"],
                     "inputModes": ["text/plain"],
                     "outputModes": ["text/event-stream", "application/json"],
                 },
@@ -3278,17 +3279,25 @@ def _delegate_task_prompt(arguments: dict[str, Any]) -> str:
     if not isinstance(deliverable, str) or not deliverable:
         raise ValueError("params.arguments.deliverable (string) is required")
     if arguments.get("allow_writes"):
-        raise ValueError(
-            "delegate_task with allow_writes=true is disabled in v1; "
-            "use ask_project for read-only questions"
+        # v22.0.0a1: caller-authorised writes. Subagent edits files
+        # directly and returns a change-summary; bypassPermissions is
+        # already enabled at the backend layer so the prompt is what
+        # gates behaviour.
+        suffix = (
+            "You may edit files in this project. Make the change directly, "
+            "then return a markdown summary under 500 words listing: "
+            "(1) files changed with one-line reasons, "
+            "(2) any new tests added, "
+            "(3) follow-ups left for the operator. "
+            "Do NOT git commit — the operator will review and commit."
         )
-    return (
-        f"Task: {task}\n\n"
-        f"Deliverable: {deliverable}\n\n"
-        "Read-only mode. Do NOT edit files. "
-        "Report what you would do and which files you would touch. "
-        "Return markdown under 500 words."
-    )
+    else:
+        suffix = (
+            "Read-only mode. Do NOT edit files. "
+            "Report what you would do and which files you would touch. "
+            "Return markdown under 500 words."
+        )
+    return f"Task: {task}\n\nDeliverable: {deliverable}\n\n{suffix}"
 
 
 _STREAMING_TOOLS: dict[str, PromptBuilder] = {

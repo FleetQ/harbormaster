@@ -179,7 +179,7 @@ All tools are registered against a single FastMCP server, exposed over both stdi
 | `project_status(name, host=None)` | v1.0 | Git log, Serena memory headers, log tails. |
 | `ask_project(name, question, max_turns=5, host=None, backend=None)` | v1.0 | Spawn subagent, return ≤800-word summary. |
 | `fan_out_ask(question, project_filter=None, host_filter=None, max_concurrency=5)` | v1.0 | Parallel multi-project Q&A with map-reduce synthesis. |
-| `delegate_task(name, task, deliverable, allow_writes=False, host=None)` | v1.0 | Read-only delegation; remote writes always rejected. |
+| `delegate_task(name, task, deliverable, allow_writes=False, host=None)` | v1.0 / v22.0.0a1 | Delegation. `allow_writes=true` (v22.0.0a1+) authorises edits via prompt branch; default stays read-only. Works for both local and SSH hosts. |
 | `recall_qa(query, top_k=5)` | v1.2 | Semantic recall of past Q&As. |
 
 Schemas use pydantic models. JSON Schema is auto-generated for MCP advertisement.

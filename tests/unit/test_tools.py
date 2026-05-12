@@ -29,11 +29,46 @@ def test_all_v10_tools_registered():
     assert not missing, f"missing tools: {missing}"
 
 
-def test_delegate_task_fails_closed_for_writes():
+def test_delegate_task_read_only_prompt_when_writes_disallowed(monkeypatch):
+    """allow_writes=False renders the read-only prompt suffix."""
+    from harbormaster.tools import delegate as _delegate
+
+    captured: dict[str, str] = {}
+
+    def fake_run_backend(*, prompt, **_kwargs):
+        captured["prompt"] = prompt
+        return "ok"
+
+    monkeypatch.setattr(_delegate, "run_backend", fake_run_backend)
+
+    mcp = build_server(HarbormasterConfig())
+    fn = _tools_by_name(mcp)["delegate_task"].fn
+    out = fn(name="anything", task="t", deliverable="d", allow_writes=False)
+    assert out == "ok"
+    assert "Read-only mode" in captured["prompt"]
+    assert "You may edit files" not in captured["prompt"]
+
+
+def test_delegate_task_writes_prompt_when_allowed(monkeypatch):
+    """allow_writes=True (v22.0.0a1) renders the writes-allowed prompt
+    instead of returning a v1-era 'fails closed' error."""
+    from harbormaster.tools import delegate as _delegate
+
+    captured: dict[str, str] = {}
+
+    def fake_run_backend(*, prompt, **_kwargs):
+        captured["prompt"] = prompt
+        return "ok"
+
+    monkeypatch.setattr(_delegate, "run_backend", fake_run_backend)
+
     mcp = build_server(HarbormasterConfig())
     fn = _tools_by_name(mcp)["delegate_task"].fn
     out = fn(name="anything", task="t", deliverable="d", allow_writes=True)
-    assert "Error" in out and "v1" in out
+    assert out == "ok"
+    assert "You may edit files" in captured["prompt"]
+    assert "Read-only mode" not in captured["prompt"]
+    assert "files changed" in captured["prompt"]
 
 
 def test_list_hosts_returns_list():
