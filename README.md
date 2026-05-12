@@ -128,7 +128,7 @@ Zero-config by default: Harbormaster auto-discovers projects under
 
 ## Tools
 
-Eight MCP tools, all optionally targetable at a remote host via `host="<label>"`.
+Ten MCP tools, all optionally targetable at a remote host via `host="<label>"`.
 
 | Tool | Purpose | Cost |
 |---|---|---|
@@ -136,7 +136,9 @@ Eight MCP tools, all optionally targetable at a remote host via `host="<label>"`
 | `list_hosts()` | Configured `[hosts]` plus `~/.ssh/config` Host aliases. | ~5 ms |
 | `project_status(name, host=None)` | Git log, Serena memory list, log tails. | ~200 ms / ~2 s |
 | `ask_project(name, question, max_turns=5, host=None)` | Spawn `claude -p` (or configured backend) in project cwd, return ≤ 800-word summary. | ~30 s / ~90 s |
-| `delegate_task(name, task, deliverable, allow_writes=False, host=None)` | Delegate a task; `allow_writes=true` lets the subagent edit files directly, `false` (default) keeps it read-only and the subagent returns a plan. | ~60 s / ~90 s |
+| `delegate_task(name, task, deliverable, allow_writes=False, mode="sync", inbox_id="default", host=None)` | Delegate a task; `allow_writes=true` lets the subagent edit files directly, `false` (default) keeps it read-only. `mode="async"` enqueues and returns immediately; the caller polls with `get_delegated_task` or drains the inbox with `recall_pending_results`. | sync: ~60 s / async: ~5 ms enqueue |
+| `get_delegated_task(job_id)` | v22.0.0 — status of one async delegated job. | ~5 ms |
+| `recall_pending_results(inbox_id, mark_read=True, limit=50)` | v22.0.0 — drain completed/failed async jobs from one inbox (FIFO on completion). | ~10 ms |
 | `fan_out_ask(question, project_filter=None, host_filter=None, max_concurrency=5, max_turns=3)` | Parallel multi-project Q&A; one section per target. | ~`max_turns × backend_time × ⌈targets / max_concurrency⌉` |
 | `recall_qa(question, top_k=5, host=None, project=None, min_similarity=0.6)` | Semantic recall over prior Q&A answers. Opt-in via `[history] enabled = true`. | ~50 ms (FTS5) / ~150 ms (vec, after warm-up) |
 | `project_graph(format="json", include_dev_deps=False, transitive=False)` | Cross-project dependency graph from manifest parsing. Returns nodes + edges + optional Mermaid markup. | ~100 ms / ~10 ms cached |
