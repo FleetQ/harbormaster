@@ -4,7 +4,8 @@
 {% block content %}
 <section class="px-6 py-4 max-w-7xl mx-auto"
          x-data="jobsBoard()"
-         x-init="loadSummary(); loadJobs()">
+         x-init="loadSummary(); loadJobs(); connectStream()"
+         x-on:beforeunload.window="disconnectStream()">
 
   <header class="flex items-baseline justify-between mb-4 flex-wrap gap-3">
     <h2 class="text-lg font-semibold">Async delegated jobs</h2>
@@ -166,6 +167,7 @@
       statusFilter: 'all',
       loading: true,
       expanded: {},
+      _eventSource: null,
       statusOptions: [
         { value: 'all',       label: 'All' },
         { value: 'queued',    label: 'Queued' },
@@ -173,6 +175,49 @@
         { value: 'completed', label: 'Completed' },
         { value: 'failed',    label: 'Failed' },
       ],
+
+      connectStream() {
+        // v22.2.0: live-update via SSE. Each completion / failure
+        // arrives as an `event: event` frame with the full Job dict.
+        // Heartbeats are sent on `event: heartbeat` and ignored
+        // client-side (the default `message` handler is never wired).
+        if (this._eventSource) return;
+        try {
+          const es = new EventSource('/api/delegated-jobs/stream');
+          es.addEventListener('event', (msg) => {
+            try {
+              this._applyJobUpdate(JSON.parse(msg.data));
+            } catch (e) { /* ignore malformed */ }
+          });
+          this._eventSource = es;
+        } catch (e) { /* SSE unsupported — operator can still reload */ }
+      },
+
+      disconnectStream() {
+        if (this._eventSource) {
+          this._eventSource.close();
+          this._eventSource = null;
+        }
+      },
+
+      _applyJobUpdate(job) {
+        // Patch the row in place if visible; refresh the summary
+        // strip on every event (cheap aggregate, keeps counters in
+        // sync with reality).
+        const idx = this.jobs.findIndex(j => j.job_id === job.job_id);
+        const visible =
+          this.statusFilter === 'all' || this.statusFilter === job.status;
+        if (idx >= 0) {
+          if (visible) {
+            this.jobs.splice(idx, 1, job);
+          } else {
+            this.jobs.splice(idx, 1);
+          }
+        } else if (visible) {
+          this.jobs.unshift(job);
+        }
+        this.loadSummary();
+      },
 
       async loadJobs() {
         this.loading = true;

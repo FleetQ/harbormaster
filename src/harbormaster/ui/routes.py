@@ -984,6 +984,39 @@ def register_routes(
 
         return await asyncio.to_thread(_counts)
 
+    @app.get("/api/delegated-jobs/stream")
+    async def stream_delegated_jobs() -> EventSourceResponse:
+        """v22.2.0: SSE stream of job state changes.
+
+        Each completion or failure pushes an ``event: event`` frame
+        carrying the full ``Job.as_dict()`` payload. Periodic
+        ``event: heartbeat`` frames keep proxies from idle-timing-out
+        the connection — same cadence config as the network stream.
+        """
+        import json as _json
+
+        from harbormaster.jobs import get_subsystem
+
+        sub = get_subsystem(config)
+        heartbeat_s = config.server.heartbeat_interval_network_s
+
+        async def gen() -> AsyncIterator[dict[str, str]]:
+            queue = sub.broadcaster.subscribe()
+            try:
+                while True:
+                    try:
+                        ev = await asyncio.wait_for(
+                            queue.get(), timeout=heartbeat_s,
+                        )
+                    except TimeoutError:
+                        yield {"event": "heartbeat", "data": "{}"}
+                        continue
+                    yield {"event": "event", "data": _json.dumps(ev)}
+            finally:
+                sub.broadcaster.unsubscribe(queue)
+
+        return EventSourceResponse(gen())
+
     @app.get("/api/delegated-jobs/{job_id}")
     async def get_delegated_job(job_id: str) -> dict[str, object]:
         """v22.0.0a4: fetch one job by id. 404 on unknown.

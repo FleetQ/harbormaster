@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from harbormaster.config import HarbormasterConfig
+from harbormaster.jobs.broadcaster import JobEventBroadcaster
 from harbormaster.jobs.store import JobStore
 from harbormaster.jobs.worker import JobWorker
 
@@ -32,6 +33,7 @@ _singleton: Subsystem | None = None
 class Subsystem:
     store: JobStore
     worker: JobWorker
+    broadcaster: JobEventBroadcaster
 
     def shutdown(self) -> None:
         self.worker.stop()
@@ -68,7 +70,14 @@ def get_subsystem(config: HarbormasterConfig) -> Subsystem:
             )
         worker = JobWorker(config=config, store=store)
         worker.start()
-        _singleton = Subsystem(store=store, worker=worker)
+        broadcaster = JobEventBroadcaster()
+        # v22.2.0: bridge JobStore's sync subscriber hook to the
+        # broadcaster's threadsafe publish so SSE consumers (and any
+        # future push transport) receive every completion / failure.
+        store.add_subscriber(broadcaster.publish_threadsafe)
+        _singleton = Subsystem(
+            store=store, worker=worker, broadcaster=broadcaster,
+        )
         _LOG.info("delegate-job subsystem ready at %s", db_path)
         return _singleton
 
