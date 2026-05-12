@@ -12,6 +12,7 @@ from harbormaster.tools.delegate import register as register_delegate
 from harbormaster.tools.fan_out import register as register_fan_out
 from harbormaster.tools.graph import register as register_graph
 from harbormaster.tools.hosts import register as register_hosts
+from harbormaster.tools.inbox import register as register_inbox
 from harbormaster.tools.job_status import register as register_job_status
 from harbormaster.tools.projects import register as register_projects
 from harbormaster.tools.recall import register as register_recall
@@ -28,6 +29,7 @@ def register_tools(mcp: FastMCP, config: HarbormasterConfig) -> None:
     register_recall(mcp, config)
     register_graph(mcp, config)
     register_job_status(mcp, config)
+    register_inbox(mcp, config)
 
     # v2.0.0a4: opt-in entry-point plugin discovery. No-op (with a
     # single debug log) when [plugins].enabled is false.
