@@ -38,6 +38,18 @@ _WRITES_SUFFIX = (
     "Do NOT git commit — the operator will review and commit."
 )
 
+_WRITES_AUTO_COMMIT_SUFFIX = (
+    "You may edit files in this project. Make the change directly, "
+    "run any relevant tests to validate, then git commit the changes "
+    "with a clear conventional-commit message ('feat:', 'fix:', "
+    "'refactor:' etc.). Do NOT push — the operator pushes after "
+    "review. Return a markdown summary under 500 words listing: "
+    "(1) files changed with one-line reasons, "
+    "(2) any new tests added, "
+    "(3) the commit SHA + subject, "
+    "(4) follow-ups left for the operator."
+)
+
 
 def build_async_delegate_prompt(job: Job, config: HarbormasterConfig) -> str:
     """Build the prompt for an async delegated job.
@@ -51,7 +63,12 @@ def build_async_delegate_prompt(job: Job, config: HarbormasterConfig) -> str:
         host=job.host,
         config=config,
     )
-    suffix = _WRITES_SUFFIX if job.allow_writes else _READ_ONLY_SUFFIX
+    if job.allow_writes:
+        suffix = (
+            _WRITES_AUTO_COMMIT_SUFFIX if job.auto_commit else _WRITES_SUFFIX
+        )
+    else:
+        suffix = _READ_ONLY_SUFFIX
     return f"{grounded}\n\n{suffix}"
 
 

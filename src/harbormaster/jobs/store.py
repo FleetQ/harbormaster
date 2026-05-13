@@ -43,6 +43,7 @@ class Job:
     duration_ms: int | None
     read_at: float | None
     max_turns: int = 10
+    auto_commit: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable view (booleans normalised, no nulls
@@ -66,6 +67,7 @@ class Job:
             "duration_ms": self.duration_ms,
             "read_at": self.read_at,
             "max_turns": self.max_turns,
+            "auto_commit": self.auto_commit,
         }
 
 
@@ -89,6 +91,7 @@ def _row_to_job(row: sqlite3.Row) -> Job:
         duration_ms=row["duration_ms"],
         read_at=row["read_at"],
         max_turns=row["max_turns"],
+        auto_commit=bool(row["auto_commit"]),
     )
 
 
@@ -172,15 +175,14 @@ class JobStore:
         model: str | None,
         inbox_id: str = "default",
         max_turns: int = 10,
+        auto_commit: bool = False,
     ) -> Job:
         """Insert a ``queued`` row and return its typed view.
 
         ``max_turns`` (v22.0.1) is the per-job turn budget the worker
-        passes to ``run_backend``. Default 10 matches the pre-v22.0.1
-        hardcoded value, so existing callers see identical behaviour.
-
-        The worker thread polls for queued rows and claims them
-        atomically via :meth:`claim_next_queued`.
+        passes to ``run_backend``. ``auto_commit`` (v24.0.0a2)
+        instructs the subagent to git-commit after edits — only
+        meaningful when ``allow_writes=True``.
         """
         job_id = self._new_job_id()
         now = time.time()
@@ -188,12 +190,13 @@ class JobStore:
             self._conn.execute(
                 "INSERT INTO delegated_jobs ("
                 "id, inbox_id, project, host, task, deliverable, "
-                "allow_writes, model, status, queued_at, max_turns"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "allow_writes, model, status, queued_at, max_turns, "
+                "auto_commit"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     job_id, inbox_id, project, host, task, deliverable,
                     1 if allow_writes else 0, model, STATUS_QUEUED, now,
-                    max_turns,
+                    max_turns, 1 if auto_commit else 0,
                 ),
             )
         job = self.get(job_id)

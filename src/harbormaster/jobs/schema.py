@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS delegated_jobs (
     completed_at REAL,
     duration_ms INTEGER,
     read_at REAL,
-    max_turns INTEGER NOT NULL DEFAULT 10
+    max_turns INTEGER NOT NULL DEFAULT 10,
+    auto_commit INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_delegated_jobs_status
@@ -52,4 +53,8 @@ MIGRATIONS: list[tuple[str, str]] = [
     # pre-v22.0.1 hardcoded value so existing rows keep the same
     # behaviour after upgrade.
     ("max_turns", "max_turns INTEGER NOT NULL DEFAULT 10"),
+    # v24.0.0a2 — caller-authorised auto-commit. Default 0 (no commit)
+    # matches the v22+ "operator reviews + commits" contract; flipping
+    # to 1 instructs the subagent to git commit after edits.
+    ("auto_commit", "auto_commit INTEGER NOT NULL DEFAULT 0"),
 ]

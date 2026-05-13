@@ -31,6 +31,18 @@ _WRITES_SUFFIX = (
     "Do NOT git commit — the operator will review and commit."
 )
 
+_WRITES_AUTO_COMMIT_SUFFIX = (
+    "You may edit files in this project. Make the change directly, "
+    "run any relevant tests to validate, then git commit the changes "
+    "with a clear conventional-commit message ('feat:', 'fix:', "
+    "'refactor:' etc.). Do NOT push — the operator pushes after "
+    "review. Return a markdown summary under 500 words listing: "
+    "(1) files changed with one-line reasons, "
+    "(2) any new tests added, "
+    "(3) the commit SHA + subject, "
+    "(4) follow-ups left for the operator."
+)
+
 
 def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
     @mcp.tool()
@@ -44,6 +56,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         mode: Literal["sync", "async"] = "sync",
         inbox_id: str = "default",
         max_turns: int = 10,
+        auto_commit: bool = False,
     ) -> str:
         """Delegate a task to a project's Claude Code subagent.
 
@@ -88,6 +101,14 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         ``code=exit_nonzero: claude -p exit 1: (no stderr)`` because
         the subagent reaches ``max_turns_reached`` before producing
         a final result.
+
+        ``auto_commit`` (v24.0.0a2) — only meaningful when
+        ``allow_writes=True``. ``False`` (default) preserves the v22
+        "subagent edits, operator commits" workflow. ``True`` swaps
+        the prompt to ask the subagent to run tests + git-commit
+        after edits (does NOT push — operator pushes after review).
+        Set when you trust the subagent's judgement and want the
+        commit step inside the delegation budget.
         """
         if mode == "async":
             # Late import to break the tools.delegate ↔ jobs.worker
@@ -104,6 +125,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                 model=model,
                 inbox_id=inbox_id,
                 max_turns=max_turns,
+                auto_commit=auto_commit,
             )
             return (
                 f"queued {job.id} (inbox={job.inbox_id}). "
@@ -119,7 +141,10 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
             host=host,
             config=config,
         )
-        suffix = _WRITES_SUFFIX if allow_writes else _READ_ONLY_SUFFIX
+        if allow_writes:
+            suffix = _WRITES_AUTO_COMMIT_SUFFIX if auto_commit else _WRITES_SUFFIX
+        else:
+            suffix = _READ_ONLY_SUFFIX
         full_prompt = f"{grounded}\n\n{suffix}"
         return run_backend(
             name=name,
