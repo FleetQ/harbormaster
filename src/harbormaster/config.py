@@ -347,10 +347,10 @@ class UIConfig(BaseModel):
 
 
 class DelegateConfig(BaseModel):
-    """v23.0.0a2: async-delegate JobStore tuning.
+    """v23.0.0a2+: async-delegate JobStore tuning.
 
-    Currently just retention. Future knobs (multi-worker concurrency,
-    per-call max_turns defaults, inbox auth) land here when shipped.
+    Retention (v23.0.0a2) + worker concurrency (v24.0.0a1) +
+    auto_commit default (v24.0.0a2).
     """
 
     model_config = _FORBID_EXTRA
@@ -360,6 +360,13 @@ class DelegateConfig(BaseModel):
     # unbounded — operator hit notes on v22 sprint. Mirrors
     # history.retain_recent_k semantics.
     retain_recent_k: int = Field(default=1000, gt=0)
+    # v24.0.0a1: number of JobWorker threads against the same
+    # JobStore. The atomic UPDATE ... RETURNING claim (v22.0.0a2)
+    # already supports multi-worker safely. Default 1 preserves
+    # backward-compat with v22/v23. Bump for high-throughput
+    # operators delegating many parallel jobs. Hard cap of 16
+    # mirrors fleetq.dispatcher_max_workers.
+    worker_count: int = Field(default=1, gt=0, le=16)
 
 
 class HarbormasterConfig(BaseModel):

@@ -32,11 +32,21 @@ _singleton: Subsystem | None = None
 @dataclass
 class Subsystem:
     store: JobStore
-    worker: JobWorker
+    workers: list[JobWorker]
     broadcaster: JobEventBroadcaster
 
+    @property
+    def worker(self) -> JobWorker:
+        """v22→v24 compat shim: existing code paths read ``sub.worker``
+        as the singular worker. With v24.0.0a1 multi-worker, return
+        the first worker — sufficient for read-only inspection
+        (``is_alive``, etc.). For lifecycle control, use ``workers``.
+        """
+        return self.workers[0]
+
     def shutdown(self) -> None:
-        self.worker.stop()
+        for w in self.workers:
+            w.stop()
         self.store.close()
 
 
@@ -78,17 +88,25 @@ def get_subsystem(config: HarbormasterConfig) -> Subsystem:
                 "delegate-job subsystem: pruned %d old rows "
                 "(retain=%d)", pruned, config.delegate.retain_recent_k,
             )
-        worker = JobWorker(config=config, store=store)
-        worker.start()
+        # v24.0.0a1: spawn N workers per [delegate] worker_count.
+        # All share the same JobStore — the atomic UPDATE ... RETURNING
+        # claim_next_queued ensures no double-processing across
+        # workers. Default worker_count=1 preserves v22/v23 behaviour.
+        n = config.delegate.worker_count
+        workers = [JobWorker(config=config, store=store) for _ in range(n)]
+        for w in workers:
+            w.start()
         broadcaster = JobEventBroadcaster()
         # v22.2.0: bridge JobStore's sync subscriber hook to the
         # broadcaster's threadsafe publish so SSE consumers (and any
         # future push transport) receive every completion / failure.
         store.add_subscriber(broadcaster.publish_threadsafe)
         _singleton = Subsystem(
-            store=store, worker=worker, broadcaster=broadcaster,
+            store=store, workers=workers, broadcaster=broadcaster,
         )
-        _LOG.info("delegate-job subsystem ready at %s", db_path)
+        _LOG.info(
+            "delegate-job subsystem ready at %s (workers=%d)", db_path, n,
+        )
         return _singleton
 
 

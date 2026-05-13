@@ -54,8 +54,8 @@ PluginRegister = Callable[["FastMCP", "HarbormasterConfig"], None]
 def discover_entry_points() -> list[EntryPoint]:
     """Return every entry point declared under the `harbormaster.tools`
     group across all installed distributions. Pure discovery — no
-    allowlist check, no load. Useful for `harbormaster-mcp plugins
-    list` (deferred to v2.0.0a5+) and for tests."""
+    allowlist check, no load. Backs `harbormaster-mcp plugins list`
+    (shipped v2.0.1) and tests."""
     return list(entry_points(group=ENTRY_POINT_GROUP))
 
 

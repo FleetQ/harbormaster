@@ -259,6 +259,19 @@ stores. Defaults preserve v11 behavior byte-for-byte.
 | `qa_log_recent_k`            | `int`     | `null`  | When set, overrides `[history].retain_recent_k` for QAStore.prune. |
 | `qa_log_top_recalled_r`      | `int`     | `null`  | When set, overrides `[history].retain_top_recalled_r`. |
 
+## `[delegate]`
+
+v23.0.0a2 + v24.0.0a1. Async-delegate JobStore tuning. Affects the
+v22-era `delegate_task(..., mode="async")` flow and its background
+worker. Retention prunes the `delegated_jobs.db` SQLite file on
+subsystem boot; `worker_count` controls how many JobWorker threads
+share the same JobStore.
+
+| Key                | Type  | Default | Notes |
+|--------------------|-------|---------|-------|
+| `retain_recent_k`  | `int` | `1000`  | > 0. Window of most-recent rows kept in `delegated_jobs.db`. Older rows are deleted on subsystem boot (mirrors `[history].retain_recent_k` semantics; v23.0.0a2). |
+| `worker_count`     | `int` | `1`     | 1..16. Number of JobWorker threads against the same JobStore. The atomic `UPDATE ... RETURNING claim_next_queued` (v22.0.0a2) safely supports multi-worker. Default 1 preserves v22/v23 single-worker behaviour. Bump for high-throughput operators delegating many parallel jobs (v24.0.0a1). |
+
 ## `[budget]`
 
 v15.0.0a4. Per-tool soft call budgets — operator-side warning surface,

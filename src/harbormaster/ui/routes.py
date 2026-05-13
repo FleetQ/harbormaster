@@ -3113,11 +3113,10 @@ async def _emit_chunks_then_result(
             pass
 
     # v10.0.0a7: record one network event per completed streamed call.
-    # The caller is "operator" today (no parent-project context for
-    # UI-direct calls); a future v11 deferred decoration could pass
-    # the originating project when a delegated tool calls another
-    # tool. Failures swallowed — instrumentation must never break
-    # the stream.
+    # The caller is "operator" for UI-direct calls (no parent-project
+    # context). Cross-tool parent-project attribution stays out of
+    # scope — not a real friction point in operator practice. Failures
+    # swallowed — instrumentation must never break the stream.
     if record_ctx is not None:
         try:
             from harbormaster.ui.network_log import network_log
