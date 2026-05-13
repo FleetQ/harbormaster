@@ -56,10 +56,14 @@ def test_full_harbormaster_config_carries_heartbeats() -> None:
 
 def test_network_stream_uses_config_heartbeat_value() -> None:
     """Source-level confirmation that the /api/network/stream route
-    pulls from config.server instead of the module constant."""
+    pulls from config.server instead of the module constant.
+
+    v23.0.0a3: route moved out of routes.py into routes_network.py
+    as part of the routes split — check the new home.
+    """
     src_path = (
         __import__("pathlib").Path(__file__).parent.parent.parent
-        / "src" / "harbormaster" / "ui" / "routes.py"
+        / "src" / "harbormaster" / "ui" / "routes_network.py"
     )
     text = src_path.read_text(encoding="utf-8")
     # The closure captures heartbeat_s = config.server.heartbeat_interval_network_s
