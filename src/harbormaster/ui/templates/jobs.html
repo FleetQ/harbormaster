@@ -18,12 +18,56 @@
             class="px-2 py-0.5 rounded bg-surface-2 border border-border"></span>
       <span x-text="`${summary.failed_today} failed (24h)`"
             class="px-2 py-0.5 rounded bg-surface-2 border border-border"></span>
+
+      {# v24.0.0a3: max_turns budget guideline popover. The empirical
+         table from v22.0.1 retro lives in `incident-playbook` Serena
+         memory; this surface keeps it in the operator's eye when they
+         delegate from the dashboard. #}
+      <button type="button"
+              @click="hintsOpen = !hintsOpen"
+              :aria-expanded="hintsOpen ? 'true' : 'false'"
+              aria-controls="max-turns-hints"
+              class="ml-2 px-2 py-0.5 rounded border border-border hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              aria-label="Show max_turns sizing guidance"
+              title="max_turns sizing guidance">?</button>
+
       <button @click="loadSummary(); loadJobs()"
               class="ml-2 px-2 py-0.5 rounded border border-border hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               aria-label="Reload jobs and summary"
               title="Reload">↻</button>
     </div>
   </header>
+
+  {# v24.0.0a3: max_turns guidance panel. Collapses by default;
+     header `?` button toggles. Empirical guideline from v22.0.1 retro
+     after the collector3.0 d_855b3149d9d3 max_turns_reached incident. #}
+  <div id="max-turns-hints"
+       x-show="hintsOpen"
+       x-cloak
+       x-transition.opacity
+       data-empty-state="jobs.max-turns-hints"
+       class="mb-4 p-3 rounded-md border border-border bg-surface-2 text-xs">
+    <p class="mb-2 text-foreground-muted">
+      Empirical <code class="text-accent">max_turns</code> sizing for
+      <code class="text-accent">delegate_task</code> (default
+      <code>10</code> — fine for read-only Q&amp;A but tight for writes).
+      The interacting cap is <code>[backends.claude] timeout_local</code>:
+      ~10 s per turn, so <code>max_turns=80</code> wants
+      <code>timeout_local ≥ 800</code>.
+    </p>
+    <ul class="grid gap-y-1 grid-cols-1 sm:grid-cols-2">
+      <li>Read-only Q&amp;A — <code>5</code>–<code>10</code></li>
+      <li>Single-file edit + commit — <code>15</code>–<code>25</code></li>
+      <li>Multi-file feature with tests — <code>50</code>–<code>80</code></li>
+      <li>Refactor across packages — <code>100</code>+</li>
+    </ul>
+    <p class="mt-2 text-foreground-muted">
+      A run that hits the cap surfaces as
+      <code>code=exit_nonzero: claude -p exit 1: (no stderr)</code> with
+      duration much less than <code>timeout_local</code>. Diagnose by
+      checking the session JSONL — see incident-playbook entry #1.
+    </p>
+  </div>
 
   {# Status filter chips. #}
   <nav class="flex gap-2 mb-3 flex-wrap" aria-label="Filter by status">
@@ -167,6 +211,7 @@
       statusFilter: 'all',
       loading: true,
       expanded: {},
+      hintsOpen: false,
       _eventSource: null,
       statusOptions: [
         { value: 'all',       label: 'All' },
