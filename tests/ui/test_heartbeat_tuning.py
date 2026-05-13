@@ -80,9 +80,11 @@ def test_streaming_dispatcher_uses_config_heartbeat_value() -> None:
 
 
 def test_dispatcher_trace_uses_config_heartbeat_value() -> None:
+    """v23.0.0a4: route moved into routes_dispatcher.py as part of
+    the routes split — check the new home."""
     src_path = (
         __import__("pathlib").Path(__file__).parent.parent.parent
-        / "src" / "harbormaster" / "ui" / "routes.py"
+        / "src" / "harbormaster" / "ui" / "routes_dispatcher.py"
     )
     text = src_path.read_text(encoding="utf-8")
     assert "config.server.heartbeat_interval_trace_s" in text
