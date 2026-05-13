@@ -35,8 +35,13 @@ class BackendConfig(BaseModel):
     enabled: bool = True
     binary: str = "claude"
     extra_args: list[str] = Field(default_factory=lambda: ["-p"])
-    timeout_local: int = Field(default=60, gt=0)
-    timeout_remote: int = Field(default=120, gt=0)
+    # v23.0.0a2: defaults bumped from 60s/120s. v1's read-only Q&A
+    # shape was sized for ~30s answers; v22 writes with max_turns=80
+    # need ~800s wall-clock. 300s/600s leaves room for real work
+    # without masking actual hangs. Operators with explicit TOML
+    # values are unaffected. See docs/budget-audit-2026-05-13.md.
+    timeout_local: int = Field(default=300, gt=0)
+    timeout_remote: int = Field(default=600, gt=0)
     output_word_cap: int = Field(default=800, gt=0)
     # v21.0.0a10: per-backend model selection. None = backend's own
     # default (no `--model` flag added). When `default_model` is set,
@@ -82,7 +87,10 @@ class HostConfig(BaseModel):
     remote_htdocs: str = "~/htdocs"
     backend: str = "claude"
     connect_timeout: int = Field(default=10, gt=0)
-    total_timeout: int = Field(default=120, gt=0)
+    # v23.0.0a2: bumped from 120s; same reasoning as
+    # BackendConfig.timeout_local — SSH streams w/ writes need
+    # multi-minute budgets. See docs/budget-audit-2026-05-13.md.
+    total_timeout: int = Field(default=600, gt=0)
     # v14.0.0a4: optional soft budget — MCP calls routed TO this host
     # per 24h. Surfaced via GET /api/hosts/budget which counts events
     # in network_log targeting this host vs the cap. None = no budget
@@ -338,6 +346,22 @@ class UIConfig(BaseModel):
     accent_chroma: float = 0.22
 
 
+class DelegateConfig(BaseModel):
+    """v23.0.0a2: async-delegate JobStore tuning.
+
+    Currently just retention. Future knobs (multi-worker concurrency,
+    per-call max_turns defaults, inbox auth) land here when shipped.
+    """
+
+    model_config = _FORBID_EXTRA
+
+    # Keep the most-recent N rows in delegated_jobs.db. Older rows
+    # are pruned on JobStore boot. Without this cap the table grows
+    # unbounded — operator hit notes on v22 sprint. Mirrors
+    # history.retain_recent_k semantics.
+    retain_recent_k: int = Field(default=1000, gt=0)
+
+
 class HarbormasterConfig(BaseModel):
     model_config = _FORBID_EXTRA
 
@@ -369,6 +393,8 @@ class HarbormasterConfig(BaseModel):
     # v15.0.0a6: markdown render allowlist tuning. Per-project overrides
     # via <project>/.harbormaster.toml. Defaults to strict.
     markdown: MarkdownConfig = Field(default_factory=MarkdownConfig)
+    # v23.0.0a2: async-delegate JobStore tuning (retention etc.).
+    delegate: DelegateConfig = Field(default_factory=DelegateConfig)
 
 
 def _expand(p: str) -> Path:

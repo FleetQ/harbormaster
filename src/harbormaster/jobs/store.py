@@ -432,6 +432,34 @@ class JobStore:
             )
             return cur.rowcount
 
+    def prune_old(self, *, retain: int) -> int:
+        """v23.0.0a2: keep only the most-recent ``retain`` rows by
+        ``queued_at``. Older rows are deleted. Returns the deleted
+        row count.
+
+        Called from subsystem boot so unbounded growth doesn't
+        accumulate across process lifetimes. Mirrors
+        ``history.retain_recent_k`` semantics — newest wins.
+
+        Safe to call concurrently with worker activity: the DELETE
+        excludes the top-N most-recent rows, which always includes
+        any in-flight ``queued`` / ``running`` jobs (their
+        ``queued_at`` is current time-ish; pruning targets old
+        ``completed`` / ``failed`` rows).
+        """
+        if retain < 1:
+            return 0
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM delegated_jobs "
+                "WHERE id NOT IN ("
+                "  SELECT id FROM delegated_jobs "
+                "  ORDER BY queued_at DESC LIMIT ?"
+                ")",
+                (retain,),
+            )
+            return cur.rowcount
+
     def recover_orphaned(self) -> int:
         """Mark any ``running`` rows as ``failed`` with reason
         ``server_restart``. Called once per process at subsystem init.

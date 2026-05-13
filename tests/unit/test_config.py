@@ -15,7 +15,11 @@ def test_default_config_has_expected_shape():
     assert cfg.projects.glob == ["~/htdocs/*"]
     assert "claude" in cfg.backends
     assert cfg.backends["claude"].binary == "claude"
-    assert cfg.backends["claude"].timeout_local == 60
+    # v23.0.0a2: defaults bumped from 60/120/120 to 300/600/600.
+    assert cfg.backends["claude"].timeout_local == 300
+    assert cfg.backends["claude"].timeout_remote == 600
+    # delegate config block + retention default
+    assert cfg.delegate.retain_recent_k == 1000
     assert cfg.fleetq.enabled is False  # opt-in
 
 

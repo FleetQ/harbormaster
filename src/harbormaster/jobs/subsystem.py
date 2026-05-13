@@ -68,6 +68,16 @@ def get_subsystem(config: HarbormasterConfig) -> Subsystem:
                 "delegate-job subsystem: recovered %d orphaned running "
                 "jobs as failed (server_restart)", recovered,
             )
+        # v23.0.0a2: prune old rows so unbounded growth doesn't
+        # accumulate across process lifetimes. Runs ONCE per boot —
+        # not on every enqueue. Default retain=1000 (overridable via
+        # [delegate] retain_recent_k).
+        pruned = store.prune_old(retain=config.delegate.retain_recent_k)
+        if pruned:
+            _LOG.info(
+                "delegate-job subsystem: pruned %d old rows "
+                "(retain=%d)", pruned, config.delegate.retain_recent_k,
+            )
         worker = JobWorker(config=config, store=store)
         worker.start()
         broadcaster = JobEventBroadcaster()
