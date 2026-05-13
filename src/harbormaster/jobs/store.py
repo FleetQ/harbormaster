@@ -12,8 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from harbormaster.jobs.schema import (
+    CLARIFICATION_SCHEMA,
     MIGRATIONS,
     SCHEMA,
+    STATUS_CLR_ANSWERED,
+    STATUS_CLR_PENDING,
     STATUS_COMPLETED,
     STATUS_FAILED,
     STATUS_QUEUED,
@@ -95,6 +98,42 @@ def _row_to_job(row: sqlite3.Row) -> Job:
     )
 
 
+@dataclass(frozen=True)
+class Clarification:
+    """Typed view over one ``job_clarifications`` row."""
+
+    id: str
+    job_id: str
+    question: str
+    answer: str | None
+    status: str  # pending | answered | timed_out
+    asked_at: float
+    answered_at: float | None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "clarification_id": self.id,
+            "job_id": self.job_id,
+            "question": self.question,
+            "answer": self.answer,
+            "status": self.status,
+            "asked_at": self.asked_at,
+            "answered_at": self.answered_at,
+        }
+
+
+def _row_to_clarification(row: sqlite3.Row) -> Clarification:
+    return Clarification(
+        id=row["id"],
+        job_id=row["job_id"],
+        question=row["question"],
+        answer=row["answer"],
+        status=row["status"],
+        asked_at=row["asked_at"],
+        answered_at=row["answered_at"],
+    )
+
+
 class JobStore:
     """SQLite-backed store for async delegate jobs.
 
@@ -118,6 +157,7 @@ class JobStore:
         self._conn.execute("PRAGMA journal_mode = WAL")
         self._conn.execute("PRAGMA synchronous = NORMAL")
         self._conn.executescript(SCHEMA)
+        self._conn.executescript(CLARIFICATION_SCHEMA)
         self._lock = threading.Lock()
         # v22.1.0: blocking-await primitives. Per-job ``Event`` so a
         # waiter on a specific id wakes on that id's completion; per-
@@ -131,6 +171,11 @@ class JobStore:
         # Currently unused by JobStore; the resource-subscription
         # surface (v22.2.0) registers a callback here.
         self._subscribers: list[Callable[[Job], None]] = []
+        # v25.0.0: clarification primitives. Per-clarification Event so
+        # request_clarification() blocks until answered; per-job Condition
+        # so await_clarification_request() wakes when any question arrives.
+        self._clarification_events: dict[str, threading.Event] = {}
+        self._job_clarification_conditions: dict[str, threading.Condition] = {}
         self._apply_migrations()
 
     def _apply_migrations(self) -> None:
@@ -278,12 +323,18 @@ class JobStore:
         with self._lock:
             ev = self._job_events.get(job_id)
             cond = self._inbox_conditions.get(job.inbox_id)
+            clr_cond = self._job_clarification_conditions.get(job_id)
             subs = list(self._subscribers)
         if ev is not None:
             ev.set()
         if cond is not None:
             with cond:
                 cond.notify_all()
+        # Wake any await_clarification_request blocked on this job so it
+        # doesn't hang if the subagent finishes without asking anything.
+        if clr_cond is not None:
+            with clr_cond:
+                clr_cond.notify_all()
         # Subscribers run outside the JobStore lock; any exception
         # they raise is swallowed (instrumentation must never break
         # the hot path — pattern from v21.0.6 + v21.0.7).
@@ -331,6 +382,14 @@ class JobStore:
             if ev is None:
                 ev = threading.Event()
                 self._job_events[job_id] = ev
+        # Second check: _fire_completion may have run in the window between
+        # the first status read above and event registration. If the job is
+        # already terminal we return immediately; otherwise ev is guaranteed
+        # to be set by _fire_completion before or after ev.wait() below
+        # (Events are sticky, so a pre-wait set still wakes the caller).
+        job = self.get(job_id)
+        if job is not None and job.status in (STATUS_COMPLETED, STATUS_FAILED):
+            return job
         ev.wait(timeout=timeout_seconds)
         return self.get(job_id)
 
@@ -380,6 +439,123 @@ class JobStore:
                 cond = threading.Condition()
                 self._inbox_conditions[inbox_id] = cond
             return cond
+
+    # ------------------------------------------------------------------
+    # v25.0.0 clarification primitives
+    # ------------------------------------------------------------------
+
+    def _get_or_create_job_clarification_condition(
+        self, job_id: str,
+    ) -> threading.Condition:
+        with self._lock:
+            cond = self._job_clarification_conditions.get(job_id)
+            if cond is None:
+                cond = threading.Condition()
+                self._job_clarification_conditions[job_id] = cond
+            return cond
+
+    def add_clarification(self, job_id: str, question: str) -> str:
+        """Write a new pending clarification for ``job_id`` and wake any
+        ``wait_for_clarification_request`` caller blocked on that job.
+        Returns the new clarification id (``clr_<8 hex>``).
+        """
+        clr_id = f"clr_{secrets.token_hex(4)}"
+        now = time.time()
+        ev = threading.Event()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO job_clarifications "
+                "(id, job_id, question, status, asked_at) VALUES (?, ?, ?, ?, ?)",
+                (clr_id, job_id, question, STATUS_CLR_PENDING, now),
+            )
+            self._clarification_events[clr_id] = ev
+            cond = self._job_clarification_conditions.get(job_id)
+        # Notify outside the store lock — same pattern as _fire_completion.
+        if cond is not None:
+            with cond:
+                cond.notify_all()
+        return clr_id
+
+    def answer_clarification(self, clr_id: str, answer: str) -> bool:
+        """Record ``answer`` for a pending clarification and unblock its
+        ``wait_for_clarification_answer`` caller.  Returns ``False`` if
+        the clarification does not exist or is not pending.
+        """
+        now = time.time()
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE job_clarifications "
+                "SET answer = ?, status = ?, answered_at = ? "
+                "WHERE id = ? AND status = ?",
+                (answer, STATUS_CLR_ANSWERED, now, clr_id, STATUS_CLR_PENDING),
+            )
+            if cursor.rowcount == 0:
+                return False
+            ev = self._clarification_events.get(clr_id)
+        if ev is not None:
+            ev.set()
+        return True
+
+    def get_pending_clarifications(self, job_id: str) -> list[Clarification]:
+        """Return all pending clarifications for ``job_id`` in ask order."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM job_clarifications "
+                "WHERE job_id = ? AND status = ? ORDER BY asked_at",
+                (job_id, STATUS_CLR_PENDING),
+            ).fetchall()
+        return [_row_to_clarification(r) for r in rows]
+
+    def get_clarification(self, clr_id: str) -> Clarification | None:
+        """Return the clarification by id, or ``None`` if not found."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM job_clarifications WHERE id = ?", (clr_id,),
+            ).fetchone()
+        return _row_to_clarification(row) if row is not None else None
+
+    def wait_for_clarification_answer(
+        self, clr_id: str, *, timeout_seconds: float,
+    ) -> Clarification | None:
+        """Block until the clarification is answered or ``timeout_seconds``
+        elapses.  Returns the final ``Clarification`` (check ``status`` to
+        distinguish ``answered`` from ``timed_out``).  Returns ``None`` if
+        ``clr_id`` is unknown.
+        """
+        clr = self.get_clarification(clr_id)
+        if clr is None:
+            return None
+        if clr.status != STATUS_CLR_PENDING:
+            return clr
+        with self._lock:
+            ev = self._clarification_events.get(clr_id)
+            if ev is None:
+                ev = threading.Event()
+                self._clarification_events[clr_id] = ev
+        # Second check — answer_clarification may have fired in the race window.
+        clr = self.get_clarification(clr_id)
+        if clr is not None and clr.status != STATUS_CLR_PENDING:
+            return clr
+        ev.wait(timeout=timeout_seconds)
+        return self.get_clarification(clr_id)
+
+    def wait_for_clarification_request(
+        self, job_id: str, *, timeout_seconds: float,
+    ) -> list[Clarification]:
+        """Block until at least one pending clarification arrives for
+        ``job_id``, or the job completes (via ``_fire_completion``), or
+        ``timeout_seconds`` elapses.  Returns the list of pending
+        clarifications (empty on timeout or job completion with no questions).
+        """
+        cond = self._get_or_create_job_clarification_condition(job_id)
+        with cond:
+            # Check inside the condition lock to close the race where
+            # add_clarification fires between our check and cond.wait().
+            pending = self.get_pending_clarifications(job_id)
+            if pending:
+                return pending
+            cond.wait(timeout=timeout_seconds)
+        return self.get_pending_clarifications(job_id)
 
     def list_recent(
         self,

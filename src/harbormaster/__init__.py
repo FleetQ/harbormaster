@@ -3,5 +3,5 @@
 Part of the FleetQ ecosystem. Standalone OSS works fully; FleetQ integration is opt-in.
 """
 
-__version__ = "24.0.2"
+__version__ = "25.0.0"
 __all__ = ["__version__"]

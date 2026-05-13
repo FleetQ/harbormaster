@@ -211,6 +211,49 @@ def test_wait_for_inbox_filters_by_since(store: JobStore):
     assert result_holder["ids"] == [job_b.id]
 
 
+def test_wait_for_job_second_check_catches_race(
+    store: JobStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: fail() fires between the fast-path status check and Event
+    registration in wait_for_job. _fire_completion finds no Event and skips
+    ev.set(), leaving the waiter to block for the full timeout.
+
+    The fix — a second status check after Event registration — must catch the
+    already-terminal state and return immediately (< 1s, not ~5s timeout).
+    """
+    job = store.enqueue(
+        project="alpha", host=None, task="t", deliverable="d",
+        allow_writes=False, model=None,
+    )
+    store.claim_next_queued()
+
+    original_get = store.get
+    call_count = 0
+
+    def patched_get(jid: str) -> object:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # Return the running snapshot to bypass the fast-path check, then
+            # immediately fail the job so _fire_completion finds no Event yet.
+            result = original_get(jid)
+            store.fail(jid, error="race-boom", cid=None, duration_ms=1)
+            return result
+        return original_get(jid)
+
+    monkeypatch.setattr(store, "get", patched_get)
+
+    start = time.monotonic()
+    result = store.wait_for_job(job.id, timeout_seconds=5.0)
+    elapsed = time.monotonic() - start
+
+    assert result is not None
+    assert result.status == STATUS_FAILED
+    assert elapsed < 1.0, (
+        f"blocked {elapsed:.2f}s — second status check after Event registration not working"
+    )
+
+
 def test_subscriber_callback_fires_on_completion(store: JobStore):
     """v22.2.0 hook: registered callbacks see the final ``Job``."""
     seen: list[tuple[str, str]] = []

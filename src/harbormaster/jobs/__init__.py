@@ -20,11 +20,11 @@ that moment — any ``running`` row from a previous process is marked
 from __future__ import annotations
 
 from harbormaster.jobs.broadcaster import JobEventBroadcaster
-from harbormaster.jobs.store import Job, JobStore
+from harbormaster.jobs.store import Clarification, Job, JobStore
 from harbormaster.jobs.subsystem import get_subsystem, shutdown_subsystem
 from harbormaster.jobs.worker import JobWorker
 
 __all__ = [
-    "Job", "JobStore", "JobWorker", "JobEventBroadcaster",
+    "Clarification", "Job", "JobStore", "JobWorker", "JobEventBroadcaster",
     "get_subsystem", "shutdown_subsystem",
 ]

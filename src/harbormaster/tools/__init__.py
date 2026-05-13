@@ -9,6 +9,7 @@ from harbormaster.config import HarbormasterConfig
 from harbormaster.plugins import load_plugins
 from harbormaster.tools.ask import register as register_ask
 from harbormaster.tools.await_jobs import register as register_await_jobs
+from harbormaster.tools.clarify import register as register_clarify
 from harbormaster.tools.delegate import register as register_delegate
 from harbormaster.tools.fan_out import register as register_fan_out
 from harbormaster.tools.graph import register as register_graph
@@ -33,6 +34,7 @@ def register_tools(mcp: FastMCP, config: HarbormasterConfig) -> None:
     register_job_status(mcp, config)
     register_inbox(mcp, config)
     register_await_jobs(mcp, config)
+    register_clarify(mcp, config)
     register_job_resources(mcp, config)
 
     # v2.0.0a4: opt-in entry-point plugin discovery. No-op (with a

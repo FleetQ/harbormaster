@@ -48,6 +48,25 @@ VALID_STATUSES = frozenset({
 # above. Each entry is ``(column_name, full_column_definition)``.
 # Pattern carried over from v21.0.8's network_log.db: PRAGMA
 # table_info + ALTER when missing.
+CLARIFICATION_SCHEMA = """
+CREATE TABLE IF NOT EXISTS job_clarifications (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    asked_at REAL NOT NULL,
+    answered_at REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_clarifications_job_pending
+    ON job_clarifications(job_id, status);
+"""
+
+STATUS_CLR_PENDING = "pending"
+STATUS_CLR_ANSWERED = "answered"
+STATUS_CLR_TIMED_OUT = "timed_out"
+
 MIGRATIONS: list[tuple[str, str]] = [
     # v22.0.1 — caller-supplied turn budget. Default 10 matches the
     # pre-v22.0.1 hardcoded value so existing rows keep the same
