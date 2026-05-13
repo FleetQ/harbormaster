@@ -25,6 +25,19 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+
+def _expand_includes(content: str, base) -> str:
+    """v24.0.0a5: expand `{% include "_partials/X" %}` so source-grep
+    tests still find content moved into partials."""
+    import re as _re
+    pat = _re.compile(r'\s*\{%\s*include\s+"(_partials/[^"]+)"\s*%\}\s*')
+    def _sub(m):
+        try:
+            return (base / m.group(1)).read_text(encoding="utf-8")
+        except OSError:
+            return m.group(0)
+    return pat.sub(_sub, content)
+
 TEMPLATE_PATH = (
     Path(__file__).parent.parent.parent
     / "src"
@@ -36,7 +49,7 @@ TEMPLATE_PATH = (
 
 
 def _read() -> str:
-    return TEMPLATE_PATH.read_text(encoding="utf-8")
+    return _expand_includes(TEMPLATE_PATH.read_text(encoding="utf-8"), TEMPLATE_PATH.parent)
 
 
 # ---------------------------------------------------------------------------

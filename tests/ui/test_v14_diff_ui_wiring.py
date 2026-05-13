@@ -27,8 +27,21 @@ TEMPLATE_DIR = (
 )
 
 
+def _expand_includes(content: str, base: Path) -> str:
+    """v24.0.0a5: expand `{% include \"_partials/X\" %}` lines so
+    source-grep tests still find content moved into partials."""
+    import re as _re
+    pat = _re.compile(r'\s*\{%\s*include\s+"(_partials/[^"]+)"\s*%\}\s*')
+    def _sub(m):
+        try:
+            return (base / m.group(1)).read_text(encoding="utf-8")
+        except OSError:
+            return m.group(0)
+    return pat.sub(_sub, content)
+
+
 def _read(name: str) -> str:
-    return (TEMPLATE_DIR / name).read_text(encoding="utf-8")
+    return _expand_includes((TEMPLATE_DIR / name).read_text(encoding="utf-8"), TEMPLATE_DIR)
 
 
 # -- project_detail.html: memory diff toggle ---------------------------

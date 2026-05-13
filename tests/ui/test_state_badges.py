@@ -24,6 +24,19 @@ from pathlib import Path
 
 import pytest
 
+
+def _expand_includes(content: str, base) -> str:
+    """v24.0.0a5: expand `{% include "_partials/X" %}` so source-grep
+    tests still find content moved into partials."""
+    import re as _re
+    pat = _re.compile(r'\s*\{%\s*include\s+"(_partials/[^"]+)"\s*%\}\s*')
+    def _sub(m):
+        try:
+            return (base / m.group(1)).read_text(encoding="utf-8")
+        except OSError:
+            return m.group(0)
+    return pat.sub(_sub, content)
+
 TEMPLATE_DIR = (
     Path(__file__).parent.parent.parent
     / "src"
@@ -34,7 +47,7 @@ TEMPLATE_DIR = (
 
 
 def _read(rel: str) -> str:
-    return (TEMPLATE_DIR / rel).read_text()
+    return _expand_includes((TEMPLATE_DIR / rel).read_text(), TEMPLATE_DIR)
 
 
 def test_bridge_state_badge_has_icon_and_aria_label() -> None:

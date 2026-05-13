@@ -26,6 +26,19 @@ from pathlib import Path
 
 import pytest
 
+
+def _expand_includes(content: str, base) -> str:
+    """v24.0.0a5: expand `{% include "_partials/X" %}` so source-grep
+    tests still find content moved into partials."""
+    import re as _re
+    pat = _re.compile(r'\s*\{%\s*include\s+"(_partials/[^"]+)"\s*%\}\s*')
+    def _sub(m):
+        try:
+            return (base / m.group(1)).read_text(encoding="utf-8")
+        except OSError:
+            return m.group(0)
+    return pat.sub(_sub, content)
+
 TEMPLATE_DIR = (
     Path(__file__).parent.parent.parent
     / "src"
@@ -46,7 +59,7 @@ SURFACES: list[tuple[str, str]] = [
 
 def _surface_block(template_name: str, surface_id: str) -> str:
     """Return the substring containing the named empty-state block."""
-    src = (TEMPLATE_DIR / template_name).read_text()
+    src = _expand_includes((TEMPLATE_DIR / template_name).read_text(), TEMPLATE_DIR)
     needle = f'data-empty-state="{surface_id}"'
     i = src.find(needle)
     assert i != -1, f"surface {surface_id!r} missing in {template_name}"
