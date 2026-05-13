@@ -203,6 +203,8 @@ Harbormaster fully standalone.
 | `heartbeat_interval`     | `int` (s) | `30`                             | > 0. Bridge heartbeat cadence. |
 | `dispatcher_max_workers` | `int`     | `1`                              | 1..16. >1 enables a bounded ThreadPoolExecutor for parallel `agent.request` dispatch. |
 | `dispatcher_unsafe_tools`| `list[str]`| `[]`                            | Per-tool deny list — these always run on the single-worker path even when `dispatcher_max_workers > 1`. |
+| `publish_completions`    | `bool`    | `false`                          | v24.0.0a7. Opt-in JobStore-completion publisher. When `true` + `team_id` non-empty + `api_token_env` resolves, every `delegate_task(mode="async")` completion is POST-ed to `<base_url>/api/v1/harbormaster/job-completed`; the bridge then broadcasts to Pusher channel `private-harbormaster.{team_id}` event `delegate-job-completed`. |
+| `team_id`                | `str`     | `""`                             | v24.0.0a7. UUID of the FleetQ team this Harbormaster publishes to. Required when `publish_completions = true`; empty otherwise. Routes the Pusher channel `private-harbormaster.{team_id}`. |
 
 ## `[history]`
 

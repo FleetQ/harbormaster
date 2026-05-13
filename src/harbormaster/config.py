@@ -166,6 +166,16 @@ class FleetQConfig(BaseModel):
     # third-party plugin tools or to selectively serialise a tool that
     # turns out to share state without redeploying harbormaster.
     dispatcher_unsafe_tools: list[str] = Field(default_factory=list)
+    # v24.0.0a7: publish JobStore completions to the FleetQ Bridge
+    # relay endpoint POST /api/v1/harbormaster/job-completed.
+    # Opt-in. Default off matches the pre-v24 behaviour (SSE-only
+    # push to operator dashboard). Bridge then broadcasts to Pusher
+    # channel `private-harbormaster.{team_id}` event
+    # `delegate-job-completed` so external agents can react in real
+    # time. ``team_id`` must be set when this is True — it identifies
+    # the per-team Pusher channel the bridge routes to.
+    publish_completions: bool = False
+    team_id: str = ""
 
 
 class HistoryConfig(BaseModel):

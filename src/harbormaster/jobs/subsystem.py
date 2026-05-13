@@ -101,6 +101,27 @@ def get_subsystem(config: HarbormasterConfig) -> Subsystem:
         # broadcaster's threadsafe publish so SSE consumers (and any
         # future push transport) receive every completion / failure.
         store.add_subscriber(broadcaster.publish_threadsafe)
+
+        # v24.0.0a7: opt-in FleetQ Bridge completion publisher.
+        # Three-gate check (publish_completions + team_id + token)
+        # lives inside the publisher; subsystem just wires the
+        # callback if the [fleetq] extra is importable. When the
+        # extra isn't installed, the import fails and we skip
+        # silently — same shape as other [fleetq] hooks.
+        try:
+            from harbormaster.fleetq.completions import CompletionPublisher
+            publisher = CompletionPublisher(config)
+            if publisher.is_armed():
+                store.add_subscriber(publisher.publish)
+                _LOG.info(
+                    "delegate-job subsystem: fleetq completion "
+                    "publisher armed (team_id=%s, endpoint=%s)",
+                    config.fleetq.team_id,
+                    config.fleetq.base_url.rstrip("/")
+                    + "/api/v1/harbormaster/job-completed",
+                )
+        except ImportError:
+            pass
         _singleton = Subsystem(
             store=store, workers=workers, broadcaster=broadcaster,
         )
