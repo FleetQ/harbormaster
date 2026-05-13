@@ -28,15 +28,17 @@ import pytest
 
 
 def _expand_includes(content: str, base) -> str:
-    """v24.0.0a5: expand `{% include "_partials/X" %}` so source-grep
-    tests still find content moved into partials."""
+    """v24.0.0a6: keep `{% include "_partials/X" %}` lines AND append
+    the partial content right after — so source-grep tests pass both
+    when they assert the include line is present AND when they grep
+    for content moved into the partial."""
     import re as _re
-    pat = _re.compile(r'\s*\{%\s*include\s+"(_partials/[^"]+)"\s*%\}\s*')
+    pat = _re.compile(r'(\{%\s*include\s+"(_partials/[^"]+)"\s*%\})')
     def _sub(m):
         try:
-            return (base / m.group(1)).read_text(encoding="utf-8")
+            return m.group(1) + "\n" + (base / m.group(2)).read_text(encoding="utf-8")
         except OSError:
-            return m.group(0)
+            return m.group(1)
     return pat.sub(_sub, content)
 
 TEMPLATE_DIR = (

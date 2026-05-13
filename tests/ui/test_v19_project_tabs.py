@@ -14,6 +14,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
+
+def _expand_includes(content: str, base) -> str:
+    """v24.0.0a6: keep `{% include "_partials/X" %}` lines AND append
+    the partial content right after — so source-grep tests pass both
+    when they assert the include line is present AND when they grep
+    for content moved into the partial."""
+    import re as _re
+    pat = _re.compile(r'(\{%\s*include\s+"(_partials/[^"]+)"\s*%\})')
+    def _sub(m):
+        try:
+            return m.group(1) + "\n" + (base / m.group(2)).read_text(encoding="utf-8")
+        except OSError:
+            return m.group(1)
+    return pat.sub(_sub, content)
+
 TEMPLATE_PATH = (
     Path(__file__).parent.parent.parent
     / "src"
@@ -25,7 +40,7 @@ TEMPLATE_PATH = (
 
 
 def _read() -> str:
-    return TEMPLATE_PATH.read_text()
+    return _expand_includes(TEMPLATE_PATH.read_text(), TEMPLATE_PATH.parent)
 
 
 def test_tab_strip_renders_with_five_tabs() -> None:

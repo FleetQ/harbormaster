@@ -26,6 +26,21 @@ from fastapi.testclient import TestClient
 from harbormaster.config import HarbormasterConfig, ProjectsConfig, UIConfig
 from harbormaster.ui import create_app
 
+
+def _expand_includes(content: str, base) -> str:
+    """v24.0.0a6: keep `{% include "_partials/X" %}` lines AND append
+    the partial content right after — so source-grep tests pass both
+    when they assert the include line is present AND when they grep
+    for content moved into the partial."""
+    import re as _re
+    pat = _re.compile(r'(\{%\s*include\s+"(_partials/[^"]+)"\s*%\})')
+    def _sub(m):
+        try:
+            return m.group(1) + "\n" + (base / m.group(2)).read_text(encoding="utf-8")
+        except OSError:
+            return m.group(1)
+    return pat.sub(_sub, content)
+
 TEMPLATES = Path(__file__).parent.parent.parent / "src" / "harbormaster" / "ui" / "templates"
 
 
@@ -34,7 +49,7 @@ TEMPLATES = Path(__file__).parent.parent.parent / "src" / "harbormaster" / "ui" 
 
 def test_dashboard_plugins_empty_state_polished() -> None:
     """`No entry points discovered.` v8 stub replaced with 3-part copy."""
-    src = (TEMPLATES / "dashboard.html").read_text()
+    src = _expand_includes((TEMPLATES / "dashboard.html").read_text(), TEMPLATES)
     # Old terse stub is gone.
     assert "No entry points discovered." not in src
     # New 3-part state present.
@@ -45,7 +60,7 @@ def test_dashboard_plugins_empty_state_polished() -> None:
 
 def test_dashboard_recent_activity_empty_state_polished() -> None:
     """`no recent calls` plain text replaced with CTA-bearing copy."""
-    src = (TEMPLATES / "dashboard.html").read_text()
+    src = _expand_includes((TEMPLATES / "dashboard.html").read_text(), TEMPLATES)
     # The old plain-text stub should no longer appear as a standalone
     # leaf (`text-foreground-subtle">no recent calls</li>`).
     assert 'text-foreground-subtle">no recent calls' not in src
@@ -68,7 +83,7 @@ def test_dispatcher_empty_states_polished() -> None:
 
 
 def test_project_detail_empty_states_polished() -> None:
-    src = (TEMPLATES / "project_detail.html").read_text()
+    src = _expand_includes((TEMPLATES / "project_detail.html").read_text(), TEMPLATES)
     assert "No memory files yet." in src
     assert "No Q&amp;A history yet." in src
     assert 'data-empty-state="qa-history.empty"' in src
@@ -80,7 +95,7 @@ def test_project_detail_empty_states_polished() -> None:
 def test_accent_picker_widget_mounted_in_dashboard_inspector() -> None:
     """The accent picker `<details>` element is present in the dashboard
     inspector block with the canonical Alpine factory + GET/PUT plumbing."""
-    src = (TEMPLATES / "dashboard.html").read_text()
+    src = _expand_includes((TEMPLATES / "dashboard.html").read_text(), TEMPLATES)
     assert 'data-inspector-accent' in src
     assert "accentPicker()" in src
     assert "function accentPicker()" in src
