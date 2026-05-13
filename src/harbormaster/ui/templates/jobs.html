@@ -100,106 +100,105 @@
     </p>
   </div>
 
-  {# Table. #}
+  {# Table. Multiple <tbody> per row-group is valid HTML and the only
+     reliable way to wrap two sibling <tr>s inside an x-for template
+     without a non-table custom element breaking the layout engine. #}
   <table x-show="jobs.length" class="w-full text-sm border-collapse">
     <thead class="text-xs uppercase text-foreground-muted">
       <tr class="border-b border-border">
         <th class="text-left py-2 pr-2 w-6"></th>
         <th class="text-left py-2 pr-2">Project</th>
-        <th class="text-left py-2 pr-2">Task</th>
+        <th class="text-left py-2 pr-4 w-2/5">Task</th>
         <th class="text-left py-2 pr-2">Inbox</th>
         <th class="text-left py-2 pr-2">Status</th>
         <th class="text-right py-2 pr-2">Duration</th>
         <th class="text-right py-2">Age</th>
       </tr>
     </thead>
-    <tbody>
-      <template x-for="job in jobs" :key="job.job_id">
-        <template x-if="true">
-          <tr-block style="display: contents">
-            <tr class="border-b border-border hover:bg-surface-2 cursor-pointer"
-                @click="toggleExpand(job.job_id)">
-              <td class="py-2 pr-2 align-top text-foreground-muted"
-                  x-text="expanded[job.job_id] ? '▾' : '▸'"></td>
-              <td class="py-2 pr-2 align-top">
-                <a :href="`/projects/${job.project}`"
-                   class="text-accent hover:underline"
-                   @click.stop
-                   x-text="job.project"></a>
-                <template x-if="job.host">
-                  <span class="ml-1 text-xs text-foreground-muted"
-                        x-text="`@${job.host}`"></span>
+    <template x-for="job in jobs" :key="job.job_id">
+      <tbody>
+        <tr class="border-b border-border hover:bg-surface-2 cursor-pointer"
+            @click="toggleExpand(job.job_id)">
+          <td class="py-2 pr-2 align-top text-foreground-muted"
+              x-text="expanded[job.job_id] ? '▾' : '▸'"></td>
+          <td class="py-2 pr-2 align-top">
+            <a :href="`/projects/${job.project}`"
+               class="text-accent hover:underline"
+               @click.stop
+               x-text="job.project"></a>
+            <template x-if="job.host">
+              <span class="ml-1 text-xs text-foreground-muted"
+                    x-text="`@${job.host}`"></span>
+            </template>
+          </td>
+          <td class="py-2 pr-4 align-top" :title="job.task">
+            <span class="text-xs leading-relaxed line-clamp-3 break-words"
+                  x-text="job.task"></span>
+          </td>
+          <td class="py-2 pr-2 align-top text-xs text-foreground-muted"
+              x-text="job.inbox_id"></td>
+          <td class="py-2 pr-2 align-top whitespace-nowrap">
+            <span :class="statusBadgeClasses(job.status)"
+                  x-text="job.status"></span>
+            <template x-if="job.allow_writes">
+              <span class="ml-1 text-xs px-1 py-0.5 rounded bg-surface-3 border border-border"
+                    title="allow_writes=true">writes</span>
+            </template>
+          </td>
+          <td class="py-2 pr-2 align-top text-right text-xs text-foreground-muted whitespace-nowrap"
+              x-text="job.duration_ms !== null ? `${(job.duration_ms / 1000).toFixed(1)}s` : '—'"></td>
+          <td class="py-2 align-top text-right text-xs text-foreground-muted whitespace-nowrap"
+              x-text="formatAge(job)"></td>
+        </tr>
+        <template x-if="expanded[job.job_id]">
+          <tr class="bg-surface-2 border-b border-border">
+            <td colspan="7" class="py-3 px-4">
+              <div x-data="{ full: null, loadError: null, busy: true }"
+                   x-init="loadFull(job.job_id, $data)">
+                <template x-if="busy">
+                  <div class="text-xs text-foreground-muted">Loading full payload…</div>
                 </template>
-              </td>
-              <td class="py-2 pr-2 align-top max-w-md truncate"
-                  :title="job.task"
-                  x-text="job.task"></td>
-              <td class="py-2 pr-2 align-top text-xs text-foreground-muted"
-                  x-text="job.inbox_id"></td>
-              <td class="py-2 pr-2 align-top">
-                <span :class="statusBadgeClasses(job.status)"
-                      x-text="job.status"></span>
-                <template x-if="job.allow_writes">
-                  <span class="ml-1 text-xs px-1 py-0.5 rounded bg-surface-3 border border-border"
-                        title="allow_writes=true">writes</span>
+                <template x-if="loadError">
+                  <div class="text-xs text-error" x-text="`Failed to load: ${loadError}`"></div>
                 </template>
-              </td>
-              <td class="py-2 pr-2 align-top text-right text-xs text-foreground-muted"
-                  x-text="job.duration_ms !== null ? `${(job.duration_ms / 1000).toFixed(1)}s` : '—'"></td>
-              <td class="py-2 align-top text-right text-xs text-foreground-muted"
-                  x-text="formatAge(job)"></td>
-            </tr>
-            <template x-if="expanded[job.job_id]">
-              <tr class="bg-surface-2 border-b border-border">
-                <td colspan="7" class="py-3 px-4">
-                  <div x-data="{ full: null, loadError: null, busy: true }"
-                       x-init="loadFull(job.job_id, $data)">
-                    <template x-if="busy">
-                      <div class="text-xs text-foreground-muted">Loading full payload…</div>
+                <template x-if="full && !busy">
+                  <div class="space-y-2">
+                    <div class="text-xs grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-foreground-muted">
+                      <div><strong class="text-foreground">job_id:</strong>
+                        <code x-text="full.job_id"></code></div>
+                      <div><strong class="text-foreground">cid:</strong>
+                        <code x-text="full.cid || '—'"></code></div>
+                      <div><strong class="text-foreground">model:</strong>
+                        <span x-text="full.model || '(default)'"></span></div>
+                      <div><strong class="text-foreground">deliverable:</strong>
+                        <span x-text="full.deliverable"></span></div>
+                    </div>
+                    <template x-if="full.output">
+                      <details class="bg-surface-1 rounded border border-border" open>
+                        <summary class="cursor-pointer text-xs px-2 py-1 text-foreground-muted">
+                          output
+                        </summary>
+                        <pre class="px-3 py-2 text-xs whitespace-pre-wrap overflow-x-auto"
+                             x-text="full.output"></pre>
+                      </details>
                     </template>
-                    <template x-if="loadError">
-                      <div class="text-xs text-error" x-text="`Failed to load: ${loadError}`"></div>
-                    </template>
-                    <template x-if="full && !busy">
-                      <div class="space-y-2">
-                        <div class="text-xs grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-foreground-muted">
-                          <div><strong class="text-foreground">job_id:</strong>
-                            <code x-text="full.job_id"></code></div>
-                          <div><strong class="text-foreground">cid:</strong>
-                            <code x-text="full.cid || '—'"></code></div>
-                          <div><strong class="text-foreground">model:</strong>
-                            <span x-text="full.model || '(default)'"></span></div>
-                          <div><strong class="text-foreground">deliverable:</strong>
-                            <span x-text="full.deliverable"></span></div>
-                        </div>
-                        <template x-if="full.output">
-                          <details class="bg-surface-1 rounded border border-border" open>
-                            <summary class="cursor-pointer text-xs px-2 py-1 text-foreground-muted">
-                              output
-                            </summary>
-                            <pre class="px-3 py-2 text-xs whitespace-pre-wrap overflow-x-auto"
-                                 x-text="full.output"></pre>
-                          </details>
-                        </template>
-                        <template x-if="full.error">
-                          <details class="bg-error/10 rounded border border-error" open>
-                            <summary class="cursor-pointer text-xs px-2 py-1 text-error">
-                              error
-                            </summary>
-                            <pre class="px-3 py-2 text-xs whitespace-pre-wrap overflow-x-auto"
-                                 x-text="full.error"></pre>
-                          </details>
-                        </template>
-                      </div>
+                    <template x-if="full.error">
+                      <details class="bg-error/10 rounded border border-error" open>
+                        <summary class="cursor-pointer text-xs px-2 py-1 text-error">
+                          error
+                        </summary>
+                        <pre class="px-3 py-2 text-xs whitespace-pre-wrap overflow-x-auto"
+                             x-text="full.error"></pre>
+                      </details>
                     </template>
                   </div>
-                </td>
-              </tr>
-            </template>
-          </tr-block>
+                </template>
+              </div>
+            </td>
+          </tr>
         </template>
-      </template>
-    </tbody>
+      </tbody>
+    </template>
   </table>
 </section>
 
