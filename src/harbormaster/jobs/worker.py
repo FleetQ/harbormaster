@@ -17,6 +17,7 @@ import threading
 import time
 
 from harbormaster.config import HarbormasterConfig
+from harbormaster.jobs.schema import STATUS_RUNNING
 from harbormaster.jobs.store import Job, JobStore
 from harbormaster.tools._grounding import build_grounded_prompt
 from harbormaster.tools._helpers import run_backend
@@ -130,11 +131,16 @@ class JobWorker:
             # run_backend already converts BackendError → "Error: ..."
             # string; the only way this except fires is an unexpected
             # crash inside helpers. Treat it as a failure with no cid.
+            # v26.0.1 — expected_status=STATUS_RUNNING for parity with
+            # the instruction-mode CAS path. Ensures a second worker
+            # (or recover_orphaned firing concurrently) cannot
+            # double-transition this row.
             duration_ms = int((time.monotonic() - start) * 1000)
             _LOG.exception("delegate-job %s unexpected crash", job.id)
             self._store.fail(
                 job.id, error=f"unexpected: {exc!r}",
                 cid=None, duration_ms=duration_ms,
+                expected_status=STATUS_RUNNING,
             )
             return
 
@@ -147,10 +153,12 @@ class JobWorker:
             cid = _extract_cid(result)
             self._store.fail(
                 job.id, error=result, cid=cid, duration_ms=duration_ms,
+                expected_status=STATUS_RUNNING,
             )
         else:
             self._store.complete(
                 job.id, output=result, duration_ms=duration_ms,
+                expected_status=STATUS_RUNNING,
             )
 
 

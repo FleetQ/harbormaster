@@ -106,12 +106,14 @@
      plain <div> has no such parsing constraints. #}
   <div x-show="jobs.length" class="w-full text-sm">
     <div class="grid gap-x-4 border-b border-border text-xs uppercase text-foreground-muted py-2"
-         style="grid-template-columns:1.5rem minmax(7rem,1fr) minmax(8rem,2fr) minmax(4rem,.7fr) auto 5rem 4rem">
+         style="grid-template-columns:1.5rem minmax(7rem,1fr) minmax(8rem,2fr) minmax(4rem,.7fr) auto 4.5rem 5rem 4rem 4rem">
       <div></div>
       <div>Project</div>
       <div>Task</div>
       <div>Inbox</div>
       <div>Status</div>
+      <div>Mode</div>
+      <div class="text-right" title="Tokens reported via record_delegation_result">Tokens</div>
       <div class="text-right">Duration</div>
       <div class="text-right">Age</div>
     </div>
@@ -119,7 +121,7 @@
     <template x-for="job in jobs" :key="job.job_id">
       <div>
         <div class="grid gap-x-4 border-b border-border py-2 hover:bg-surface-2 cursor-pointer items-start"
-             style="grid-template-columns:1.5rem minmax(7rem,1fr) minmax(8rem,2fr) minmax(4rem,.7fr) auto 5rem 4rem"
+             style="grid-template-columns:1.5rem minmax(7rem,1fr) minmax(8rem,2fr) minmax(4rem,.7fr) auto 4.5rem 5rem 4rem 4rem"
              @click="toggleExpand(job.job_id)">
           <div class="text-foreground-muted text-xs"
                x-text="expanded[job.job_id] ? '▾' : '▸'"></div>
@@ -146,6 +148,12 @@
                     title="allow_writes=true">writes</span>
             </template>
           </div>
+          <div class="text-xs text-foreground-muted whitespace-nowrap"
+               :title="job.execution_mode === 'instruction' ? 'instruction packet returned to caller (subscription pool)' : 'subprocess `claude -p` (credit pool)'"
+               x-text="job.execution_mode === 'instruction' ? 'instr' : 'subproc'"></div>
+          <div class="text-right text-xs text-foreground-muted whitespace-nowrap font-mono"
+               :title="job.tokens_used !== null && job.tokens_used !== undefined ? `${job.tokens_used.toLocaleString()} tokens reported by caller` : 'no token usage reported'"
+               x-text="job.tokens_used !== null && job.tokens_used !== undefined ? job.tokens_used.toLocaleString() : '—'"></div>
           <div class="text-right text-xs text-foreground-muted whitespace-nowrap"
                x-text="job.duration_ms !== null ? `${(job.duration_ms / 1000).toFixed(1)}s` : '—'"></div>
           <div class="text-right text-xs text-foreground-muted whitespace-nowrap"
@@ -173,6 +181,14 @@
                       <span x-text="full.model || '(default)'"></span></div>
                     <div><strong class="text-foreground">deliverable:</strong>
                       <span x-text="full.deliverable"></span></div>
+                    <div><strong class="text-foreground">mode:</strong>
+                      <code x-text="full.execution_mode || 'subprocess'"></code></div>
+                    <div><strong class="text-foreground">tokens:</strong>
+                      <span x-text="full.tokens_used !== null && full.tokens_used !== undefined ? full.tokens_used.toLocaleString() : '—'"></span></div>
+                    <template x-if="full.batch_id">
+                      <div><strong class="text-foreground">batch:</strong>
+                        <code x-text="full.batch_id"></code></div>
+                    </template>
                   </div>
                   <template x-if="full.output">
                     <details class="bg-surface-1 rounded border border-border" open>

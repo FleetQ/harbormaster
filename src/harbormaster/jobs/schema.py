@@ -96,4 +96,10 @@ MIGRATIONS: list[tuple[str, str]] = [
     # for subprocess rows — the worker builds its prompt at run time
     # via build_grounded_prompt.
     ("rendered_prompt", "rendered_prompt TEXT"),
+    # v26.0.1 — correlation id for fan-out batches. All rows enqueued
+    # by a single fan_out_ask invocation share the same batch_id;
+    # NULL for single-target delegate_task / ask_project rows. Lets
+    # the operator filter /jobs by batch and the CLI surface batch
+    # completion progress (X of N targets recorded).
+    ("batch_id", "batch_id TEXT"),
 ]

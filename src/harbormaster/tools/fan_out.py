@@ -252,6 +252,12 @@ def _instruction_fan_out(
     from harbormaster.jobs.schema import STATUS_AWAITING_CALLER
 
     sub = get_subsystem(config)
+    # v26.0.1 — every row in this fan-out shares one batch_id so the
+    # operator can correlate the N awaiting_caller rows back to the
+    # single fan_out_ask invocation. Generated here (not inside the
+    # build_fan_out_packet helper) so the same id is used on the row
+    # AND in the packet envelope returned to the caller.
+    batch_id = f"batch_{secrets.token_hex(6)}"
     target_packets: list[dict[str, object]] = []
     for target in targets:
         try:
@@ -285,6 +291,7 @@ def _instruction_fan_out(
             execution_mode="instruction",
             initial_status=STATUS_AWAITING_CALLER,
             rendered_prompt=full_prompt,
+            batch_id=batch_id,
         )
         target_packets.append({
             "job_id": job.id,
@@ -296,7 +303,7 @@ def _instruction_fan_out(
             "model_hint": model,
         })
     return build_fan_out_packet(
-        batch_id=f"batch_{secrets.token_hex(6)}",
+        batch_id=batch_id,
         targets=target_packets,
         synthesize=synthesize,
         synthesis_max_turns=synthesis_max_turns,
