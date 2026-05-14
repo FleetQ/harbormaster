@@ -52,6 +52,8 @@ class Job:
     execution_mode: str = "subprocess"
     tokens_used: int | None = None
     rendered_prompt: str | None = None
+    # v26.0.1 — fan-out batch correlation id; NULL for non-batch rows.
+    batch_id: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable view (booleans normalised, no nulls
@@ -79,6 +81,7 @@ class Job:
             "execution_mode": self.execution_mode,
             "tokens_used": self.tokens_used,
             "rendered_prompt": self.rendered_prompt,
+            "batch_id": self.batch_id,
         }
 
 
@@ -115,6 +118,7 @@ def _row_to_job(row: sqlite3.Row) -> Job:
         rendered_prompt=(
             row["rendered_prompt"] if "rendered_prompt" in row_keys else None
         ),
+        batch_id=(row["batch_id"] if "batch_id" in row_keys else None),
     )
 
 
@@ -244,6 +248,7 @@ class JobStore:
         execution_mode: str = "subprocess",
         initial_status: str = STATUS_QUEUED,
         rendered_prompt: str | None = None,
+        batch_id: str | None = None,
     ) -> Job:
         """Insert a row and return its typed view.
 
@@ -273,13 +278,13 @@ class JobStore:
                 "INSERT INTO delegated_jobs ("
                 "id, inbox_id, project, host, task, deliverable, "
                 "allow_writes, model, status, queued_at, max_turns, "
-                "auto_commit, execution_mode, rendered_prompt"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "auto_commit, execution_mode, rendered_prompt, batch_id"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     job_id, inbox_id, project, host, task, deliverable,
                     1 if allow_writes else 0, model, initial_status, now,
                     max_turns, 1 if auto_commit else 0, execution_mode,
-                    rendered_prompt,
+                    rendered_prompt, batch_id,
                 ),
             )
         job = self.get(job_id)
@@ -663,8 +668,11 @@ class JobStore:
         *,
         project: str | None = None,
         status: str | None = None,
+        batch_id: str | None = None,
         limit: int = 50,
     ) -> list[Job]:
+        """List recent jobs. v26.0.1 adds ``batch_id`` filter so callers
+        can pull every row from one fan_out_ask invocation back."""
         clauses: list[str] = []
         params: list[Any] = []
         if project:
@@ -673,6 +681,9 @@ class JobStore:
         if status:
             clauses.append("status = ?")
             params.append(status)
+        if batch_id:
+            clauses.append("batch_id = ?")
+            params.append(batch_id)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         with self._lock:

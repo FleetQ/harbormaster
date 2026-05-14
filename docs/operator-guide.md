@@ -22,6 +22,7 @@ If you're just trying it out for the first time, start with the
 10. [Budgets and rate limits](#10-budgets-and-rate-limits)
 11. [The `config check` CLI](#11-the-config-check-cli)
 12. [Pre-commit hooks for downstream forks](#12-pre-commit-hooks-for-downstream-forks)
+13. [Execution mode & Claude billing pool routing (v26.0.0+)](#13-execution-mode--claude-billing-pool-routing-v2600)
 
 ---
 
@@ -482,6 +483,133 @@ The hooks (also referenced from the README):
   field.
 
 Both hooks are fast (<1 s each) and run on every `git commit`.
+
+---
+
+## 13. Execution mode & Claude billing pool routing (v26.0.0+)
+
+Starting **2026-06-15**, Anthropic separates programmatic Claude usage
+(Agent SDK, `claude -p`, third-party apps authenticating through the
+Agent SDK) from the Max plan's interactive usage pool. Programmatic
+calls draw from a dedicated **\$200/mo credit pool** (Max 20x; \$100
+for Max 5x; \$20 for Pro) at full API rates, with no rollover. See the
+research synthesis at
+[`../claudedocs/research_anthropic_credit_policy_2026-05-14.md`](../claudedocs/research_anthropic_credit_policy_2026-05-14.md).
+
+Harbormaster v26.0.0 introduces an **instruction-mode** path that
+returns a markdown packet to the calling MCP client (typically your
+interactive `claude` TUI) instead of spawning `claude -p` server-side.
+The calling assistant executes the packet's prompt via its own `Agent`
+/ `Task` subagent — those API calls inherit the parent session's auth
+context and bill against the **interactive subscription pool**, not
+the credit pool.
+
+### 13.1 Default behaviour
+
+`[delegate] execution_mode = "instruction"` is the default. No
+configuration change needed for typical interactive workflows:
+
+1. Operator runs `claude` from a project dir.
+2. Inside the TUI, the assistant calls `mcp__harbormaster__delegate_task(...)`.
+3. Harbormaster returns a `HARBORMASTER_INSTRUCTION_V1` markdown packet.
+4. The assistant spawns `Agent(prompt=..., cwd=...)` per the packet.
+5. After the Agent returns, the assistant calls
+   `mcp__harbormaster__record_delegation_result(job_id=..., status=...,
+   output=..., duration_ms=..., tokens_used=...)`.
+6. The JobStore row transitions to `completed` / `failed`; SSE on
+   `/jobs` and FleetQ Bridge subscribers fire identically to the
+   v22-v25 subprocess path.
+
+Every step happens inside one interactive Claude Code session — the
+subprocess-spawning path is bypassed entirely.
+
+### 13.2 Verifying you're on the subscription pool
+
+The cost-routing assumption relies on two preconditions:
+
+1. **Your interactive `claude` is authenticated via subscription
+   OAuth, not an API key.**
+   Check: `claude doctor` shows `auth=subscription` (Pro/Max). If it
+   shows `auth=api-key`, the parent session — and every Agent it
+   spawns — bills against the API account, not the subscription pool.
+2. **No `ANTHROPIC_API_KEY` env var leaks into Harbormaster's
+   subprocess context.** Even in instruction mode, the Harbormaster
+   process inherits the operator's env; an `ANTHROPIC_API_KEY`
+   leaking through can re-shape behaviour for any future subprocess
+   path.
+
+The safest pattern:
+
+```bash
+# Generate a long-lived subscription OAuth token (one-time):
+claude setup-token
+# → outputs a token of the form sk-ant-oat01-...
+
+# Export it on every Harbormaster invocation:
+export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+
+# CRITICAL: ensure no API key shadows the subscription auth:
+unset ANTHROPIC_API_KEY
+```
+
+Drop those two lines into your `~/.zshrc` / shell init so every shell
+that launches `claude` or `harbormaster-mcp` honours the same
+contract.
+
+**Known footgun**: GitHub issue
+[#37686](https://github.com/anthropics/claude-code/issues/37686)
+documents an operator who got a **\$1,800 unexpected API bill in two
+days** because a stale `ANTHROPIC_API_KEY` was set in their cron
+environment. The variable silently won over the subscription OAuth —
+no warning, no log line. Audit your shell init files before relying
+on v26's cost routing.
+
+### 13.3 When to opt back to subprocess mode
+
+The instruction-mode path requires an interactive caller — there must
+be a calling assistant to receive the packet and execute the Agent.
+For these scenarios, set `[delegate] execution_mode = "subprocess"`:
+
+- **Unattended cron jobs / overnight pipelines** with no human-facing
+  TUI. The subprocess path spawns `claude -p` directly and bills
+  against the credit pool.
+- **CI / GitHub Actions** workflows triggering delegate work without a
+  human in the loop.
+- **SSH cross-host delegation**. Harbormaster auto-falls-back to
+  subprocess for any non-local target regardless of this setting
+  (the calling assistant has no PTY to the remote host) — explicit
+  config not needed but harmless.
+
+Mixed setups are supported: keep `execution_mode = "instruction"`
+globally and trust the SSH auto-fallback for the few cross-host calls.
+
+### 13.4 Orphan sweep
+
+Instruction-mode rows wait in status `awaiting_caller` until the
+calling assistant invokes `record_delegation_result`. If the caller
+crashes mid-Agent or never reports back, the row would otherwise
+linger forever. Harbormaster sweeps stale `awaiting_caller` rows to
+`failed` with error `caller_never_recorded_result` after
+`[delegate] awaiting_caller_timeout_seconds` (default 3600 = 1 h).
+Set to `0` to disable the sweep. The sweep runs once at subsystem
+boot AND opportunistically inside every `record_delegation_result`
+invocation, so no dedicated heartbeat thread is needed.
+
+### 13.5 Observing the routing in `/jobs`
+
+The UI surfaces per-row provenance via the `Mode` column
+(`instr` / `subproc`) and per-row `Tokens` reported by the caller
+(NULL when no value was passed). Use these for sanity-checking your
+routing: if interactive use suddenly shows `subproc` rows, an env
+override likely flipped the dispatch.
+
+### 13.6 Migration from v25 and earlier
+
+No data migration is required — Harbormaster applies idempotent
+`ALTER TABLE` migrations on first boot of the new code, adding the
+`execution_mode` (default `'subprocess'`), `tokens_used` (NULL),
+`rendered_prompt` (NULL), and `batch_id` (NULL) columns. Existing
+rows preserve their actual provenance under the new schema.
 
 ---
 
