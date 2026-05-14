@@ -360,7 +360,7 @@ class DelegateConfig(BaseModel):
     """v23.0.0a2+: async-delegate JobStore tuning.
 
     Retention (v23.0.0a2) + worker concurrency (v24.0.0a1) +
-    auto_commit default (v24.0.0a2).
+    auto_commit default (v24.0.0a2) + execution mode (v26.0.0).
     """
 
     model_config = _FORBID_EXTRA
@@ -377,6 +377,30 @@ class DelegateConfig(BaseModel):
     # operators delegating many parallel jobs. Hard cap of 16
     # mirrors fleetq.dispatcher_max_workers.
     worker_count: int = Field(default=1, gt=0, le=16)
+    # v26.0.0 — orchestrator-in-the-loop pivot.
+    # "instruction" (default): delegate_task / ask_project / fan_out_ask
+    #   return an instruction packet for the calling MCP client (the
+    #   operator's interactive `claude` TUI) to execute via its own
+    #   Agent() / Task tool. The job is persisted with
+    #   status=awaiting_caller; the caller MUST report back through the
+    #   new record_delegation_result tool. Routes LLM cost to the
+    #   caller's interactive subscription pool (Max plan limits) instead
+    #   of the new programmatic-credit pool ($200/mo Max 20x as of
+    #   2026-06-15).
+    # "subprocess" (legacy v22-v25): server-side `claude -p` execution
+    #   with JobWorker async support. Required for SSH cross-host and
+    #   any unattended scenario where no interactive caller exists.
+    # SSH targets always fall back to subprocess at the tool layer
+    # regardless of this setting — the calling assistant has no PTY
+    # to the remote host.
+    execution_mode: Literal["instruction", "subprocess"] = "instruction"
+    # v26.0.0 — orphan sweep TTL for instruction-mode rows whose caller
+    # never invokes record_delegation_result. Older rows are swept to
+    # status=failed with error="caller_never_recorded_result" at
+    # subsystem boot AND opportunistically inside record_delegation_result.
+    # Set to 0 to disable the sweep. Default 3600s (1 h) matches the
+    # practical ceiling on a single delegate operation.
+    awaiting_caller_timeout_seconds: int = Field(default=3600, ge=0)
 
 
 class HarbormasterConfig(BaseModel):

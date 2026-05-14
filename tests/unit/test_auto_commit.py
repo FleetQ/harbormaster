@@ -24,7 +24,7 @@ def test_sync_delegate_no_auto_commit_uses_writes_suffix(monkeypatch):
         captured["prompt"] = prompt
         return "ok"
 
-    monkeypatch.setattr(_delegate, "run_backend", fake)
+    monkeypatch.setattr(_delegate, "run_backend_or_instruction", fake)
 
     fn = _tools(build_server(HarbormasterConfig()))["delegate_task"].fn
     fn(name="x", task="t", deliverable="d", allow_writes=True)
@@ -42,7 +42,7 @@ def test_sync_delegate_auto_commit_swaps_suffix(monkeypatch):
         captured["prompt"] = prompt
         return "ok"
 
-    monkeypatch.setattr(_delegate, "run_backend", fake)
+    monkeypatch.setattr(_delegate, "run_backend_or_instruction", fake)
 
     fn = _tools(build_server(HarbormasterConfig()))["delegate_task"].fn
     fn(
@@ -66,7 +66,7 @@ def test_sync_delegate_auto_commit_without_allow_writes_stays_read_only(monkeypa
         captured["prompt"] = prompt
         return "ok"
 
-    monkeypatch.setattr(_delegate, "run_backend", fake)
+    monkeypatch.setattr(_delegate, "run_backend_or_instruction", fake)
 
     fn = _tools(build_server(HarbormasterConfig()))["delegate_task"].fn
     fn(

@@ -17,7 +17,12 @@ from pathlib import Path
 
 import pytest
 
-from harbormaster.config import BackendConfig, HarbormasterConfig, ProjectsConfig
+from harbormaster.config import (
+    BackendConfig,
+    DelegateConfig,
+    HarbormasterConfig,
+    ProjectsConfig,
+)
 from harbormaster.server import build_server
 
 FAKE_CLAUDE = Path(__file__).resolve().parent.parent / "fixtures" / "fake_claude.py"
@@ -43,6 +48,13 @@ def fake_config(tmp_path: Path, project_dir: Path) -> HarbormasterConfig:
                 timeout_local=10,  # plenty for the shim
             )
         },
+        # v26.0.0 — these tests exercise the real subprocess path
+        # against a fake-claude shim. The v26 default execution_mode
+        # is "instruction" (returns a packet instead of spawning the
+        # binary); pin to "subprocess" here so the fake-claude harness
+        # is actually invoked. Instruction mode has its own dedicated
+        # coverage in tests/unit/test_v26_*.py.
+        delegate=DelegateConfig(execution_mode="subprocess"),
     )
 
 

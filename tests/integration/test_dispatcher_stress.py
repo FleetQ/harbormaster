@@ -28,6 +28,7 @@ from typing import Any
 import pytest
 
 from harbormaster.config import (
+    DelegateConfig,
     HarbormasterConfig,
     HistoryConfig,
     ProjectsConfig,
@@ -167,6 +168,8 @@ def stress_backend_config(tmp_path: Path) -> HarbormasterConfig:
                 timeout_local=10,
             ),
         },
+        # v26.0.0 — pin to subprocess so the fake_claude binary runs.
+        delegate=DelegateConfig(execution_mode="subprocess"),
     )
 
 

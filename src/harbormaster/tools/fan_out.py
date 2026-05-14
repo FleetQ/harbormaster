@@ -11,6 +11,7 @@ extra claude -p invocation, off by default.
 """
 from __future__ import annotations
 
+import secrets
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,7 +20,8 @@ from mcp.server.fastmcp import FastMCP
 
 from harbormaster.backends import BackendError, get_backend
 from harbormaster.config import HarbormasterConfig
-from harbormaster.projects import discover_projects
+from harbormaster.instruction import build_fan_out_packet, execution_mode_for
+from harbormaster.projects import discover_projects, resolve_project
 from harbormaster.tools._helpers import run_backend
 
 
@@ -87,6 +89,32 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
             "Reply with a brief markdown answer under 150 words. "
             "Focus on the answer; skip preamble."
         )
+
+        # v26.0.0 — when EVERY target resolves to instruction mode
+        # (i.e. all targets are local AND execution_mode='instruction'),
+        # return a fan-out instruction packet for the caller to execute
+        # in parallel via N Agent() calls. Mixed batches keep the v25
+        # subprocess-everywhere behaviour to avoid confusing hybrid
+        # output shapes; operators wanting hybrid can call fan_out_ask
+        # twice (one per host class). Going through execution_mode_for
+        # keeps the SSH-forces-subprocess rule in a single place.
+        all_instruction = all(
+            execution_mode_for(
+                config, None if t.host == "local" else t.host,
+            ) == "instruction"
+            for t in targets
+        )
+        if all_instruction:
+            return _instruction_fan_out(
+                targets=targets,
+                full_prompt=full_prompt,
+                question=question,
+                config=config,
+                max_turns=max_turns,
+                synthesize=synthesize,
+                synthesis_max_turns=synthesis_max_turns,
+                model=model,
+            )
 
         results: dict[_Target, str] = {}
 
@@ -200,6 +228,80 @@ def _synthesize(
     except BackendError as e:
         return f"Synthesis failed: {e}"
     return result.output
+
+
+def _instruction_fan_out(
+    *,
+    targets: list[_Target],
+    full_prompt: str,
+    question: str,
+    config: HarbormasterConfig,
+    max_turns: int,
+    synthesize: bool,
+    synthesis_max_turns: int,
+    model: str | None,
+) -> str:
+    """v26.0.0 — enqueue one ``awaiting_caller`` row per target and
+    return a batch instruction packet describing all of them.
+
+    The calling assistant spawns N parallel Agents, records each result
+    via ``record_delegation_result``, and (if ``synthesize=True``) runs
+    a single final synthesis Agent across the collected answers.
+    """
+    from harbormaster.jobs import get_subsystem
+    from harbormaster.jobs.schema import STATUS_AWAITING_CALLER
+
+    sub = get_subsystem(config)
+    target_packets: list[dict[str, object]] = []
+    for target in targets:
+        try:
+            cwd = resolve_project(
+                target.project, config.projects,
+                ignore_patterns=config.ignore.patterns,
+            )
+        except ValueError:
+            # Resolution failure on a target shouldn't kill the batch —
+            # surface the failure inline. The caller will skip this
+            # target's Agent call.
+            target_packets.append({
+                "job_id": None,
+                "project": target.project,
+                "host": "local",
+                "cwd": None,
+                "prompt": None,
+                "error": f"project not found: {target.project}",
+            })
+            continue
+        job = sub.store.enqueue(
+            project=target.project,
+            host=None,
+            task=question,
+            deliverable="",
+            allow_writes=False,
+            model=model,
+            inbox_id="default",
+            max_turns=max_turns,
+            auto_commit=False,
+            execution_mode="instruction",
+            initial_status=STATUS_AWAITING_CALLER,
+            rendered_prompt=full_prompt,
+        )
+        target_packets.append({
+            "job_id": job.id,
+            "project": target.project,
+            "host": "local",
+            "cwd": str(cwd),
+            "prompt": full_prompt,
+            "max_turns_hint": max_turns,
+            "model_hint": model,
+        })
+    return build_fan_out_packet(
+        batch_id=f"batch_{secrets.token_hex(6)}",
+        targets=target_packets,
+        synthesize=synthesize,
+        synthesis_max_turns=synthesis_max_turns,
+        model_hint=model,
+    )
 
 
 def _format_report(

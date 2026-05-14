@@ -38,9 +38,14 @@ STATUS_QUEUED = "queued"
 STATUS_RUNNING = "running"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
+# v26.0.0 — instruction-mode initial state. Caller (the MCP client)
+# must invoke `record_delegation_result` to transition to a terminal
+# state. Workers ignore this status — they only claim STATUS_QUEUED.
+STATUS_AWAITING_CALLER = "awaiting_caller"
 
 VALID_STATUSES = frozenset({
     STATUS_QUEUED, STATUS_RUNNING, STATUS_COMPLETED, STATUS_FAILED,
+    STATUS_AWAITING_CALLER,
 })
 
 # Idempotent ``ALTER TABLE ADD COLUMN`` migrations applied on
@@ -76,4 +81,19 @@ MIGRATIONS: list[tuple[str, str]] = [
     # matches the v22+ "operator reviews + commits" contract; flipping
     # to 1 instructs the subagent to git commit after edits.
     ("auto_commit", "auto_commit INTEGER NOT NULL DEFAULT 0"),
+    # v26.0.0 — execution provenance. 'subprocess' (default) matches
+    # pre-v26 rows whose work was run by a JobWorker spawning `claude -p`.
+    # 'instruction' rows were enqueued in instruction mode and recorded
+    # via `record_delegation_result` by the calling MCP client.
+    ("execution_mode", "execution_mode TEXT NOT NULL DEFAULT 'subprocess'"),
+    # v26.0.0 — tokens reported by the caller via record_delegation_result.
+    # Nullable: only populated when caller passes the value.
+    ("tokens_used", "tokens_used INTEGER"),
+    # v26.0.0 — the full rendered prompt (grounded context + role
+    # suffix) for instruction-mode rows. Stored so a caller that lost
+    # the original delegate_task / ask_project response and recovers
+    # the packet via get_delegated_task gets a faithful copy. NULL
+    # for subprocess rows — the worker builds its prompt at run time
+    # via build_grounded_prompt.
+    ("rendered_prompt", "rendered_prompt TEXT"),
 ]

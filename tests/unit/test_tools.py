@@ -43,7 +43,7 @@ def test_delegate_task_read_only_prompt_when_writes_disallowed(monkeypatch):
         captured["prompt"] = prompt
         return "ok"
 
-    monkeypatch.setattr(_delegate, "run_backend", fake_run_backend)
+    monkeypatch.setattr(_delegate, "run_backend_or_instruction", fake_run_backend)
 
     mcp = build_server(HarbormasterConfig())
     fn = _tools_by_name(mcp)["delegate_task"].fn
@@ -64,7 +64,7 @@ def test_delegate_task_passes_max_turns_to_run_backend(monkeypatch):
         captured["max_turns"] = max_turns
         return "ok"
 
-    monkeypatch.setattr(_delegate, "run_backend", fake_run_backend)
+    monkeypatch.setattr(_delegate, "run_backend_or_instruction", fake_run_backend)
 
     mcp = build_server(HarbormasterConfig())
     fn = _tools_by_name(mcp)["delegate_task"].fn
@@ -87,7 +87,7 @@ def test_delegate_task_writes_prompt_when_allowed(monkeypatch):
         captured["prompt"] = prompt
         return "ok"
 
-    monkeypatch.setattr(_delegate, "run_backend", fake_run_backend)
+    monkeypatch.setattr(_delegate, "run_backend_or_instruction", fake_run_backend)
 
     mcp = build_server(HarbormasterConfig())
     fn = _tools_by_name(mcp)["delegate_task"].fn

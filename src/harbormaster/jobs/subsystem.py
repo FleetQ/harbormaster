@@ -78,6 +78,19 @@ def get_subsystem(config: HarbormasterConfig) -> Subsystem:
                 "delegate-job subsystem: recovered %d orphaned running "
                 "jobs as failed (server_restart)", recovered,
             )
+        # v26.0.0 — orphan sweep for instruction-mode rows whose caller
+        # never invoked record_delegation_result. Runs once at boot;
+        # record_delegation_result also calls this opportunistically so
+        # we don't need a separate heartbeat thread. Operators who want
+        # to keep stale rows around set awaiting_caller_timeout_seconds=0.
+        ttl = config.delegate.awaiting_caller_timeout_seconds
+        if ttl > 0:
+            swept = store.sweep_stale_awaiting_caller(max_age_seconds=ttl)
+            if swept:
+                _LOG.info(
+                    "delegate-job subsystem: swept %d stale awaiting_caller "
+                    "rows (ttl=%ds)", swept, ttl,
+                )
         # v23.0.0a2: prune old rows so unbounded growth doesn't
         # accumulate across process lifetimes. Runs ONCE per boot —
         # not on every enqueue. Default retain=1000 (overridable via
