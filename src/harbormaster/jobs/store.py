@@ -15,6 +15,7 @@ from harbormaster.jobs.schema import (
     CLARIFICATION_SCHEMA,
     MIGRATIONS,
     SCHEMA,
+    STATUS_AWAITING_CALLER,
     STATUS_CLR_ANSWERED,
     STATUS_CLR_PENDING,
     STATUS_COMPLETED,
@@ -47,6 +48,10 @@ class Job:
     read_at: float | None
     max_turns: int = 10
     auto_commit: bool = False
+    # v26.0.0 — execution provenance + caller-reported usage.
+    execution_mode: str = "subprocess"
+    tokens_used: int | None = None
+    rendered_prompt: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable view (booleans normalised, no nulls
@@ -71,10 +76,18 @@ class Job:
             "read_at": self.read_at,
             "max_turns": self.max_turns,
             "auto_commit": self.auto_commit,
+            "execution_mode": self.execution_mode,
+            "tokens_used": self.tokens_used,
+            "rendered_prompt": self.rendered_prompt,
         }
 
 
 def _row_to_job(row: sqlite3.Row) -> Job:
+    # v26.0.0 — execution_mode + tokens_used arrived via idempotent
+    # ALTER TABLE migrations. Use dict access guarded by `.keys()` so
+    # tests using mock rows (or pre-migration DBs surfaced through
+    # legacy fixtures) don't crash.
+    row_keys = set(row.keys())
     return Job(
         id=row["id"],
         inbox_id=row["inbox_id"],
@@ -95,6 +108,13 @@ def _row_to_job(row: sqlite3.Row) -> Job:
         read_at=row["read_at"],
         max_turns=row["max_turns"],
         auto_commit=bool(row["auto_commit"]),
+        execution_mode=(
+            row["execution_mode"] if "execution_mode" in row_keys else "subprocess"
+        ),
+        tokens_used=(row["tokens_used"] if "tokens_used" in row_keys else None),
+        rendered_prompt=(
+            row["rendered_prompt"] if "rendered_prompt" in row_keys else None
+        ),
     )
 
 
@@ -221,8 +241,25 @@ class JobStore:
         inbox_id: str = "default",
         max_turns: int = 10,
         auto_commit: bool = False,
+        execution_mode: str = "subprocess",
+        initial_status: str = STATUS_QUEUED,
+        rendered_prompt: str | None = None,
     ) -> Job:
-        """Insert a ``queued`` row and return its typed view.
+        """Insert a row and return its typed view.
+
+        ``execution_mode`` (v26.0.0) records who runs the job. Default
+        ``"subprocess"`` matches the v22-25 contract: ``initial_status``
+        defaults to ``queued`` so a JobWorker picks it up. For
+        instruction mode, callers pass ``execution_mode="instruction"``
+        plus ``initial_status="awaiting_caller"`` — that row is invisible
+        to workers (they only claim ``queued``) and waits for the MCP
+        client to invoke ``record_delegation_result``.
+
+        ``rendered_prompt`` (v26.0.0) is the full grounded + suffixed
+        prompt persisted for instruction-mode rows so a caller who
+        loses the original packet response can recover it faithfully
+        via ``get_delegated_task``. NULL for subprocess rows — the
+        worker builds its own prompt at run time.
 
         ``max_turns`` (v22.0.1) is the per-job turn budget the worker
         passes to ``run_backend``. ``auto_commit`` (v24.0.0a2)
@@ -236,12 +273,13 @@ class JobStore:
                 "INSERT INTO delegated_jobs ("
                 "id, inbox_id, project, host, task, deliverable, "
                 "allow_writes, model, status, queued_at, max_turns, "
-                "auto_commit"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "auto_commit, execution_mode, rendered_prompt"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     job_id, inbox_id, project, host, task, deliverable,
-                    1 if allow_writes else 0, model, STATUS_QUEUED, now,
-                    max_turns, 1 if auto_commit else 0,
+                    1 if allow_writes else 0, model, initial_status, now,
+                    max_turns, 1 if auto_commit else 0, execution_mode,
+                    rendered_prompt,
                 ),
             )
         job = self.get(job_id)
@@ -277,17 +315,52 @@ class JobStore:
         return _row_to_job(row) if row else None
 
     def complete(
-        self, job_id: str, *, output: str, duration_ms: int,
-    ) -> None:
+        self,
+        job_id: str,
+        *,
+        output: str,
+        duration_ms: int,
+        tokens_used: int | None = None,
+        expected_status: str | None = None,
+    ) -> bool:
+        """Mark ``job_id`` completed. v26.0.0 added ``tokens_used`` so
+        instruction-mode callers can report cumulative token cost back,
+        and ``expected_status`` so callers can require the row to be in
+        a specific state before transitioning — closes the
+        record_delegation_result TOCTOU window between read and update.
+
+        Returns ``True`` when the row was actually updated and the
+        completion fan-out fired; ``False`` when the optimistic guard
+        rejected the transition (row was already terminal or moved on).
+        """
         now = time.time()
         with self._lock:
-            self._conn.execute(
-                "UPDATE delegated_jobs "
-                "SET status = ?, output = ?, completed_at = ?, duration_ms = ? "
-                "WHERE id = ?",
-                (STATUS_COMPLETED, output, now, duration_ms, job_id),
-            )
-        self._fire_completion(job_id)
+            if expected_status is None:
+                cur = self._conn.execute(
+                    "UPDATE delegated_jobs "
+                    "SET status = ?, output = ?, completed_at = ?, "
+                    "    duration_ms = ?, tokens_used = ? "
+                    "WHERE id = ?",
+                    (
+                        STATUS_COMPLETED, output, now, duration_ms,
+                        tokens_used, job_id,
+                    ),
+                )
+            else:
+                cur = self._conn.execute(
+                    "UPDATE delegated_jobs "
+                    "SET status = ?, output = ?, completed_at = ?, "
+                    "    duration_ms = ?, tokens_used = ? "
+                    "WHERE id = ? AND status = ?",
+                    (
+                        STATUS_COMPLETED, output, now, duration_ms,
+                        tokens_used, job_id, expected_status,
+                    ),
+                )
+            updated = cur.rowcount > 0
+        if updated:
+            self._fire_completion(job_id)
+        return updated
 
     def fail(
         self,
@@ -296,17 +369,45 @@ class JobStore:
         error: str,
         cid: str | None,
         duration_ms: int,
-    ) -> None:
+        tokens_used: int | None = None,
+        expected_status: str | None = None,
+    ) -> bool:
+        """Mark ``job_id`` failed. v26.0.0 added ``tokens_used`` for the
+        instruction-mode contract: a caller may have spent tokens before
+        the Agent failed; we record that cost honestly. ``expected_status``
+        provides the same optimistic-CAS guard as ``complete()``.
+
+        Returns ``True`` when the row was actually updated and the
+        completion fan-out fired; ``False`` otherwise.
+        """
         now = time.time()
         with self._lock:
-            self._conn.execute(
-                "UPDATE delegated_jobs "
-                "SET status = ?, error = ?, cid = ?, "
-                "    completed_at = ?, duration_ms = ? "
-                "WHERE id = ?",
-                (STATUS_FAILED, error, cid, now, duration_ms, job_id),
-            )
-        self._fire_completion(job_id)
+            if expected_status is None:
+                cur = self._conn.execute(
+                    "UPDATE delegated_jobs "
+                    "SET status = ?, error = ?, cid = ?, "
+                    "    completed_at = ?, duration_ms = ?, tokens_used = ? "
+                    "WHERE id = ?",
+                    (
+                        STATUS_FAILED, error, cid, now, duration_ms,
+                        tokens_used, job_id,
+                    ),
+                )
+            else:
+                cur = self._conn.execute(
+                    "UPDATE delegated_jobs "
+                    "SET status = ?, error = ?, cid = ?, "
+                    "    completed_at = ?, duration_ms = ?, tokens_used = ? "
+                    "WHERE id = ? AND status = ?",
+                    (
+                        STATUS_FAILED, error, cid, now, duration_ms,
+                        tokens_used, job_id, expected_status,
+                    ),
+                )
+            updated = cur.rowcount > 0
+        if updated:
+            self._fire_completion(job_id)
+        return updated
 
     def _fire_completion(self, job_id: str) -> None:
         """v22.1.0: wake any waiters parked on this job's Event or
@@ -655,3 +756,64 @@ class JobStore:
                 (STATUS_FAILED, "server_restart", now, STATUS_RUNNING),
             )
             return cur.rowcount
+
+    def sweep_stale_awaiting_caller(
+        self, *, max_age_seconds: int, exclude_ids: frozenset[str] | None = None,
+    ) -> int:
+        """v26.0.0 — sweep ``awaiting_caller`` rows older than
+        ``max_age_seconds`` to ``failed`` with reason
+        ``caller_never_recorded_result``.
+
+        Uses ``UPDATE … RETURNING id`` so the rows we just transitioned
+        are the exact rows we fire ``_fire_completion`` for — no second
+        SELECT, no race with a concurrent ``record_delegation_result``
+        that updates the same row between SELECT and fan-out.
+
+        ``exclude_ids`` (v26.0.0) lets the caller protect specific rows
+        from the sweep — used by ``record_delegation_result`` to ensure
+        the row being recorded is not swept out from under itself.
+
+        Called periodically from the JobSubsystem heartbeat. Returns the
+        count of rows swept. A ``max_age_seconds`` of 0 disables the
+        sweep (callers should not call into this with 0; the subsystem
+        suppresses the call instead).
+        """
+        if max_age_seconds <= 0:
+            return 0
+        cutoff = time.time() - max_age_seconds
+        now = time.time()
+        excluded = exclude_ids or frozenset()
+        with self._lock:
+            if excluded:
+                placeholders = ",".join("?" for _ in excluded)
+                cur = self._conn.execute(
+                    f"UPDATE delegated_jobs "
+                    f"SET status = ?, error = ?, completed_at = ?, "
+                    f"    duration_ms = COALESCE(duration_ms, 0) "
+                    f"WHERE status = ? AND queued_at < ? "
+                    f"  AND id NOT IN ({placeholders}) "
+                    f"RETURNING id",
+                    (
+                        STATUS_FAILED, "caller_never_recorded_result", now,
+                        STATUS_AWAITING_CALLER, cutoff,
+                        *excluded,
+                    ),
+                )
+            else:
+                cur = self._conn.execute(
+                    "UPDATE delegated_jobs "
+                    "SET status = ?, error = ?, completed_at = ?, "
+                    "    duration_ms = COALESCE(duration_ms, 0) "
+                    "WHERE status = ? AND queued_at < ? "
+                    "RETURNING id",
+                    (
+                        STATUS_FAILED, "caller_never_recorded_result", now,
+                        STATUS_AWAITING_CALLER, cutoff,
+                    ),
+                )
+            swept_ids = [row["id"] for row in cur.fetchall()]
+        # Fire completion notifications outside the lock so subscribers
+        # (SSE/bridge/inbox waiters) see uniform behaviour across reasons.
+        for jid in swept_ids:
+            self._fire_completion(jid)
+        return len(swept_ids)

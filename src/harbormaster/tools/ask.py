@@ -5,7 +5,7 @@ from mcp.server.fastmcp import FastMCP
 
 from harbormaster.config import HarbormasterConfig
 from harbormaster.tools._grounding import build_grounded_prompt
-from harbormaster.tools._helpers import run_backend
+from harbormaster.tools._helpers import run_backend_or_instruction
 
 
 def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
@@ -19,11 +19,22 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
     ) -> str:
         """Ask a question of a project's Claude Code subagent.
 
-        Spawns the configured backend in the project's directory; the project's
-        CLAUDE.md and Serena memories auto-load. Returns ≤ 800-word markdown
-        summary; full output dumped to /tmp if longer. When `host` is set
-        (and != "local"), runs over SSH on that host inside the host's
-        configured `remote_htdocs/<name>`.
+        Behaviour depends on ``[delegate] execution_mode``:
+
+        - ``"instruction"`` (default, v26.0.0): returns an instruction
+          packet for the calling MCP client to execute via its
+          ``Agent`` / ``Task`` tool. The packet carries the project's
+          cwd so the agent can auto-load CLAUDE.md and Serena memories.
+          The caller MUST invoke ``record_delegation_result`` to mark
+          the job complete.
+        - ``"subprocess"`` (legacy v22-v25): spawns the configured backend
+          in the project's directory; CLAUDE.md and Serena memories
+          auto-load. Returns ≤ 800-word markdown summary; full output
+          dumped to /tmp if longer.
+
+        When `host` is set (and != "local"), runs over SSH on that host
+        inside the host's configured `remote_htdocs/<name>`. SSH always
+        forces subprocess mode (no PTY to remote from caller's session).
 
         When `[history] auto_ground = true`, the prompt is prepended with
         a "Prior context" section listing the top-K past Q&A matches for
@@ -44,7 +55,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
             "Return a concise markdown summary under 500 words. "
             "Focus on the answer; skip unnecessary preamble."
         )
-        return run_backend(
+        return run_backend_or_instruction(
             name=name,
             prompt=full_prompt,
             max_turns=max_turns,
@@ -52,4 +63,5 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
             config=config,
             label_prefix="ask",
             model=model,
+            task_text=question,
         )

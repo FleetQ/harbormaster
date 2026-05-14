@@ -19,6 +19,7 @@ from harbormaster.tools.job_resources import register as register_job_resources
 from harbormaster.tools.job_status import register as register_job_status
 from harbormaster.tools.projects import register as register_projects
 from harbormaster.tools.recall import register as register_recall
+from harbormaster.tools.record_result import register as register_record_result
 
 
 def register_tools(mcp: FastMCP, config: HarbormasterConfig) -> None:
@@ -36,6 +37,8 @@ def register_tools(mcp: FastMCP, config: HarbormasterConfig) -> None:
     register_await_jobs(mcp, config)
     register_clarify(mcp, config)
     register_job_resources(mcp, config)
+    # v26.0.0 — caller-side report-back tool for instruction-mode jobs.
+    register_record_result(mcp, config)
 
     # v2.0.0a4: opt-in entry-point plugin discovery. No-op (with a
     # single debug log) when [plugins].enabled is false.

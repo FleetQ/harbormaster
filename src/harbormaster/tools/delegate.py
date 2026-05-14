@@ -13,8 +13,9 @@ from typing import Literal
 from mcp.server.fastmcp import FastMCP
 
 from harbormaster.config import HarbormasterConfig
+from harbormaster.instruction import execution_mode_for
 from harbormaster.tools._grounding import build_grounded_prompt
-from harbormaster.tools._helpers import run_backend
+from harbormaster.tools._helpers import run_backend_or_instruction
 
 _READ_ONLY_SUFFIX = (
     "Read-only mode. Do NOT edit files. "
@@ -110,12 +111,64 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         Set when you trust the subagent's judgement and want the
         commit step inside the delegation budget.
         """
+        # v26.0.0 — resolve effective execution mode honouring the
+        # SSH-forces-subprocess rule. Async mode crosses both paths
+        # differently: subprocess-async enqueues for a JobWorker;
+        # instruction-async enqueues an awaiting_caller row whose
+        # packet the caller polls for via get_delegated_task.
+        eff_mode = execution_mode_for(config, host)
+
         if mode == "async":
             # Late import to break the tools.delegate ↔ jobs.worker
             # ↔ tools._grounding circular path. The async subsystem
             # touches tool-helper modules at construction time.
             from harbormaster.jobs import get_subsystem
+            from harbormaster.jobs.schema import (
+                STATUS_AWAITING_CALLER,
+                STATUS_QUEUED,
+            )
             sub = get_subsystem(config)
+            if eff_mode == "instruction":
+                # v26.0.0 — async + instruction: enqueue as awaiting_caller,
+                # return a handle. The caller polls get_delegated_task to
+                # retrieve the instruction packet, then executes it.
+                # Pre-render the full prompt (grounded + role suffix) so
+                # the recovered packet faithfully reproduces the original.
+                grounded = build_grounded_prompt(
+                    question=f"{task}\n\nDeliverable: {deliverable}",
+                    project=name,
+                    host=host,
+                    config=config,
+                )
+                if allow_writes:
+                    suffix = (
+                        _WRITES_AUTO_COMMIT_SUFFIX
+                        if auto_commit else _WRITES_SUFFIX
+                    )
+                else:
+                    suffix = _READ_ONLY_SUFFIX
+                rendered = f"{grounded}\n\n{suffix}"
+                job = sub.store.enqueue(
+                    project=name,
+                    host=host,
+                    task=task,
+                    deliverable=deliverable,
+                    allow_writes=allow_writes,
+                    model=model,
+                    inbox_id=inbox_id,
+                    max_turns=max_turns,
+                    auto_commit=auto_commit,
+                    execution_mode="instruction",
+                    initial_status=STATUS_AWAITING_CALLER,
+                    rendered_prompt=rendered,
+                )
+                return (
+                    f"queued {job.id} (inbox={job.inbox_id}) in instruction "
+                    f"mode. Fetch instruction packet with "
+                    f"get_delegated_task({job.id!r}), execute via Agent(), "
+                    f"and report back with record_delegation_result."
+                )
+            # Legacy subprocess-async path.
             job = sub.store.enqueue(
                 project=name,
                 host=host,
@@ -126,6 +179,8 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                 inbox_id=inbox_id,
                 max_turns=max_turns,
                 auto_commit=auto_commit,
+                execution_mode="subprocess",
+                initial_status=STATUS_QUEUED,
             )
             return (
                 f"queued {job.id} (inbox={job.inbox_id}). "
@@ -134,7 +189,8 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                 f"inbox_id={job.inbox_id!r})."
             )
 
-        # mode == "sync" — existing v22.0.0a1 behaviour.
+        # mode == "sync" — instruction-mode returns a packet, subprocess
+        # mode preserves the v22-v25 blocking semantics.
         grounded = build_grounded_prompt(
             question=f"{task}\n\nDeliverable: {deliverable}",
             project=name,
@@ -146,7 +202,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         else:
             suffix = _READ_ONLY_SUFFIX
         full_prompt = f"{grounded}\n\n{suffix}"
-        return run_backend(
+        return run_backend_or_instruction(
             name=name,
             prompt=full_prompt,
             max_turns=max_turns,
@@ -154,4 +210,9 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
             config=config,
             label_prefix="delegate",
             model=model,
+            allow_writes=allow_writes,
+            auto_commit=auto_commit,
+            deliverable=deliverable,
+            inbox_id=inbox_id,
+            task_text=task,
         )

@@ -16,6 +16,12 @@ from pathlib import Path
 
 from harbormaster.backends import BackendError, get_backend_for_project
 from harbormaster.config import HarbormasterConfig
+from harbormaster.instruction import (
+    PacketKind,
+    build_packet,
+    execution_mode_for,
+    packet_kind_for_delegate,
+)
 from harbormaster.projects import resolve_project, validate_project_name
 from harbormaster.ssh import is_remote
 
@@ -233,6 +239,145 @@ def run_backend(
     )
 
     return _truncate(result.output, cap, label)
+
+
+def run_instruction(
+    *,
+    name: str,
+    prompt: str,
+    max_turns: int,
+    host: str | None,
+    config: HarbormasterConfig,
+    label_prefix: str,
+    model: str | None = None,
+    allow_writes: bool = False,
+    auto_commit: bool = False,
+    deliverable: str = "",
+    inbox_id: str = "default",
+    task_text: str | None = None,
+) -> str:
+    """v26.0.0 — instruction-mode counterpart to ``run_backend``.
+
+    Creates one ``delegated_jobs`` row with status ``awaiting_caller``
+    and returns the markdown instruction packet. The calling MCP client
+    is expected to execute the embedded prompt via its ``Agent`` / ``Task``
+    tool and then invoke ``record_delegation_result`` to transition the
+    row to ``completed`` / ``failed``.
+
+    No subprocess spawn, no LLM round-trip — this function completes in
+    a single SQLite write plus string formatting.
+
+    ``task_text`` (when provided) is what gets persisted in the row's
+    ``task`` column for UI / recall surfaces. When None, the full
+    ``prompt`` is used. Pass a short task description here for cleaner
+    /jobs rendering.
+    """
+    try:
+        validate_project_name(name)
+    except ValueError as e:
+        return f"Error: {e}"
+
+    try:
+        cwd = resolve_project(name, config.projects, ignore_patterns=config.ignore.patterns)
+    except ValueError as e:
+        return f"Error: {e}"
+
+    # Late import to avoid a tools ↔ jobs import cycle at module load time.
+    from harbormaster.jobs import get_subsystem
+    from harbormaster.jobs.schema import STATUS_AWAITING_CALLER
+
+    sub = get_subsystem(config)
+    kind: PacketKind = (
+        "ask" if label_prefix == "ask"
+        else packet_kind_for_delegate(allow_writes, auto_commit)
+    )
+
+    job = sub.store.enqueue(
+        project=name,
+        host=host,
+        task=task_text if task_text is not None else prompt,
+        deliverable=deliverable,
+        allow_writes=allow_writes,
+        model=model,
+        inbox_id=inbox_id,
+        max_turns=max_turns,
+        auto_commit=auto_commit,
+        execution_mode="instruction",
+        initial_status=STATUS_AWAITING_CALLER,
+        # v26.0.0 — persist the rendered prompt so a caller that loses
+        # the original packet response can recover it faithfully via
+        # get_delegated_task. The recovered packet must carry the same
+        # role suffix (read-only / writes / writes+auto-commit) as the
+        # initial render — otherwise an allow_writes=False job's
+        # recovered Agent could edit files.
+        rendered_prompt=prompt,
+    )
+
+    packet = build_packet(
+        job_id=job.id,
+        kind=kind,
+        project=name,
+        cwd=str(cwd),
+        host=host,
+        prompt=prompt,
+        max_turns=max_turns,
+        model_hint=model,
+        allow_writes=allow_writes,
+        auto_commit=auto_commit,
+    )
+    return packet.to_markdown()
+
+
+def run_backend_or_instruction(
+    *,
+    name: str,
+    prompt: str,
+    max_turns: int,
+    host: str | None,
+    config: HarbormasterConfig,
+    label_prefix: str,
+    model: str | None = None,
+    allow_writes: bool = False,
+    auto_commit: bool = False,
+    deliverable: str = "",
+    inbox_id: str = "default",
+    task_text: str | None = None,
+) -> str:
+    """v26.0.0 — top-level dispatcher: instruction mode (default) or
+    subprocess mode (legacy). Falls back to subprocess for SSH targets
+    regardless of config because the calling assistant has no PTY to
+    the remote host.
+
+    Returns either an instruction packet (markdown with
+    ``HARBORMASTER_INSTRUCTION_V1`` marker) or the v25 subprocess result
+    string. Both shapes are accepted by all existing callers — the
+    instruction-packet response is itself a markdown string.
+    """
+    mode = execution_mode_for(config, host)
+    if mode == "instruction":
+        return run_instruction(
+            name=name,
+            prompt=prompt,
+            max_turns=max_turns,
+            host=host,
+            config=config,
+            label_prefix=label_prefix,
+            model=model,
+            allow_writes=allow_writes,
+            auto_commit=auto_commit,
+            deliverable=deliverable,
+            inbox_id=inbox_id,
+            task_text=task_text,
+        )
+    return run_backend(
+        name=name,
+        prompt=prompt,
+        max_turns=max_turns,
+        host=host,
+        config=config,
+        label_prefix=label_prefix,
+        model=model,
+    )
 
 
 def _maybe_writeback_to_fleetq(

@@ -263,16 +263,20 @@ stores. Defaults preserve v11 behavior byte-for-byte.
 
 ## `[delegate]`
 
-v23.0.0a2 + v24.0.0a1. Async-delegate JobStore tuning. Affects the
-v22-era `delegate_task(..., mode="async")` flow and its background
-worker. Retention prunes the `delegated_jobs.db` SQLite file on
-subsystem boot; `worker_count` controls how many JobWorker threads
-share the same JobStore.
+v23.0.0a2 + v24.0.0a1 + v26.0.0. Async-delegate JobStore tuning AND
+execution-mode dispatch. Affects every `delegate_task` / `ask_project`
+/ `fan_out_ask` call. Retention prunes the `delegated_jobs.db` SQLite
+file on subsystem boot; `worker_count` controls how many JobWorker
+threads share the same JobStore; `execution_mode` selects between
+instruction packets (caller executes) and subprocess invocation
+(server executes).
 
 | Key                | Type  | Default | Notes |
 |--------------------|-------|---------|-------|
 | `retain_recent_k`  | `int` | `1000`  | > 0. Window of most-recent rows kept in `delegated_jobs.db`. Older rows are deleted on subsystem boot (mirrors `[history].retain_recent_k` semantics; v23.0.0a2). |
 | `worker_count`     | `int` | `1`     | 1..16. Number of JobWorker threads against the same JobStore. The atomic `UPDATE ... RETURNING claim_next_queued` (v22.0.0a2) safely supports multi-worker. Default 1 preserves v22/v23 single-worker behaviour. Bump for high-throughput operators delegating many parallel jobs (v24.0.0a1). |
+| `execution_mode`   | `str` | `"instruction"` | v26.0.0. `"instruction"` (default) returns an instruction packet to the calling MCP client so the operator's interactive `claude` TUI can execute the work via its `Agent` / `Task` tool — routing LLM cost to the caller's interactive subscription pool (Max plan limits) instead of the new programmatic-credit pool ($200/mo Max 20x as of 2026-06-15). `"subprocess"` preserves the v22-v25 server-side `claude -p` execution. SSH targets always force `subprocess` regardless of this setting because the calling assistant has no PTY to the remote host. |
+| `awaiting_caller_timeout_seconds` | `int` | `3600` | v26.0.0. ≥ 0. Orphan-sweep TTL for instruction-mode rows whose caller never invokes `record_delegation_result`. Older rows are swept to `failed` with error `"caller_never_recorded_result"` at subsystem boot AND opportunistically inside `record_delegation_result`. Set to 0 to disable the sweep. |
 
 ## `[budget]`
 
