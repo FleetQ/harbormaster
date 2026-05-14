@@ -11,7 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from harbormaster.config import BackendConfig, HarbormasterConfig, ProjectsConfig
+from harbormaster.config import (
+    BackendConfig,
+    DelegateConfig,
+    HarbormasterConfig,
+    ProjectsConfig,
+)
 from harbormaster.jobs.subsystem import shutdown_subsystem
 from harbormaster.server import build_server
 
@@ -32,6 +37,8 @@ def fake_config(tmp_path: Path, monkeypatch) -> HarbormasterConfig:
                 binary=str(FAKE_CLAUDE), timeout_local=10,
             ),
         },
+        # v26.0.0 — pin to subprocess so the fake_claude binary runs.
+        delegate=DelegateConfig(execution_mode="subprocess"),
     )
 
 
