@@ -401,6 +401,19 @@ class DelegateConfig(BaseModel):
     # Set to 0 to disable the sweep. Default 3600s (1 h) matches the
     # practical ceiling on a single delegate operation.
     awaiting_caller_timeout_seconds: int = Field(default=3600, ge=0)
+    # v27.0.0 — which orchestrator (calling MCP client) executes
+    # instruction-mode packets. Selects the packet-rendering adapter so
+    # non-Claude callers (Codex CLI, Gemini CLI) get a packet in their
+    # own sub-agent idiom. Not a Literal: unknown values are allowed and
+    # trigger a transparent subprocess fallback at the tool layer.
+    #   "auto" (default) — detect the caller from the MCP clientInfo
+    #     handshake, falling back to "claude" when undetected (preserves
+    #     the v26 default packet byte-for-byte).
+    #   "claude" | "codex" | "gemini" | "neutral" — pin the adapter for
+    #     this deployment. Callers can still override per-call via the
+    #     tools' `orchestrator` parameter.
+    # SSH targets always force subprocess regardless of this setting.
+    orchestrator: str = "auto"
 
 
 class HarbormasterConfig(BaseModel):

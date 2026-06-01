@@ -89,5 +89,13 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                 allow_writes=job.allow_writes,
                 auto_commit=job.auto_commit,
             )
-            payload["instruction_packet"] = packet.to_markdown()
+            # v27.0.0 — render with the same adapter the row was enqueued
+            # for so a recovered packet matches the original orchestrator.
+            # Pre-v27 rows have orchestrator=None → claude default.
+            from harbormaster.orchestrators import get_adapter
+            adapter = get_adapter(job.orchestrator or "claude") or get_adapter(
+                "claude"
+            )
+            assert adapter is not None  # claude is always registered
+            payload["instruction_packet"] = adapter.render_packet(packet)
         return payload

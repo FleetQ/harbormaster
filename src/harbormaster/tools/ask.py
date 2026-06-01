@@ -16,6 +16,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         max_turns: int = 5,
         host: str | None = None,
         model: str | None = None,
+        orchestrator: str | None = None,
     ) -> str:
         """Ask a question of a project's Claude Code subagent.
 
@@ -43,6 +44,12 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         v21.0.0a10: ``model`` is an optional alias ('haiku', 'sonnet',
         'opus') or full model id; None = backend default. Subject to
         ``[backends.<name>] allowed_models`` whitelist when set.
+
+        v27.0.0: ``orchestrator`` overrides which calling client the
+        instruction packet is rendered for ('claude', 'codex', 'gemini',
+        'neutral'). None = resolve from config / MCP clientInfo, defaulting
+        to 'claude'. An unknown value falls back to subprocess execution.
+        No effect in subprocess mode or over SSH.
         """
         grounded = build_grounded_prompt(
             question=question,
@@ -64,4 +71,5 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
             label_prefix="ask",
             model=model,
             task_text=question,
+            orchestrator=orchestrator,
         )

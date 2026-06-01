@@ -20,7 +20,12 @@ from mcp.server.fastmcp import FastMCP
 
 from harbormaster.backends import BackendError, get_backend
 from harbormaster.config import HarbormasterConfig
-from harbormaster.instruction import build_fan_out_packet, execution_mode_for
+from harbormaster.instruction import execution_mode_for
+from harbormaster.orchestrators import (
+    detect_client_orchestrator,
+    get_adapter,
+    resolve_orchestrator,
+)
 from harbormaster.projects import discover_projects, resolve_project
 from harbormaster.tools._helpers import run_backend
 
@@ -45,6 +50,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         synthesize: bool = False,
         synthesis_max_turns: int = 5,
         model: str | None = None,
+        orchestrator: str | None = None,
     ) -> str:
         """Ask the same question of multiple projects in parallel.
 
@@ -71,6 +77,11 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                 id passed to every target subprocess. None = backend default.
                 Subject to ``[backends.<name>] allowed_models`` whitelist
                 when set. v21.0.0a10.
+            orchestrator: v27.0.0 — which calling client the fan-out
+                instruction packet is rendered for ('claude', 'codex',
+                'gemini', 'neutral'). None = resolve from config / MCP
+                clientInfo, defaulting to 'claude'. An unknown value (or any
+                remote target) falls back to the subprocess ThreadPool path.
 
         Returns:
             Markdown report. Per-target sections + (optionally) a synthesis
@@ -104,7 +115,15 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
             ) == "instruction"
             for t in targets
         )
-        if all_instruction:
+        # v27.0.0 — the resolved orchestrator must have an adapter to render
+        # a fan-out packet; an unknown orchestrator falls through to the
+        # subprocess ThreadPool path below.
+        orch = resolve_orchestrator(
+            explicit=orchestrator,
+            config=config,
+            detected=detect_client_orchestrator(),
+        )
+        if all_instruction and get_adapter(orch) is not None:
             return _instruction_fan_out(
                 targets=targets,
                 full_prompt=full_prompt,
@@ -114,6 +133,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                 synthesize=synthesize,
                 synthesis_max_turns=synthesis_max_turns,
                 model=model,
+                orchestrator=orch,
             )
 
         results: dict[_Target, str] = {}
@@ -240,13 +260,17 @@ def _instruction_fan_out(
     synthesize: bool,
     synthesis_max_turns: int,
     model: str | None,
+    orchestrator: str,
 ) -> str:
     """v26.0.0 — enqueue one ``awaiting_caller`` row per target and
     return a batch instruction packet describing all of them.
 
-    The calling assistant spawns N parallel Agents, records each result
-    via ``record_delegation_result``, and (if ``synthesize=True``) runs
-    a single final synthesis Agent across the collected answers.
+    The calling assistant spawns N parallel sub-agents, records each
+    result via ``record_delegation_result``, and (if ``synthesize=True``)
+    runs a single final synthesis sub-agent across the collected answers.
+
+    v27.0.0 — ``orchestrator`` selects the adapter that renders the batch
+    packet and is persisted on every row for recovery / observability.
     """
     from harbormaster.jobs import get_subsystem
     from harbormaster.jobs.schema import STATUS_AWAITING_CALLER
@@ -292,6 +316,7 @@ def _instruction_fan_out(
             initial_status=STATUS_AWAITING_CALLER,
             rendered_prompt=full_prompt,
             batch_id=batch_id,
+            orchestrator=orchestrator,
         )
         target_packets.append({
             "job_id": job.id,
@@ -302,7 +327,11 @@ def _instruction_fan_out(
             "max_turns_hint": max_turns,
             "model_hint": model,
         })
-    return build_fan_out_packet(
+    adapter = get_adapter(orchestrator)
+    # Guarded upstream — the all_instruction gate only calls this when the
+    # orchestrator resolves to a known adapter.
+    assert adapter is not None
+    return adapter.render_fan_out(
         batch_id=batch_id,
         targets=target_packets,
         synthesize=synthesize,

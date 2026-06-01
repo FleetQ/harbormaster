@@ -14,6 +14,11 @@ from mcp.server.fastmcp import FastMCP
 
 from harbormaster.config import HarbormasterConfig
 from harbormaster.instruction import execution_mode_for
+from harbormaster.orchestrators import (
+    detect_client_orchestrator,
+    get_adapter,
+    resolve_orchestrator,
+)
 from harbormaster.tools._grounding import build_grounded_prompt
 from harbormaster.tools._helpers import run_backend_or_instruction
 
@@ -58,6 +63,7 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         inbox_id: str = "default",
         max_turns: int = 10,
         auto_commit: bool = False,
+        orchestrator: str | None = None,
     ) -> str:
         """Delegate a task to a project's Claude Code subagent.
 
@@ -110,6 +116,12 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         after edits (does NOT push — operator pushes after review).
         Set when you trust the subagent's judgement and want the
         commit step inside the delegation budget.
+
+        ``orchestrator`` (v27.0.0) selects which calling client the
+        instruction packet is rendered for ('claude', 'codex', 'gemini',
+        'neutral'). None = resolve from config / MCP clientInfo,
+        defaulting to 'claude'. An unknown value falls back to subprocess
+        execution. No effect over SSH.
         """
         # v26.0.0 — resolve effective execution mode honouring the
         # SSH-forces-subprocess rule. Async mode crosses both paths
@@ -128,7 +140,20 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                 STATUS_QUEUED,
             )
             sub = get_subsystem(config)
-            if eff_mode == "instruction":
+            # v27.0.0 — only stay on the instruction path when the resolved
+            # orchestrator has an adapter; an unknown orchestrator can't run
+            # a packet, so fall through to subprocess-async (a JobWorker runs
+            # it server-side).
+            orch = (
+                resolve_orchestrator(
+                    explicit=orchestrator,
+                    config=config,
+                    detected=detect_client_orchestrator(),
+                )
+                if eff_mode == "instruction"
+                else None
+            )
+            if eff_mode == "instruction" and get_adapter(orch or "") is not None:
                 # v26.0.0 — async + instruction: enqueue as awaiting_caller,
                 # return a handle. The caller polls get_delegated_task to
                 # retrieve the instruction packet, then executes it.
@@ -161,14 +186,16 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
                     execution_mode="instruction",
                     initial_status=STATUS_AWAITING_CALLER,
                     rendered_prompt=rendered,
+                    orchestrator=orch,
                 )
                 return (
                     f"queued {job.id} (inbox={job.inbox_id}) in instruction "
                     f"mode. Fetch instruction packet with "
-                    f"get_delegated_task({job.id!r}), execute via Agent(), "
-                    f"and report back with record_delegation_result."
+                    f"get_delegated_task({job.id!r}), execute via your "
+                    f"sub-agent, and report back with record_delegation_result."
                 )
-            # Legacy subprocess-async path.
+            # Legacy subprocess-async path (also reached when instruction
+            # mode resolved to an unknown orchestrator).
             job = sub.store.enqueue(
                 project=name,
                 host=host,
@@ -215,4 +242,5 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
             deliverable=deliverable,
             inbox_id=inbox_id,
             task_text=task,
+            orchestrator=orchestrator,
         )

@@ -54,6 +54,10 @@ class Job:
     rendered_prompt: str | None = None
     # v26.0.1 — fan-out batch correlation id; NULL for non-batch rows.
     batch_id: str | None = None
+    # v27.0.0 — orchestrator adapter the instruction packet was rendered
+    # for ('claude' | 'codex' | 'gemini' | 'neutral'); NULL for
+    # subprocess rows and pre-v27 rows.
+    orchestrator: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable view (booleans normalised, no nulls
@@ -82,6 +86,7 @@ class Job:
             "tokens_used": self.tokens_used,
             "rendered_prompt": self.rendered_prompt,
             "batch_id": self.batch_id,
+            "orchestrator": self.orchestrator,
         }
 
 
@@ -119,6 +124,9 @@ def _row_to_job(row: sqlite3.Row) -> Job:
             row["rendered_prompt"] if "rendered_prompt" in row_keys else None
         ),
         batch_id=(row["batch_id"] if "batch_id" in row_keys else None),
+        orchestrator=(
+            row["orchestrator"] if "orchestrator" in row_keys else None
+        ),
     )
 
 
@@ -249,6 +257,7 @@ class JobStore:
         initial_status: str = STATUS_QUEUED,
         rendered_prompt: str | None = None,
         batch_id: str | None = None,
+        orchestrator: str | None = None,
     ) -> Job:
         """Insert a row and return its typed view.
 
@@ -270,6 +279,11 @@ class JobStore:
         passes to ``run_backend``. ``auto_commit`` (v24.0.0a2)
         instructs the subagent to git-commit after edits — only
         meaningful when ``allow_writes=True``.
+
+        ``orchestrator`` (v27.0.0) is the resolved orchestrator adapter
+        name for instruction-mode rows so ``get_delegated_task`` can
+        rebuild the packet with the same adapter. NULL for subprocess
+        rows.
         """
         job_id = self._new_job_id()
         now = time.time()
@@ -278,13 +292,14 @@ class JobStore:
                 "INSERT INTO delegated_jobs ("
                 "id, inbox_id, project, host, task, deliverable, "
                 "allow_writes, model, status, queued_at, max_turns, "
-                "auto_commit, execution_mode, rendered_prompt, batch_id"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "auto_commit, execution_mode, rendered_prompt, batch_id, "
+                "orchestrator"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     job_id, inbox_id, project, host, task, deliverable,
                     1 if allow_writes else 0, model, initial_status, now,
                     max_turns, 1 if auto_commit else 0, execution_mode,
-                    rendered_prompt, batch_id,
+                    rendered_prompt, batch_id, orchestrator,
                 ),
             )
         job = self.get(job_id)

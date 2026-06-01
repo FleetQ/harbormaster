@@ -189,6 +189,10 @@
                       <div><strong class="text-foreground">batch:</strong>
                         <code x-text="full.batch_id"></code></div>
                     </template>
+                    <template x-if="full.orchestrator">
+                      <div><strong class="text-foreground">orchestrator:</strong>
+                        <code x-text="full.orchestrator"></code></div>
+                    </template>
                   </div>
                   <template x-if="full.output">
                     <details class="bg-surface-1 rounded border border-border" open>
