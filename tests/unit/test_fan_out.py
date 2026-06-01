@@ -34,6 +34,8 @@ def test_fan_out_ask_signature():
         "synthesize", "synthesis_max_turns",
         # v21.0.0a10: operator-selectable model per tool call.
         "model",
+        # v27.0.0: per-call orchestrator adapter override.
+        "orchestrator",
     }
     assert expected == set(sig.parameters.keys())
     assert sig.parameters["max_concurrency"].default == 5

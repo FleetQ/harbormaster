@@ -22,6 +22,11 @@ from harbormaster.instruction import (
     execution_mode_for,
     packet_kind_for_delegate,
 )
+from harbormaster.orchestrators import (
+    detect_client_orchestrator,
+    get_adapter,
+    resolve_orchestrator,
+)
 from harbormaster.projects import resolve_project, validate_project_name
 from harbormaster.ssh import is_remote
 
@@ -255,14 +260,15 @@ def run_instruction(
     deliverable: str = "",
     inbox_id: str = "default",
     task_text: str | None = None,
+    orchestrator: str = "claude",
 ) -> str:
     """v26.0.0 — instruction-mode counterpart to ``run_backend``.
 
     Creates one ``delegated_jobs`` row with status ``awaiting_caller``
     and returns the markdown instruction packet. The calling MCP client
-    is expected to execute the embedded prompt via its ``Agent`` / ``Task``
-    tool and then invoke ``record_delegation_result`` to transition the
-    row to ``completed`` / ``failed``.
+    is expected to execute the embedded prompt via its sub-agent primitive
+    and then invoke ``record_delegation_result`` to transition the row to
+    ``completed`` / ``failed``.
 
     No subprocess spawn, no LLM round-trip — this function completes in
     a single SQLite write plus string formatting.
@@ -271,6 +277,12 @@ def run_instruction(
     ``task`` column for UI / recall surfaces. When None, the full
     ``prompt`` is used. Pass a short task description here for cleaner
     /jobs rendering.
+
+    ``orchestrator`` (v27.0.0) selects the packet-rendering adapter
+    (``claude`` / ``codex`` / ``gemini`` / ``neutral``). Must be a known
+    adapter — callers resolve + validate it before reaching here. The
+    name is persisted on the row so ``get_delegated_task`` rebuilds the
+    packet with the same adapter.
     """
     try:
         validate_project_name(name)
@@ -311,6 +323,7 @@ def run_instruction(
         # initial render — otherwise an allow_writes=False job's
         # recovered Agent could edit files.
         rendered_prompt=prompt,
+        orchestrator=orchestrator,
     )
 
     packet = build_packet(
@@ -325,7 +338,13 @@ def run_instruction(
         allow_writes=allow_writes,
         auto_commit=auto_commit,
     )
-    return packet.to_markdown()
+    adapter = get_adapter(orchestrator)
+    # Defensive: callers resolve to a known adapter before reaching here.
+    # If an unknown name slips through, fall back to the claude renderer
+    # rather than crashing the tool call.
+    if adapter is None:  # pragma: no cover - guarded upstream
+        return packet.to_markdown()
+    return adapter.render_packet(packet)
 
 
 def run_backend_or_instruction(
@@ -342,6 +361,7 @@ def run_backend_or_instruction(
     deliverable: str = "",
     inbox_id: str = "default",
     task_text: str | None = None,
+    orchestrator: str | None = None,
 ) -> str:
     """v26.0.0 — top-level dispatcher: instruction mode (default) or
     subprocess mode (legacy). Falls back to subprocess for SSH targets
@@ -352,22 +372,41 @@ def run_backend_or_instruction(
     ``HARBORMASTER_INSTRUCTION_V1`` marker) or the v25 subprocess result
     string. Both shapes are accepted by all existing callers — the
     instruction-packet response is itself a markdown string.
+
+    v27.0.0 — in instruction mode the effective orchestrator is resolved
+    via ``resolve_orchestrator`` (explicit ``orchestrator`` param > config
+    > MCP clientInfo auto-detect > ``claude`` default). If the resolved
+    orchestrator has no adapter (an unknown name pinned by param/config),
+    the call transparently falls back to subprocess execution — an
+    unrecognised orchestrator can't run a packet.
     """
     mode = execution_mode_for(config, host)
     if mode == "instruction":
-        return run_instruction(
-            name=name,
-            prompt=prompt,
-            max_turns=max_turns,
-            host=host,
+        orch = resolve_orchestrator(
+            explicit=orchestrator,
             config=config,
-            label_prefix=label_prefix,
-            model=model,
-            allow_writes=allow_writes,
-            auto_commit=auto_commit,
-            deliverable=deliverable,
-            inbox_id=inbox_id,
-            task_text=task_text,
+            detected=detect_client_orchestrator(),
+        )
+        if get_adapter(orch) is not None:
+            return run_instruction(
+                name=name,
+                prompt=prompt,
+                max_turns=max_turns,
+                host=host,
+                config=config,
+                label_prefix=label_prefix,
+                model=model,
+                allow_writes=allow_writes,
+                auto_commit=auto_commit,
+                deliverable=deliverable,
+                inbox_id=inbox_id,
+                task_text=task_text,
+                orchestrator=orch,
+            )
+        logger.warning(
+            "unknown orchestrator %r — falling back to subprocess for "
+            "tool=%s project=%s",
+            orch, label_prefix, name,
         )
     return run_backend(
         name=name,

@@ -102,4 +102,10 @@ MIGRATIONS: list[tuple[str, str]] = [
     # the operator filter /jobs by batch and the CLI surface batch
     # completion progress (X of N targets recorded).
     ("batch_id", "batch_id TEXT"),
+    # v27.0.0 — which orchestrator (calling MCP client) the instruction
+    # packet was rendered for: 'claude' | 'codex' | 'gemini' | 'neutral'.
+    # NULL for subprocess rows (no caller-side execution) and for pre-v27
+    # rows. Persisted so get_delegated_task rebuilds the packet with the
+    # same adapter that produced it, and so /jobs can surface provenance.
+    ("orchestrator", "orchestrator TEXT"),
 ]
