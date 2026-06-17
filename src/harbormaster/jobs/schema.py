@@ -108,4 +108,11 @@ MIGRATIONS: list[tuple[str, str]] = [
     # rows. Persisted so get_delegated_task rebuilds the packet with the
     # same adapter that produced it, and so /jobs can surface provenance.
     ("orchestrator", "orchestrator TEXT"),
+    # v28.0.0 — resilient orphan recovery. How many times this row was
+    # re-queued by recover_orphaned() after a crash/restart left it
+    # ``running``. Read-only jobs are re-queued (safe re-run) up to
+    # MAX_RECOVERY_ATTEMPTS; this counter is the poison-pill guard that
+    # stops a job which reliably crashes the worker from re-queuing
+    # forever. 0 for jobs that have never been orphan-recovered.
+    ("recovery_count", "recovery_count INTEGER NOT NULL DEFAULT 0"),
 ]

@@ -24,6 +24,23 @@ from harbormaster.jobs.schema import (
     STATUS_RUNNING,
 )
 
+# v28.0.0 — orphan recovery re-queues a read-only in-flight job at most
+# this many times before giving up and failing it. 1 means: re-run once
+# after a restart, then fail if it is orphaned again (poison-pill guard).
+MAX_RECOVERY_ATTEMPTS = 1
+
+
+@dataclass(frozen=True)
+class OrphanRecovery:
+    """Outcome of one :meth:`JobStore.recover_orphaned` pass."""
+
+    requeued: int
+    failed: int
+
+    @property
+    def total(self) -> int:
+        return self.requeued + self.failed
+
 
 @dataclass(frozen=True)
 class Job:
@@ -766,22 +783,55 @@ class JobStore:
             )
             return cur.rowcount
 
-    def recover_orphaned(self) -> int:
-        """Mark any ``running`` rows as ``failed`` with reason
-        ``server_restart``. Called once per process at subsystem init.
+    def recover_orphaned(self) -> OrphanRecovery:
+        """Recover ``running`` rows left behind by a crash/restart.
 
-        Returns the count of rows recovered.
+        Called once per process at subsystem init. v28.0.0 makes this
+        non-destructive for the common case instead of the old blanket
+        ``running -> failed``:
+
+        * Read-only jobs (``allow_writes = 0``) under the recovery cap are
+          re-queued (``running -> queued``, ``recovery_count += 1``) so the
+          worker re-runs them from scratch — a read-only ask has no side
+          effects, so re-running is safe and the operator does not have to
+          re-delegate.
+        * Write jobs are failed: the dead subprocess may have applied
+          partial edits, so auto-rerunning risks double-applying. A human
+          decides.
+        * Read-only jobs that have already hit ``MAX_RECOVERY_ATTEMPTS`` are
+          failed — a job that reliably crashes the worker must not re-queue
+          forever.
+
+        Returns an :class:`OrphanRecovery` summarising both outcomes.
         """
         now = time.time()
         with self._lock:
-            cur = self._conn.execute(
+            # Re-queue safe-to-rerun read-only jobs still under the cap.
+            requeued = self._conn.execute(
+                "UPDATE delegated_jobs "
+                "SET status = ?, recovery_count = recovery_count + 1, "
+                "    started_at = NULL "
+                "WHERE status = ? AND allow_writes = 0 "
+                "  AND recovery_count < ?",
+                (STATUS_QUEUED, STATUS_RUNNING, MAX_RECOVERY_ATTEMPTS),
+            ).rowcount
+            # Everything still ``running`` is unsafe to re-run (write job)
+            # or has exhausted its recovery budget — fail it honestly.
+            failed = self._conn.execute(
                 "UPDATE delegated_jobs "
                 "SET status = ?, error = ?, completed_at = ?, "
                 "    duration_ms = COALESCE(duration_ms, 0) "
                 "WHERE status = ?",
-                (STATUS_FAILED, "server_restart", now, STATUS_RUNNING),
-            )
-            return cur.rowcount
+                (
+                    STATUS_FAILED,
+                    "server_restart: not safe to auto-rerun "
+                    "(write job, or exceeded recovery attempts) — "
+                    "re-delegate manually",
+                    now,
+                    STATUS_RUNNING,
+                ),
+            ).rowcount
+            return OrphanRecovery(requeued=requeued, failed=failed)
 
     def sweep_stale_awaiting_caller(
         self, *, max_age_seconds: int, exclude_ids: frozenset[str] | None = None,
