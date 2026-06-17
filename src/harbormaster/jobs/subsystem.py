@@ -3,9 +3,9 @@
 
 Tools call :func:`get_subsystem` instead of constructing a store /
 worker themselves. First call opens the SQLite store, runs orphan
-recovery (``running`` → ``failed`` for any rows left from a previous
-process), starts the worker thread, and returns the bundle. Subsequent
-calls return the cached bundle.
+recovery (re-queues safe read-only rows left ``running`` by a previous
+process, fails the rest), starts the worker thread, and returns the
+bundle. Subsequent calls return the cached bundle.
 
 ``shutdown_subsystem`` exists primarily for tests — production code
 relies on the daemon-thread worker exiting when the process dies.
@@ -73,10 +73,11 @@ def get_subsystem(config: HarbormasterConfig) -> Subsystem:
         db_path = _resolve_db_path(config)
         store = JobStore(db_path)
         recovered = store.recover_orphaned()
-        if recovered:
+        if recovered.total:
             _LOG.warning(
-                "delegate-job subsystem: recovered %d orphaned running "
-                "jobs as failed (server_restart)", recovered,
+                "delegate-job subsystem: orphan recovery — re-queued %d "
+                "read-only job(s), failed %d (server_restart)",
+                recovered.requeued, recovered.failed,
             )
         # v26.0.0 — orphan sweep for instruction-mode rows whose caller
         # never invoked record_delegation_result. Runs once at boot;

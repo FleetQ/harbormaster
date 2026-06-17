@@ -11,7 +11,11 @@ from harbormaster.jobs.schema import (
     STATUS_QUEUED,
     STATUS_RUNNING,
 )
-from harbormaster.jobs.store import JobStore
+from harbormaster.jobs.store import (
+    MAX_RECOVERY_ATTEMPTS,
+    JobStore,
+    OrphanRecovery,
+)
 
 
 @pytest.fixture
@@ -118,25 +122,83 @@ def test_fail_marks_failed_with_error_and_cid(store: JobStore):
     assert final.cid == "abc12345"
 
 
-def test_recover_orphaned_promotes_running_to_failed(store: JobStore):
-    j1 = store.enqueue(
+def test_recover_orphaned_requeues_readonly_job(store: JobStore):
+    # v28.0.0 — a read-only job left ``running`` by a crash is re-queued
+    # (safe to re-run), not failed, and the worker can re-claim it.
+    job = store.enqueue(
         project="alpha", host=None, task="t", deliverable="d",
         allow_writes=False, model=None,
     )
-    j2 = store.enqueue(
-        project="alpha", host=None, task="t", deliverable="d",
-        allow_writes=False, model=None,
-    )
-    store.claim_next_queued()  # j1 → running
-    store.claim_next_queued()  # j2 → running
+    store.claim_next_queued()  # → running
 
     recovered = store.recover_orphaned()
-    assert recovered == 2
-    for jid in (j1.id, j2.id):
-        final = store.get(jid)
-        assert final is not None
-        assert final.status == STATUS_FAILED
-        assert final.error == "server_restart"
+    assert recovered == OrphanRecovery(requeued=1, failed=0)
+
+    requeued = store.get(job.id)
+    assert requeued is not None
+    assert requeued.status == STATUS_QUEUED
+    assert requeued.error is None
+    assert requeued.started_at is None
+
+    reclaimed = store.claim_next_queued()
+    assert reclaimed is not None
+    assert reclaimed.id == job.id
+    assert reclaimed.status == STATUS_RUNNING
+
+
+def test_recover_orphaned_fails_write_jobs(store: JobStore):
+    # A write job's dead subprocess may have applied partial edits, so it
+    # is failed (a human decides), never silently re-run.
+    job = store.enqueue(
+        project="alpha", host=None, task="t", deliverable="d",
+        allow_writes=True, model=None,
+    )
+    store.claim_next_queued()  # → running
+
+    recovered = store.recover_orphaned()
+    assert recovered == OrphanRecovery(requeued=0, failed=1)
+
+    final = store.get(job.id)
+    assert final is not None
+    assert final.status == STATUS_FAILED
+    assert "re-delegate manually" in (final.error or "")
+
+
+def test_recover_orphaned_caps_requeue(store: JobStore):
+    # A read-only job that keeps getting orphaned must not re-queue
+    # forever — after MAX_RECOVERY_ATTEMPTS it is failed (poison-pill guard).
+    assert MAX_RECOVERY_ATTEMPTS == 1
+    job = store.enqueue(
+        project="alpha", host=None, task="t", deliverable="d",
+        allow_writes=False, model=None,
+    )
+
+    store.claim_next_queued()  # → running (attempt 1)
+    first = store.recover_orphaned()
+    assert first == OrphanRecovery(requeued=1, failed=0)
+    assert store.get(job.id).status == STATUS_QUEUED  # type: ignore[union-attr]
+
+    store.claim_next_queued()  # → running (attempt 2)
+    second = store.recover_orphaned()
+    assert second == OrphanRecovery(requeued=0, failed=1)
+    final = store.get(job.id)
+    assert final is not None
+    assert final.status == STATUS_FAILED
+
+
+def test_recover_orphaned_summary_counts_mixed_batch(store: JobStore):
+    for allow in (False, False, True):
+        store.enqueue(
+            project="alpha", host=None, task="t", deliverable="d",
+            allow_writes=allow, model=None,
+        )
+    for _ in range(3):
+        store.claim_next_queued()  # all → running
+
+    recovered = store.recover_orphaned()
+    assert recovered.requeued == 2
+    assert recovered.failed == 1
+    assert recovered.total == 3
 
 
 def test_list_recent_filters_by_project_and_status(store: JobStore):
