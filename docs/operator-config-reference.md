@@ -200,6 +200,7 @@ Harbormaster fully standalone.
 | `kg_llm_max_triples`     | `int`     | `20`                             | > 0. Cap when the LLM extractor is active. |
 | `publish_a2a_cards`      | `bool`    | `false`                          | Publish A2A v0.3 agent cards per project. |
 | `register_as_bridge`     | `bool`    | `false`                          | Register this Harbormaster as a Bridge with FleetQ. |
+| `bridge_in_stdio`        | `bool`    | `false`                          | Run the FleetQ bridge + auto-reembed background subsystems on the `stdio` transport too. Off by default: stdio processes (one per Claude Code/Desktop connection) stay thin MCP surfaces, so they don't spawn duplicate bridges, spam the heartbeat retry loop, or leak orphaned daemon threads. Enable only for a single long-lived stdio host that should itself be the bridge. |
 | `heartbeat_interval`     | `int` (s) | `30`                             | > 0. Bridge heartbeat cadence. |
 | `dispatcher_max_workers` | `int`     | `1`                              | 1..16. >1 enables a bounded ThreadPoolExecutor for parallel `agent.request` dispatch. |
 | `dispatcher_unsafe_tools`| `list[str]`| `[]`                            | Per-tool deny list — these always run on the single-worker path even when `dispatcher_max_workers > 1`. |

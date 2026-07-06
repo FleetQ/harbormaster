@@ -293,18 +293,37 @@ def main(argv: list[str] | None = None) -> int:
 
     mcp = build_server(config)
 
-    fleetq = _maybe_start_fleetq_bridge(config, mcp)
+    # The FleetQ Bridge (heartbeat + relay) and the auto-reembed worker are
+    # long-lived, singleton background subsystems that belong to a persistent
+    # server instance. Claude Code / Desktop spawn a fresh stdio process per
+    # connection, so starting them on stdio means every session registers a
+    # duplicate bridge, spams the heartbeat retry loop into the client's
+    # stderr (5MB+ logs / "Server disconnected" churn seen in the field), and
+    # leaves orphaned daemon threads when the client tears the pipe down.
+    # Keep stdio processes as thin MCP tool surfaces; run the background
+    # subsystems only under an HTTP transport, unless the operator explicitly
+    # opts a long-lived stdio host into the bridge role.
+    run_background_subsystems = (
+        args.transport != "stdio" or config.fleetq.bridge_in_stdio
+    )
+
+    fleetq = (
+        _maybe_start_fleetq_bridge(config, mcp)
+        if run_background_subsystems
+        else None
+    )
 
     # v4.0.0a5: when [history] auto_reembed_on_drift is enabled, kick
     # off a background thread that walks every per-host store and
     # reembeds any with detected model drift. No-op when disabled or
     # when [history] extra is absent.
-    try:
-        from harbormaster.history import maybe_start_auto_reembed_thread
+    if run_background_subsystems:
+        try:
+            from harbormaster.history import maybe_start_auto_reembed_thread
 
-        maybe_start_auto_reembed_thread(config)
-    except ImportError:
-        pass
+            maybe_start_auto_reembed_thread(config)
+        except ImportError:
+            pass
 
     try:
         if args.transport == "stdio":

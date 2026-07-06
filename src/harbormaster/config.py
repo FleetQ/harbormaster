@@ -152,6 +152,17 @@ class FleetQConfig(BaseModel):
     kg_llm_max_triples: int = Field(default=20, gt=0)
     publish_a2a_cards: bool = False
     register_as_bridge: bool = False
+    # The FleetQ Bridge (heartbeat loop + relay subscriber) and the
+    # auto-reembed worker are long-lived, singleton background subsystems.
+    # Claude Code / Desktop spawn one fresh *stdio* harbormaster process per
+    # connection, so starting them there means every session registers a
+    # duplicate bridge, spams the heartbeat retry loop into the client's
+    # stderr, and leaves orphaned daemon threads when the client closes the
+    # pipe. They are therefore skipped on the stdio transport by default and
+    # only run under a persistent HTTP server. Flip this True only when your
+    # single harbormaster instance IS a long-lived stdio process that should
+    # itself act as the FleetQ bridge.
+    bridge_in_stdio: bool = False
     heartbeat_interval: int = Field(default=30, gt=0)
     # v4.0.0a6: BridgeRelay's agent.request dispatcher worker count.
     # 1 = single-worker (v3.0.0a5 default; serial dispatch from queue).
