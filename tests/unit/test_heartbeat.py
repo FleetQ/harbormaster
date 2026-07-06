@@ -208,6 +208,57 @@ def test_thread_named_for_diagnosability():
         hb.stop()
 
 
+# ----- register-retry backoff ----------------------------------------------
+
+
+def test_register_retry_delay_backs_off_exponentially():
+    """A persistent register failure must not retry every `interval` forever.
+    The delay doubles from `interval` per consecutive failure."""
+    hb = HeartbeatLoop(_make_client(), endpoints={}, interval=30)
+    hb._register_failures = 1
+    assert hb._register_retry_delay() == 30  # interval * 2**0
+    hb._register_failures = 2
+    assert hb._register_retry_delay() == 60  # interval * 2**1
+    hb._register_failures = 3
+    assert hb._register_retry_delay() == 120
+    hb._register_failures = 5
+    assert hb._register_retry_delay() == 480  # interval * 2**4
+
+
+def test_register_retry_delay_is_capped():
+    """Backoff never exceeds the cap, no matter how many failures pile up."""
+    hb = HeartbeatLoop(_make_client(), endpoints={}, interval=30)
+    hb._register_failures = 1000
+    assert hb._register_retry_delay() == hb._max_register_backoff
+    # A tighter cap is honoured too (and no overflow from a huge exponent).
+    hb._max_register_backoff = 90
+    assert hb._register_retry_delay() == 90
+
+
+def test_register_failures_reset_on_success():
+    """Consecutive-failure counter resets once a register succeeds, so the
+    next outage starts backing off from `interval` again rather than the cap."""
+    client = _make_client(register_ok=False)
+    hb = HeartbeatLoop(client, endpoints={}, interval=30)
+    hb._register_now()
+    hb._register_now()
+    assert hb._register_failures == 2
+    assert hb.registered is False
+
+    # FleetQ comes back — next register succeeds.
+    client.register.side_effect = None
+    client.register.return_value = RegisterResponse(
+        session_id="s-1",
+        team_id="t-1",
+        connected_at="2026-05-08T12:00:00Z",
+        reverb_app_key=None,
+        reverb_relay_url=None,
+    )
+    hb._register_now()
+    assert hb.registered is True
+    assert hb._register_failures == 0
+
+
 # ----- endpoints_factory drift detection -----------------------------------
 
 

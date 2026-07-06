@@ -21,6 +21,13 @@ from harbormaster.fleetq.state import BridgeStateWriter
 
 logger = logging.getLogger(__name__)
 
+# Cap for the register-retry backoff. A persistent auth failure (an expired
+# or revoked token → HTTP 401) is not transient: retrying every `interval`
+# seconds forever just hammers FleetQ and floods the client's stderr (a real
+# incident produced 14k+ 401 lines / 5.5MB in a single Claude Desktop log).
+# Back off exponentially from `interval` up to this ceiling instead.
+_MAX_REGISTER_BACKOFF_SECONDS = 900  # 15 minutes
+
 
 class HeartbeatLoop:
     """Daemon thread wrapping a BridgeClient.
@@ -61,6 +68,10 @@ class HeartbeatLoop:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._registered = False
+        # Consecutive failed register attempts, for exponential backoff on the
+        # retry loop. Reset to 0 on any successful register.
+        self._register_failures = 0
+        self._max_register_backoff = _MAX_REGISTER_BACKOFF_SECONDS
         self._last_response: RegisterResponse | None = None
         # Tracks the manifest FleetQ currently knows about so the drift
         # check has something to compare against. Updated on successful
@@ -84,6 +95,7 @@ class HeartbeatLoop:
         try:
             response = self.client.register(self.endpoints)
             self._registered = True
+            self._register_failures = 0
             self._last_response = response
             # The manifest we just sent is now the authoritative known state
             # on FleetQ — sync the drift baseline so the next factory tick
@@ -102,7 +114,11 @@ class HeartbeatLoop:
                 )
         except BridgeError as e:
             self._registered = False
-            logger.warning("FleetQ bridge register failed: %s", e)
+            self._register_failures += 1
+            logger.warning(
+                "FleetQ bridge register failed (attempt %d): %s — next retry in %ds",
+                self._register_failures, e, int(self._register_retry_delay()),
+            )
             if self.state_writer is not None:
                 self.state_writer.mark_disconnected(error=str(e))
 
@@ -133,10 +149,33 @@ class HeartbeatLoop:
         if self.state_writer is not None:
             self.state_writer.mark_disconnected()
 
+    def _register_retry_delay(self) -> float:
+        """Exponential backoff (capped) for the register-retry loop.
+
+        Only meaningful while unregistered, i.e. ``_register_failures >= 1``.
+        Doubles from ``interval`` per consecutive failure up to
+        ``_max_register_backoff``. The exponent is clamped so ``2 ** exp``
+        can't overflow into an absurd value before the cap applies.
+        """
+        exp = min(max(self._register_failures - 1, 0), 16)
+        # `1 << exp` (== 2**exp; exp is clamped >= 0) keeps mypy's int typing;
+        # `2 ** <non-literal>` widens to Any in typeshed.
+        return min(self.interval * (1 << exp), self._max_register_backoff)
+
     def _loop(self) -> None:
-        while not self._stop.wait(self.interval):
+        # When registered, tick at `interval`. While unregistered (initial or
+        # session-loss re-register failing), back off exponentially so a
+        # persistent auth failure doesn't retry every `interval` forever.
+        while True:
+            delay = (
+                self.interval
+                if self._registered
+                else self._register_retry_delay()
+            )
+            if self._stop.wait(delay):
+                return
             if not self._registered:
-                # Initial register failed; keep retrying every interval.
+                # Register still failing; retry with escalating backoff.
                 self._register_now()
                 continue
             try:
