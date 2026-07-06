@@ -50,6 +50,11 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         Prefer this over polling ``get_delegated_task`` in a loop: one
         held request is cheaper than N round-trips and the wakeup is
         immediate on completion (no poll interval).
+
+        Interactive clients (Claude Desktop, claude.ai) expire a tool
+        call after a few minutes — pass a short ``timeout_seconds``
+        (60-120) and re-call, rather than the 900s default (which suits
+        unattended runners like Claude Code).
         """
         from harbormaster.jobs import get_subsystem
 
@@ -84,6 +89,12 @@ def register(mcp: FastMCP, config: HarbormasterConfig) -> None:
         once the results have been processed, so they do not re-fire
         the next wait. Decoupled on purpose: an agent may want to
         peek-then-decide before consuming the inbox.
+
+        Interactive clients (Claude Desktop, claude.ai) expire a tool
+        call after a few minutes — pass a short ``timeout_seconds``
+        (60-120) and re-call, rather than the 900s default (which suits
+        unattended runners like Claude Code). ``timed_out: true`` just
+        means "nothing yet"; re-call — it is not an error.
         """
         from harbormaster.jobs import get_subsystem
 
