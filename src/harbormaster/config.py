@@ -425,6 +425,24 @@ class DelegateConfig(BaseModel):
     #     tools' `orchestrator` parameter.
     # SSH targets always force subprocess regardless of this setting.
     orchestrator: str = "auto"
+    # v27.1.3 — authoritative wall-clock (seconds) for the async
+    # subprocess-mode delegate jobs run by the JobWorker. When set it
+    # OVERRIDES the backend's own ``timeout_local`` for local async
+    # jobs executed server-side (JobWorker → run_backend → ask_local).
+    # None (default) preserves the v22-v27 behaviour: local async jobs
+    # inherit ``[backends.<name>] timeout_local`` (default 300s).
+    #
+    # Why a separate knob: before this, the only lever for a local
+    # async delegate job's wall-clock was ``timeout_local`` — but that
+    # value also caps the SYNC delegate / ask_project / fan_out_ask
+    # paths, so bumping it to accommodate a long unattended job widened
+    # the interactive budget too. ``subprocess_timeout`` decouples the
+    # async-job ceiling from the interactive one. It is authoritative
+    # for LOCAL async jobs; remote (SSH) async jobs remain governed by
+    # ``[hosts.<h>] total_timeout`` (ask_remote ignores backend timeouts).
+    # Config is read once at process boot, so a change requires an MCP
+    # server restart to take effect.
+    subprocess_timeout: int | None = Field(default=None, gt=0)
 
 
 class HarbormasterConfig(BaseModel):

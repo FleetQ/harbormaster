@@ -52,6 +52,31 @@ _WRITES_AUTO_COMMIT_SUFFIX = (
 )
 
 
+def _apply_subprocess_timeout(config: HarbormasterConfig) -> HarbormasterConfig:
+    """v27.1.3 — return a config whose backend ``timeout_local`` is
+    overridden by ``[delegate] subprocess_timeout`` when that knob is set.
+
+    Local async delegate jobs execute through ``run_backend`` →
+    ``ask_local`` → ``subprocess.run(timeout=cfg.timeout_local)``. Before
+    this, that wall-clock could only be tuned via ``timeout_local``, which
+    also governs the interactive sync paths. ``subprocess_timeout`` lets an
+    operator raise the async-job ceiling in isolation. Unset (None) → the
+    config is returned untouched, preserving v22-v27 behaviour.
+
+    Remote (SSH) async jobs are unaffected: ``ask_remote`` uses the host's
+    ``total_timeout``, not the backend timeout, so we only override
+    ``timeout_local`` here.
+    """
+    t = config.delegate.subprocess_timeout
+    if t is None:
+        return config
+    new_backends = {
+        name: bc.model_copy(update={"timeout_local": t})
+        for name, bc in config.backends.items()
+    }
+    return config.model_copy(update={"backends": new_backends})
+
+
 def build_async_delegate_prompt(job: Job, config: HarbormasterConfig) -> str:
     """Build the prompt for an async delegated job.
 
@@ -81,7 +106,10 @@ class JobWorker:
         store: JobStore,
         poll_interval_s: float = 0.5,
     ):
-        self._config = config
+        # v27.1.3 — fold [delegate] subprocess_timeout into the config the
+        # local executor reads (backend timeout_local), so async subprocess
+        # jobs honour it. No-op when the knob is unset.
+        self._config = _apply_subprocess_timeout(config)
         self._store = store
         self._poll_interval = poll_interval_s
         self._stop = threading.Event()
